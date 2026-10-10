@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "eventId": "00000000-0000-4000-8000-000000000020",
+  "deviceAlias": "fixture-device",
+  "deviceSequence": 1,
+  "baseRevision": 0,
+  "payloadDigest": "5e636498d2253af000dbdfad972de96ccbb3bb1a64f66c8e5fc0fc559a73b73c",
+  "createdAt": "2026-10-10T00:00:00Z",
+  "deviceState": {
+    "platform": "macos-arm64",
+    "appVersion": "0.0.0-fixture",
+    "lastSuccessfulSyncAt": null,
+    "freshness": "unknown"
+  },
+  "payload": {
+    "projects": [
+      {
+        "projectAlias": "fixture-project",
+        "responseProfile": "none",
+        "toolPreferences": [
+          {
+            "toolId": "fixture-synthetic-tool",
+            "agentSurface": "claude-code-terminal",
+            "platformTarget": "macos-arm64",
+            "decision": "later",
+            "sourceCommit": null,
+            "capabilityFingerprint": null,
+            "remindAt": "2026-10-17T00:00:00Z"
+          }
+        ],
+        "updatedAt": "2026-10-10T00:00:00Z"
+      }
+    ]
+  }
+}

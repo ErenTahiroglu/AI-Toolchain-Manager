@@ -1,0 +1,4 @@
+# Test-only dependency for validating Phase 0 JSON Schema contracts.
+# This dependency was already available to the system Python used for validation.
+# It was not installed or added to the Pylance-selected interpreter in this task.
+jsonschema==4.23.0

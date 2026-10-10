@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 2,
+  "eventId": "00000000-0000-4000-8000-000000000031",
+  "chainId": "00000000-0000-4000-8000-000000000032",
+  "segmentStart": true,
+  "sequence": 1,
+  "timestamp": "2026-10-10T00:00:00Z",
+  "previousHash": null,
+  "recordDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "traceId": "00000000-0000-4000-8000-000000000033",
+  "eventType": "verify",
+  "outcome": "passed",
+  "redaction": { "status": "applied-before-persistence", "policyId": "fixture", "policyVersion": "1.0", "payloadDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+}

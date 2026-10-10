@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "eventId": "00000000-0000-4000-8000-000000000040",
+  "deviceAlias": "fixture-device",
+  "deviceSequence": 1,
+  "baseRevision": 0,
+  "createdAt": "2026-10-10T00:00:00Z",
+  "deviceState": {
+    "platform": "macos-arm64",
+    "appVersion": "0.0.0-fixture",
+    "lastSuccessfulSyncAt": null,
+    "freshness": "unknown",
+    "machineId": "private-machine-id"
+  },
+  "payload": { "projects": [] }
+}

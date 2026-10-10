@@ -1,0 +1,34 @@
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Python test and local environments
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local credentials and configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local runtime state, caches, and diagnostics
+*.log
+*.sqlite
+*.sqlite3
+*.db
+graphify-out/
+.cache/
+
+# Generated or review-transfer artifacts
+build/
+dist/
+target/
+*.zip

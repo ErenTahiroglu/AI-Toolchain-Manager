@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ErenTahiroglu/AI-Toolchain-Manager/blob/phase0/architecture/schemas/audit-event.schema.json",
+  "title": "Evidence-bound redacted audit event",
+  "description": "Schema validity is not proof that a claim is true. Persistence code must perform redaction, digest calculation, and append-only chain checks before writing.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "eventId", "chainId", "segmentStart", "sequence", "timestamp", "previousHash", "recordDigest", "traceId", "eventType", "outcome", "redaction"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "eventId": { "type": "string", "format": "uuid" },
+    "chainId": { "type": "string", "format": "uuid" },
+    "segmentStart": { "type": "boolean" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "previousHash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "previousSegmentHead": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "recordDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "traceId": { "type": "string", "format": "uuid" },
+    "eventType": {
+      "enum": ["inspect", "approve", "reject", "defer", "reset_rejection", "install", "verify", "disable", "catalog_remove", "uninstall", "update", "rollback", "sync", "health_check", "failure_injection"]
+    },
+    "outcome": { "enum": ["passed", "failed", "blocked", "unknown", "skipped"] },
+    "toolId": { "type": ["string", "null"], "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$" },
+    "toolRevision": { "type": ["string", "null"], "pattern": "^([a-f0-9]{40}|[a-f0-9]{64})$" },
+    "toolVersion": { "type": ["string", "null"], "maxLength": 128 },
+    "projectAlias": { "type": ["string", "null"], "maxLength": 80 },
+    "targetId": { "enum": ["macos-arm64-claude-code", "macos-arm64-antigravity-ide", "windows-x64-claude-code", "unknown"] },
+    "adapterId": { "type": ["string", "null"], "maxLength": 80 },
+    "adapterVersion": { "type": ["string", "null"], "maxLength": 80 },
+    "checkId": { "type": ["string", "null"], "maxLength": 80 },
+    "checkVersion": { "type": ["string", "null"], "maxLength": 80 },
+    "verdictSource": { "enum": ["independent-harness", "operational-health", "target-self-report", "human-review", "ai-assisted", "not-applicable"] },
+    "evidenceDigest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "artifactDigest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "recipeId": { "type": ["string", "null"], "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$" },
+    "approvedRecipeDigest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "approvalReference": { "type": ["string", "null"], "format": "uuid" },
+    "actorType": { "enum": ["user", "manager", "adapter", "test-harness", "system"] },
+    "errorCode": { "type": ["string", "null"], "pattern": "^[A-Z0-9_]{1,64}$" },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "policyId", "policyVersion", "payloadDigest"],
+      "properties": {
+        "status": { "const": "applied-before-persistence" },
+        "policyId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$" },
+        "policyVersion": { "type": "string", "maxLength": 80 },
+        "payloadDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "segmentStart": { "const": true } }, "required": ["segmentStart"] },
+      "then": {
+        "properties": { "sequence": { "const": 1 }, "previousHash": { "type": "null" } }
+      },
+      "else": {
+        "properties": { "sequence": { "minimum": 2 }, "previousHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "eventType": { "const": "verify" }, "outcome": { "const": "passed" } },
+        "required": ["eventType", "outcome"]
+      },
+      "then": {
+        "required": ["toolId", "toolVersion", "adapterId", "adapterVersion", "checkId", "checkVersion", "targetId", "verdictSource", "evidenceDigest", "artifactDigest"],
+        "properties": {
+          "verdictSource": { "const": "independent-harness" },
+          "toolId": { "type": "string" },
+          "toolVersion": { "type": "string" },
+          "adapterId": { "type": "string" },
+          "adapterVersion": { "type": "string" },
+          "checkId": { "type": "string" },
+          "checkVersion": { "type": "string" },
+          "evidenceDigest": { "type": "string" },
+          "artifactDigest": { "type": "string" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "eventType": { "enum": ["install", "update"] }, "outcome": { "const": "passed" } },
+        "required": ["eventType", "outcome"]
+      },
+      "then": { "required": ["recipeId", "approvalReference", "artifactDigest", "toolId", "toolVersion", "targetId"] }
+    },
+    {
+      "if": {
+        "properties": { "eventType": { "const": "approve" }, "outcome": { "const": "passed" } },
+        "required": ["eventType", "outcome"]
+      },
+      "then": { "required": ["recipeId", "approvedRecipeDigest", "actorType"], "properties": { "actorType": { "const": "user" }, "approvedRecipeDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" } } }
+    },
+    {
+      "if": {
+        "properties": { "eventType": { "const": "reset_rejection" }, "outcome": { "const": "passed" } },
+        "required": ["eventType", "outcome"]
+      },
+      "then": { "required": ["toolId", "projectAlias", "targetId", "actorType"], "properties": { "actorType": { "const": "user" } } }
+    }
+  ]
+}

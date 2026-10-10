@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ErenTahiroglu/AI-Toolchain-Manager/blob/phase0/architecture/schemas/catalog-entry.schema.json",
+  "title": "Non-executable tool catalog metadata",
+  "description": "Descriptive metadata only. This schema never grants install or activation authority. Install authorization is a separate install-recipe document.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "toolId", "displayName", "repository", "sourceSnapshot", "category", "reviewState", "license", "targetEvidence", "installMethods", "verificationClaims", "privacy", "updatedAt"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "toolId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$" },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "owner", "name"],
+      "properties": {
+        "url": { "type": "string", "format": "uri", "pattern": "^https://github\\.com/[^/]+/[^/]+/?$" },
+        "owner": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 }
+      }
+    },
+    "sourceSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observedRef", "immutableCommit", "revisionState", "observedAt", "evidenceIds"],
+      "properties": {
+        "observedRef": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "immutableCommit": { "type": ["string", "null"], "pattern": "^([a-f0-9]{40}|[a-f0-9]{64})$" },
+        "releaseVersion": { "type": ["string", "null"], "maxLength": 128 },
+        "revisionState": { "enum": ["immutable-commit", "release-tag-observed", "mutable-ref-only", "unknown"] },
+        "observedAt": { "type": "string", "format": "date-time" },
+        "evidenceIds": { "type": "array", "items": { "type": "string", "pattern": "^R[0-9]{2,3}$" }, "minItems": 1, "uniqueItems": true }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "revisionState": { "const": "immutable-commit" } }, "required": ["revisionState"] },
+          "then": { "properties": { "immutableCommit": { "type": "string", "pattern": "^([a-f0-9]{40}|[a-f0-9]{64})$" } } }
+        },
+        {
+          "if": { "properties": { "revisionState": { "enum": ["mutable-ref-only", "unknown"] } }, "required": ["revisionState"] },
+          "then": { "properties": { "immutableCommit": { "type": "null" } } }
+        }
+      ]
+    },
+    "category": { "enum": ["native-cli", "mcp-server", "python-cli", "agent-plugin", "agent-skill", "workflow", "library"] },
+    "reviewState": { "enum": ["unreviewed", "metadata-reviewed", "blocked", "quarantined"] },
+    "license": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "spdxId", "evidenceId"],
+      "properties": {
+        "state": { "enum": ["known", "unknown", "review-required"] },
+        "spdxId": { "type": ["string", "null"], "maxLength": 80 },
+        "evidenceId": { "type": ["string", "null"], "pattern": "^R[0-9]{2,3}$" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "state": { "const": "known" } }, "required": ["state"] },
+          "then": { "properties": { "spdxId": { "type": "string", "minLength": 1 }, "evidenceId": { "type": "string", "pattern": "^R[0-9]{2,3}$" } } }
+        }
+      ]
+    },
+    "targetEvidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["platformTarget", "agentSurface", "compatibilityState", "evidenceId"],
+        "properties": {
+          "platformTarget": { "enum": ["macos-arm64", "windows-x64"] },
+          "agentSurface": { "enum": ["claude-code-terminal", "claude-desktop-code", "antigravity-ide", "antigravity-cli", "antigravity-2", "local-cli", null] },
+          "compatibilityState": { "enum": ["vendor-declared", "independently-tested", "unknown", "unsupported"] },
+          "evidenceId": { "type": ["string", "null"], "pattern": "^R[0-9]{2,3}$" },
+          "limitation": { "type": ["string", "null"], "maxLength": 500 },
+          "independentCheckId": { "type": ["string", "null"], "maxLength": 80 },
+          "harnessVersion": { "type": ["string", "null"], "maxLength": 80 },
+          "testedAt": { "type": ["string", "null"], "format": "date-time" },
+          "evidenceDigest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "compatibilityState": { "const": "independently-tested" } }, "required": ["compatibilityState"] },
+            "then": {
+              "properties": {
+                "independentCheckId": { "type": "string", "minLength": 1 },
+                "harnessVersion": { "type": "string", "minLength": 1 },
+                "testedAt": { "type": "string", "format": "date-time" },
+                "evidenceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+              },
+              "required": ["independentCheckId", "harnessVersion", "testedAt", "evidenceDigest"]
+            }
+          }
+        ]
+      }
+    },
+    "installMethods": {
+      "description": "Publisher-described methods only. These are labels, never executable commands.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["methodId", "evidenceId"],
+        "properties": {
+          "methodId": { "enum": ["native-plugin-manager", "skills-cli", "verified-release-archive", "homebrew", "winget", "uv-tool", "pipx", "pip", "go-install", "docker", "source-build", "manual-instructions", "unknown"] },
+          "evidenceId": { "type": ["string", "null"], "pattern": "^R[0-9]{2,3}$" },
+          "publisherPin": { "type": ["string", "null"], "maxLength": 200 }
+        }
+      }
+    },
+    "dependencies": { "type": "array", "items": { "type": "string", "maxLength": 160 } },
+    "privilegeClaims": { "type": "array", "items": { "type": "string", "maxLength": 160 } },
+    "networkClaims": { "type": "array", "items": { "type": "string", "maxLength": 253 } },
+    "artifactEvidence": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["url", "sha256", "signatureState", "evidenceId"],
+      "properties": {
+        "url": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "sha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+        "signatureState": { "enum": ["verified-by-manager", "publisher-reports-signature", "missing", "invalid", "unknown"] },
+        "signer": { "type": ["string", "null"], "maxLength": 256 },
+        "provenanceRef": { "type": ["string", "null"], "maxLength": 500 },
+        "evidenceId": { "type": "string", "pattern": "^R[0-9]{2,3}$" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "signatureState": { "const": "verified-by-manager" } }, "required": ["signatureState"] },
+          "then": { "properties": { "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "signer": { "type": "string", "minLength": 1 }, "provenanceRef": { "type": "string", "minLength": 1 } } }
+        }
+      ]
+    },
+    "verificationClaims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "state", "evidenceId"],
+        "properties": {
+          "kind": { "enum": ["presence", "version", "protocol", "function", "independent-test"] },
+          "state": { "enum": ["publisher-describes", "unknown", "not-run"] },
+          "evidenceId": { "type": "string", "pattern": "^R[0-9]{2,3}$" }
+        }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["telemetry", "mayTransmitProjectContent", "evidenceId"],
+      "properties": {
+        "telemetry": { "enum": ["none-declared", "opt-in", "opt-out", "unknown"] },
+        "mayTransmitProjectContent": { "type": ["boolean", "null"] },
+        "evidenceId": { "type": "string", "pattern": "^R[0-9]{2,3}$" },
+        "notes": { "type": "array", "items": { "type": "string", "maxLength": 500 } }
+      }
+    },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  }
+}

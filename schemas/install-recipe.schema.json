@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ErenTahiroglu/AI-Toolchain-Manager/blob/phase0/architecture/schemas/install-recipe.schema.json",
+  "title": "Separately approved typed install recipe",
+  "description": "An install recipe is separate from descriptive catalog metadata. Free-form commands, scripts, shell arguments, environment values, and arbitrary paths are not representable.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "recipeId", "toolId", "targetId", "agentSurface", "sourceCommit", "artifact", "licenseReview", "adapterId", "adapterVersion", "operations", "authorizationState"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "recipeId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$" },
+    "toolId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$" },
+    "targetId": { "enum": ["macos-arm64-claude-code", "macos-arm64-antigravity-ide", "windows-x64-claude-code"] },
+    "agentSurface": { "enum": ["claude-code-terminal", "claude-desktop-code", "antigravity-ide", "antigravity-cli", "antigravity-2", "local-cli"] },
+    "sourceCommit": { "type": "string", "pattern": "^([a-f0-9]{40}|[a-f0-9]{64})$" },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "sha256", "signatureState", "signer", "provenanceEvidenceId"],
+      "properties": {
+        "url": { "type": "string", "format": "uri", "pattern": "^https://github\\.com/[^/]+/[^/]+/releases/download/" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "signatureState": { "const": "verified-by-manager" },
+        "signer": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "provenanceEvidenceId": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "licenseReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "licenseId", "evidenceId", "reviewedAt"],
+      "properties": {
+        "state": { "enum": ["accepted", "blocked", "unknown"] },
+        "licenseId": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "evidenceId": { "type": "string", "pattern": "^R[0-9]{2,3}$" },
+        "reviewedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "adapterId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$" },
+    "adapterVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "executionMode": { "enum": ["typed-adapter-only", "manual-only"] },
+    "operations": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["operation", "artifactId"],
+            "properties": { "operation": { "const": "fetch-release-artifact" }, "artifactId": { "const": "primary" } }
+          },
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["operation", "artifactId", "expectedSha256"],
+            "properties": { "operation": { "const": "verify-artifact-digest" }, "artifactId": { "const": "primary" }, "expectedSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+          },
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["operation", "artifactId", "destinationId"],
+            "properties": { "operation": { "const": "stage-private-copy" }, "artifactId": { "const": "primary" }, "destinationId": { "const": "manager-owned-staging" } }
+          },
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["operation", "artifactId", "activationSlot", "activationMethod"],
+            "properties": {
+              "operation": { "const": "activate-staged-artifact" },
+              "artifactId": { "const": "primary" },
+              "activationSlot": { "enum": ["manager-versioned-binary", "native-plugin-manager", "managed-instruction-block"] },
+              "activationMethod": { "enum": ["atomic-version-switch", "host-native-registration", "marker-delimited-merge"] }
+            }
+          },
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["operation", "packageManager", "packageName", "version", "lifecycleScripts"],
+            "properties": {
+              "operation": { "const": "install-pinned-package" },
+              "packageManager": { "enum": ["homebrew", "winget", "uv-tool", "pipx", "go-install", "native-plugin-manager"] },
+              "packageName": { "type": "string", "pattern": "^[a-zA-Z0-9@._/-]{1,180}$" },
+              "version": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,127}$" },
+              "lifecycleScripts": { "const": "disabled" }
+            }
+          },
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["operation", "host", "pluginId"],
+            "properties": {
+              "operation": { "const": "register-native-plugin" },
+              "host": { "enum": ["claude-code-terminal", "claude-desktop-code", "antigravity-ide", "antigravity-cli", "antigravity-2"] },
+              "pluginId": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$" }
+            }
+          },
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["operation", "instructionTarget", "templateId"],
+            "properties": {
+              "operation": { "const": "write-managed-instruction-block" },
+              "instructionTarget": { "enum": ["CLAUDE.md", "GEMINI.md", "AGENTS.md", "agents-rules"] },
+              "templateId": { "enum": ["response-profile-caveman", "response-profile-ste-oriented", "tool-discovery-pointer"] }
+            }
+          }
+        ]
+      },
+      "minItems": 1
+    },
+    "authorizationState": { "enum": ["pending", "approved", "rejected"] },
+    "stagingEvidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["checkId", "harnessId", "harnessVersion", "targetId", "artifactSha256", "state", "independent", "evidenceDigest", "completedAt"],
+        "properties": {
+          "checkId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,79}$" },
+          "harnessId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,79}$" },
+          "harnessVersion": { "type": "string", "maxLength": 80 },
+          "targetId": { "enum": ["macos-arm64-claude-code", "macos-arm64-antigravity-ide", "windows-x64-claude-code"] },
+          "artifactSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "state": { "enum": ["passed", "failed", "blocked"] },
+          "independent": { "const": true },
+          "evidenceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "completedAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "approval": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["actorType", "approvalEventId", "approvedAt", "authorizedRecipeDigest"],
+      "properties": {
+        "actorType": { "const": "user" },
+        "approvalEventId": { "type": "string", "format": "uuid" },
+        "approvedAt": { "type": "string", "format": "date-time" },
+        "authorizedRecipeDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "targetId": { "const": "macos-arm64-claude-code" } }, "required": ["targetId"] },
+      "then": { "properties": { "agentSurface": { "enum": ["claude-code-terminal", "claude-desktop-code"] } } }
+    },
+    {
+      "if": { "properties": { "targetId": { "const": "macos-arm64-antigravity-ide" } }, "required": ["targetId"] },
+      "then": { "properties": { "agentSurface": { "const": "antigravity-ide" } } }
+    },
+    {
+      "if": { "properties": { "targetId": { "const": "windows-x64-claude-code" } }, "required": ["targetId"] },
+      "then": { "properties": { "agentSurface": { "const": "claude-code-terminal" } } }
+    },
+    {
+      "if": { "properties": { "authorizationState": { "const": "approved" } }, "required": ["authorizationState"] },
+      "then": {
+        "required": ["stagingEvidence", "approval", "executionMode"],
+        "properties": {
+          "executionMode": { "const": "typed-adapter-only" },
+          "approval": { "type": "object" },
+          "licenseReview": { "properties": { "state": { "const": "accepted" } } },
+          "stagingEvidence": { "minItems": 1 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "executionMode": { "const": "manual-only" } }, "required": ["executionMode"] },
+      "then": { "properties": { "authorizationState": { "enum": ["pending", "rejected"] } } }
+    }
+  ]
+}

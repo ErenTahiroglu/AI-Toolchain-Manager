@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "projectAlias": "fixture-project",
+  "revision": 1,
+  "baseRevision": 0,
+  "responseProfile": "none",
+  "profileConflict": { "state": "clear", "resolution": "not-needed", "detectedSources": [] },
+  "targetSelections": [
+    {
+      "toolId": "fixture-synthetic-tool",
+      "agentSurface": "claude-code-terminal",
+      "platformTarget": "macos-arm64",
+      "desiredState": "accepted",
+      "actualState": "not-configured",
+      "compatibilityState": "vendor-declared",
+      "externalConflictState": "clear",
+      "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "capabilityFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "reasonCode": null,
+      "remindAt": null,
+      "decisionEventId": "00000000-0000-4000-8000-000000000002",
+      "evidenceId": "R99"
+    }
+  ],
+  "deviceAlias": "fixture-device",
+  "updatedAt": "2026-10-10T00:00:00Z",
+  "conflicts": []
+}

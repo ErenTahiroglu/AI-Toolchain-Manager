@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "recipeId": "fixture-synthetic-recipe",
+  "toolId": "fixture-synthetic-tool",
+  "targetId": "macos-arm64-claude-code",
+  "agentSurface": "claude-code-terminal",
+  "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "artifact": {
+    "url": "https://github.com/fixture-owner/fixture-tool/releases/download/v1/fixture.zip",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "signatureState": "verified-by-manager",
+    "signer": "synthetic-fixture-key",
+    "provenanceEvidenceId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "licenseReview": { "state": "accepted", "licenseId": "MIT", "evidenceId": "R99", "reviewedAt": "2026-10-10T00:00:00Z" },
+  "adapterId": "fixture-adapter",
+  "adapterVersion": "1.0.0",
+  "executionMode": "typed-adapter-only",
+  "operations": [
+    { "operation": "fetch-release-artifact", "artifactId": "primary" },
+    { "operation": "verify-artifact-digest", "artifactId": "primary", "expectedSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+    { "operation": "stage-private-copy", "artifactId": "primary", "destinationId": "manager-owned-staging" },
+    { "operation": "activate-staged-artifact", "artifactId": "primary", "activationSlot": "manager-versioned-binary", "activationMethod": "atomic-version-switch" }
+  ],
+  "authorizationState": "approved",
+  "stagingEvidence": [
+    {
+      "checkId": "fixture-function-check",
+      "harnessId": "fixture-independent-harness",
+      "harnessVersion": "1.0.0",
+      "targetId": "macos-arm64-claude-code",
+      "artifactSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "state": "passed",
+      "independent": true,
+      "evidenceDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "completedAt": "2026-10-10T00:00:00Z"
+    }
+  ],
+  "approval": {
+    "actorType": "user",
+    "approvalEventId": "00000000-0000-4000-8000-000000000001",
+    "approvedAt": "2026-10-10T00:00:00Z",
+    "authorizedRecipeDigest": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

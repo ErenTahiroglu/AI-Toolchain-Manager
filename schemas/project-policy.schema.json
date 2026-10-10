@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ErenTahiroglu/AI-Toolchain-Manager/blob/phase0/architecture/schemas/project-policy.schema.json",
+  "title": "Target-scoped AI Toolchain Manager project policy",
+  "description": "One response profile per project. Tool decisions are scoped to an explicit agent surface and platform. Logical duplicate keys are rejected by the companion contract validator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "projectAlias", "revision", "responseProfile", "profileConflict", "targetSelections", "updatedAt"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "projectAlias": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._ -]{0,79}$" },
+    "revision": { "type": "integer", "minimum": 0 },
+    "baseRevision": { "type": ["integer", "null"], "minimum": 0 },
+    "responseProfile": { "enum": ["caveman", "asd-ste100-oriented-technical-english", "none"] },
+    "profileConflict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "resolution"],
+      "properties": {
+        "state": { "enum": ["clear", "conflict", "unknown"] },
+        "resolution": { "enum": ["not-needed", "user-selected-manager-profile", "deferred", "unresolved"] },
+        "detectedSources": { "type": "array", "items": { "type": "string", "maxLength": 160 }, "uniqueItems": true }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "state": { "const": "conflict" } }, "required": ["state"] },
+          "then": { "properties": { "resolution": { "enum": ["user-selected-manager-profile", "deferred", "unresolved"] } } }
+        },
+        {
+          "if": { "properties": { "resolution": { "const": "user-selected-manager-profile" } }, "required": ["resolution"] },
+          "then": { "properties": { "state": { "const": "conflict" } } }
+        }
+      ]
+    },
+    "targetSelections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["toolId", "agentSurface", "platformTarget", "desiredState", "actualState", "compatibilityState", "externalConflictState"],
+        "properties": {
+          "toolId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$" },
+          "agentSurface": { "enum": ["claude-code-terminal", "claude-desktop-code", "antigravity-ide", "antigravity-cli", "antigravity-2"] },
+          "platformTarget": { "enum": ["macos-arm64", "windows-x64"] },
+          "desiredState": { "enum": ["accepted", "rejected", "later", "disabled"] },
+          "actualState": { "enum": ["not-configured", "active", "inactive", "conflict", "unknown", "stale", "unsupported"] },
+          "compatibilityState": { "enum": ["vendor-declared", "independently-tested", "unknown", "unsupported"] },
+          "externalConflictState": { "enum": ["clear", "conflict", "unknown"] },
+          "sourceCommit": { "type": ["string", "null"], "pattern": "^([a-f0-9]{40}|[a-f0-9]{64})$" },
+          "capabilityFingerprint": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+          "reasonCode": { "type": ["string", "null"], "maxLength": 80 },
+          "remindAt": { "type": ["string", "null"], "format": "date-time" },
+          "rejectionReminderAt": { "type": ["string", "null"], "format": "date-time" },
+          "resetEventId": { "type": ["string", "null"], "format": "uuid" },
+          "decisionEventId": { "type": ["string", "null"], "format": "uuid" },
+          "evidenceId": { "type": ["string", "null"], "pattern": "^R[0-9]{2,3}$" }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "desiredState": { "const": "later" } }, "required": ["desiredState"] },
+            "then": { "properties": { "remindAt": { "type": "string", "format": "date-time" } } }
+          },
+          {
+            "if": { "properties": { "desiredState": { "const": "rejected" } }, "required": ["desiredState"] },
+            "then": { "properties": { "rejectionReminderAt": { "type": ["string", "null"], "format": "date-time" } } }
+          }
+        ]
+      }
+    },
+    "deviceAlias": { "type": ["string", "null"], "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "conflicts": { "type": "array", "items": { "type": "string", "maxLength": 300 } }
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ErenTahiroglu/AI-Toolchain-Manager/blob/phase0/architecture/schemas/sync-envelope.schema.json",
+  "title": "Sanitized private preference sync envelope",
+  "description": "Only allowlisted preferences and coarse device status are representable. Local paths, credentials, raw logs, source, indexes, and runtime state are forbidden.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "eventId", "deviceAlias", "deviceSequence", "baseRevision", "payloadDigest", "createdAt", "deviceState", "payload"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "eventId": { "type": "string", "format": "uuid" },
+    "deviceAlias": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$" },
+    "deviceSequence": { "type": "integer", "minimum": 1 },
+    "baseRevision": { "type": "integer", "minimum": 0 },
+    "payloadDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "deviceState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "appVersion", "lastSuccessfulSyncAt", "freshness"],
+      "properties": {
+        "platform": { "enum": ["macos-arm64", "windows-x64"] },
+        "appVersion": { "type": "string", "maxLength": 80 },
+        "lastSuccessfulSyncAt": { "type": ["string", "null"], "format": "date-time" },
+        "freshness": { "enum": ["fresh", "stale", "offline", "unknown"] }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projects"],
+      "properties": {
+        "projects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["projectAlias", "responseProfile", "toolPreferences", "updatedAt"],
+            "properties": {
+              "projectAlias": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._ -]{0,79}$" },
+              "responseProfile": { "enum": ["caveman", "asd-ste100-oriented-technical-english", "none"] },
+              "toolPreferences": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["toolId", "agentSurface", "platformTarget", "decision", "sourceCommit", "capabilityFingerprint"],
+                  "properties": {
+                    "toolId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$" },
+                    "agentSurface": { "enum": ["claude-code-terminal", "claude-desktop-code", "antigravity-ide", "antigravity-cli", "antigravity-2"] },
+                    "platformTarget": { "enum": ["macos-arm64", "windows-x64"] },
+                    "decision": { "enum": ["accepted", "rejected", "later", "disabled"] },
+                    "sourceCommit": { "type": ["string", "null"], "pattern": "^([a-f0-9]{40}|[a-f0-9]{64})$" },
+                    "capabilityFingerprint": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+                    "remindAt": { "type": ["string", "null"], "format": "date-time" },
+                    "rejectionReminderAt": { "type": ["string", "null"], "format": "date-time" },
+                    "resetEventId": { "type": ["string", "null"], "format": "uuid" }
+                  }
+                }
+              },
+              "updatedAt": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
