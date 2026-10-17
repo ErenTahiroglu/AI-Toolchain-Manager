@@ -25,6 +25,7 @@ fn req(entry: &str, platform: &str, surface: &str) -> PlanRequest {
         agent_surface: surface.to_string(),
         scope: "user".to_string(),
         method_id: None,
+        project_alias: None,
     }
 }
 
@@ -110,7 +111,12 @@ fn every_entry_platform_surface_scope_and_method_gives_a_blocked_preview_only_pl
                     let methods: Vec<Option<String>> =
                         std::iter::once(None).chain(declared_methods(&e).into_iter().map(|(m, _)| Some(m))).collect();
                     for m in methods {
-                        let r = PlanRequest { scope: scope.to_string(), method_id: m, ..req(&e.entry_id, platform, surface) };
+                        let r = PlanRequest {
+                            scope: scope.to_string(),
+                            method_id: m,
+                            project_alias: (*scope == "project").then(|| "proje-a".to_string()),
+                            ..req(&e.entry_id, platform, surface)
+                        };
                         let p = plan(&conn, &r, &host(platform));
                         p.check_invariants().unwrap();
                         assert_eq!(p.state, "preview_only");
@@ -189,7 +195,7 @@ fn a_native_plugin_plan_names_the_agent_registry_and_never_a_path() {
     assert_eq!(p.target.recipe_target_id.as_deref(), Some("windows-x64-claude-code"));
     assert_eq!(p.config_changes[0].area, WriteArea::AgentPluginRegistryClaude);
     // a project scope writes the project's own settings instead
-    let project = PlanRequest { scope: "project".to_string(), ..r };
+    let project = PlanRequest { scope: "project".to_string(), project_alias: Some("proje-a".to_string()), ..r };
     assert_eq!(build_plan(&e, &project, &host(WIN), &[]).unwrap().config_changes[0].area, WriteArea::ProjectAgentSettings);
     let text = serde_json::to_string(&p).unwrap();
     assert!(!text.contains(":\\") && !text.contains("/Users/") && !text.contains("/home/"));
@@ -589,7 +595,9 @@ fn existing_installations_copies_and_mismatched_platforms_are_conflicts_not_over
     // a plan for the OTHER platform while this computer has a copy: version/architecture mismatch
     let other = if platform == PLATFORM_WINDOWS { MAC } else { WIN };
     let p = plan(&conn, &req("gitleaks", other, "local-cli"), &host(platform));
-    assert!(p.conflicts.iter().any(|c| c.code == "existing_installation_other_platform"));
+    // this computer's copy says nothing about the other platform: it is disclosed, not treated as a conflict for the target
+    assert!(!p.conflicts.iter().any(|c| c.code.starts_with("existing_installation")));
+    assert!(p.eligibility.warnings.iter().any(|w| w.code == "foreign_platform_record"));
     assert!(codes(&p.eligibility.blockers).contains(&"different_computer_platform"));
     // two copies in two PATH folders
     let conn2 = seeded();
@@ -683,4 +691,566 @@ fn scanning_an_unusable_machine_still_yields_a_plan_and_an_unreadable_data_folde
     let not_a_folder = dir.path().join("file");
     fs::write(&not_a_folder, b"x").unwrap();
     assert!(db::open_file(&not_a_folder.join("atm.sqlite"), None).is_err());
+}
+
+// =====================================================================================================================
+// Phase 2D closure (Issue #11)
+// =====================================================================================================================
+
+// ---- RT-2D-01: only current, applicable, authorised evidence can satisfy or refute a prerequisite -------------------
+
+fn state_of(p: &InstallPlan, id: &str) -> (String, String) {
+    let x = p.prerequisites.iter().find(|x| x.id == id).unwrap_or_else(|| panic!("no prerequisite {id}: {:?}", p.prerequisites));
+    (x.state.clone(), x.basis.clone())
+}
+
+fn warning_codes(p: &InstallPlan) -> Vec<&str> {
+    codes(&p.eligibility.warnings)
+}
+
+fn claude_request(platform: &str) -> PlanRequest {
+    req("superpowers", platform, "claude-code-terminal")
+}
+
+/// A stored, current, present observation of the Claude Code agent on PATH, from a real scan of a synthetic machine.
+fn claude_observation(platform: &str) -> StoredObservation {
+    let conn = seeded();
+    let m = Machine::new("src", "r");
+    m.program("claude", platform);
+    m.scan(&conn, platform);
+    discovery::store::latest_observations(&conn)
+        .unwrap()
+        .into_iter()
+        .find(|o| o.subject == "agent:claude-code" && o.method == "path-executable" && o.presence == "present")
+        .expect("a present Claude Code observation")
+}
+
+#[test]
+fn an_agent_seen_in_an_earlier_scan_is_unknown_when_the_latest_scan_was_not_allowed_to_look() {
+    let platform = this_platform();
+    let conn = seeded();
+    let m = Machine::new("a", "r");
+    m.program("claude", platform);
+    m.scan(&conn, platform);
+    let r = claude_request(platform);
+    assert_eq!(state_of(&plan(&conn, &r, &host(platform)), "agent_present"), ("met".into(), "current_scan".into()));
+    // the next scan is allowed to read user files only: the PATH area was NOT checked
+    let auth = Authorization { path_executables: false, user_config: true, project: None, fingerprint_artifacts: false };
+    discovery::run_scan(&conn, &m.roots(platform), &auth).unwrap();
+    let p = plan(&conn, &r, &host(platform));
+    assert_eq!(
+        state_of(&p, "agent_present"),
+        ("unknown".into(), "no_current_evidence".into()),
+        "an old observation is not the latest scan finding it"
+    );
+    assert!(warning_codes(&p).contains(&"historical_presence_not_current"));
+    assert!(codes(&p.eligibility.blockers).contains(&"agent_not_confirmed"));
+    assert!(!p.prerequisites.iter().any(|x| x.id == "agent_present" && x.text.contains("bulunamadı")), "unchecked is not absent");
+}
+
+#[test]
+fn an_agent_seen_earlier_and_missing_from_the_latest_authorised_scan_is_absent_not_present() {
+    let platform = this_platform();
+    let conn = seeded();
+    let m = Machine::new("b", "r");
+    m.program("claude", platform);
+    m.scan(&conn, platform);
+    fs::remove_file(m.bin.join(if platform == PLATFORM_WINDOWS { "claude.exe" } else { "claude" })).unwrap();
+    m.scan(&conn, platform);
+    let p = plan(&conn, &claude_request(platform), &host(platform));
+    assert_eq!(state_of(&p, "agent_present"), ("unmet".into(), "current_scan".into()));
+    assert!(!warning_codes(&p).contains(&"historical_presence_not_current"), "the old row was replaced by the newer scan's answer");
+}
+
+#[test]
+fn a_scan_that_was_not_authorised_to_look_never_produces_absence() {
+    let platform = this_platform();
+    let mut o = claude_observation(platform);
+    o.presence = "absent".to_string();
+    o.scan_authorized_path = false; // a (corrupt or forged) absent row from a scan without PATH permission
+    let conn = seeded();
+    let p = build_plan(&entry(&conn, "superpowers"), &claude_request(platform), &host(platform), &[o]).unwrap();
+    assert_eq!(state_of(&p, "agent_present").0, "unknown");
+}
+
+#[test]
+fn a_record_from_another_platform_is_disclosed_but_never_satisfies_the_target() {
+    let windows_record = claude_observation(this_platform());
+    let other = if this_platform() == PLATFORM_WINDOWS { MAC } else { WIN };
+    let conn = seeded();
+    let p = build_plan(&entry(&conn, "superpowers"), &claude_request(other), &host(other), std::slice::from_ref(&windows_record)).unwrap();
+    assert_eq!(state_of(&p, "agent_present").0, "unknown");
+    assert!(warning_codes(&p).contains(&"foreign_platform_record"));
+    // the same record for its own platform is accepted (control)
+    let p = build_plan(&entry(&conn, "superpowers"), &claude_request(this_platform()), &host(this_platform()), &[windows_record]).unwrap();
+    assert_eq!(state_of(&p, "agent_present").0, "met");
+}
+
+#[test]
+fn evidence_for_one_agent_surface_is_never_merged_into_another() {
+    let platform = this_platform();
+    let claude = claude_observation(platform);
+    let conn = seeded();
+    let ask = |surface: &str, obs: &[StoredObservation]| {
+        let e = entry(&conn, "superpowers");
+        build_plan(&e, &req("superpowers", platform, surface), &host(platform), obs).unwrap()
+    };
+    let met = |p: &InstallPlan| state_of(p, "agent_present").0;
+    assert_eq!(met(&ask("claude-code-terminal", std::slice::from_ref(&claude))), "met");
+    // Claude Desktop and the Antigravity surfaces have no evidence of their own here
+    for surface in ["claude-desktop-code", "antigravity-ide", "antigravity-cli", "antigravity-2"] {
+        assert_eq!(met(&ask(surface, std::slice::from_ref(&claude))), "unknown", "{surface} borrowed Claude Code evidence");
+    }
+    // a current Antigravity IDE record satisfies the IDE only, not the CLI or 2.0
+    let mut ide = claude.clone();
+    ide.subject = "agent:antigravity-ide".to_string();
+    ide.agent_surface = "antigravity-ide".to_string();
+    assert_eq!(met(&ask("antigravity-ide", &[ide.clone()])), "met");
+    for surface in ["antigravity-cli", "antigravity-2", "claude-code-terminal"] {
+        assert_eq!(met(&ask(surface, &[ide.clone()])), "unknown", "{surface} borrowed Antigravity IDE evidence");
+    }
+    // the right subject on the wrong surface label is also refused
+    let mut mislabelled = claude.clone();
+    mislabelled.agent_surface = "claude-desktop-code".to_string();
+    let p = ask("claude-code-terminal", &[mislabelled]);
+    assert_eq!(met(&p), "unknown");
+    assert!(warning_codes(&p).contains(&"other_surface_record"));
+}
+
+#[test]
+fn project_scope_evidence_is_used_only_for_that_project() {
+    let platform = this_platform();
+    let mut settings = claude_observation(platform);
+    settings.method = "claude-settings-file".to_string();
+    settings.scope = "project".to_string();
+    settings.project_alias = Some("proje-a".to_string());
+    settings.presence = "unknown".to_string();
+    settings.configuration = "malformed".to_string();
+    settings.scan_authorized_project = true;
+    let conn = seeded();
+    let ask = |scope: &str, alias: Option<&str>| {
+        let r = PlanRequest { scope: scope.to_string(), project_alias: alias.map(str::to_string), ..claude_request(platform) };
+        build_plan(&entry(&conn, "superpowers"), &r, &host(platform), &[settings.clone()]).unwrap()
+    };
+    assert_eq!(state_of(&ask("project", Some("proje-a")), "agent_config_readable"), ("unmet".into(), "current_scan".into()));
+    assert_eq!(
+        state_of(&ask("project", Some("proje-b")), "agent_config_readable").0,
+        "unknown",
+        "another project's file is not this project's"
+    );
+    assert_eq!(state_of(&ask("user", None), "agent_config_readable").0, "unknown", "a project file is not the user's file");
+    // a project plan needs a valid alias, and a user plan must not carry one
+    for r in [
+        PlanRequest { scope: "project".to_string(), project_alias: None, ..claude_request(platform) },
+        PlanRequest { scope: "project".to_string(), project_alias: Some("C:\\Users\\x".to_string()), ..claude_request(platform) },
+        PlanRequest { scope: "user".to_string(), project_alias: Some("proje-a".to_string()), ..claude_request(platform) },
+    ] {
+        assert_eq!(plan_for(&conn, &r, &host(platform)).unwrap_err().code, "PLAN_REQUEST_INVALID");
+    }
+}
+
+#[test]
+fn stale_observations_do_not_count_and_are_only_history() {
+    let platform = this_platform();
+    let mut o = claude_observation(platform);
+    o.current = false;
+    o.stale = true;
+    o.not_current_reason = Some("Son tarama 24 saatten eski; yeniden tarayın.".to_string());
+    let conn = seeded();
+    let p = build_plan(&entry(&conn, "superpowers"), &claude_request(platform), &host(platform), &[o]).unwrap();
+    assert_eq!(state_of(&p, "agent_present"), ("unknown".into(), "no_current_evidence".into()));
+    assert!(warning_codes(&p).contains(&"historical_presence_not_current"));
+}
+
+#[test]
+fn current_evidence_wins_over_history_and_historical_versions_never_make_a_conflict() {
+    let platform = this_platform();
+    let conn = seeded();
+    let m = Machine::new("h", "r");
+    m.program("gitleaks", platform);
+    m.scan(&conn, platform);
+    let now = discovery::store::latest_observations(&conn)
+        .unwrap()
+        .into_iter()
+        .find(|o| o.subject == "gitleaks" && o.presence == "present")
+        .unwrap();
+    let mut current = now.clone();
+    current.version = Some("1.0.0".to_string());
+    let mut old_a = now.clone();
+    old_a.current = false;
+    old_a.version = Some("9.9.9".to_string());
+    old_a.method = "native-install-location".to_string();
+    let mut old_b = old_a.clone();
+    old_b.version = Some("8.8.8".to_string());
+    let e = entry(&conn, "gitleaks");
+    let r = req("gitleaks", platform, "local-cli");
+    let p = build_plan(&e, &r, &host(platform), &[current.clone(), old_a.clone(), old_b.clone()]).unwrap();
+    let c: Vec<&str> = p.conflicts.iter().map(|c| c.code.as_str()).collect();
+    assert!(c.contains(&"existing_installation_found"));
+    assert!(!c.contains(&"conflicting_version_records"), "stale versions are history, not a conflict: {c:?}");
+    // only history: no existing installation is claimed at all
+    let p = build_plan(&e, &r, &host(platform), &[old_a, old_b]).unwrap();
+    assert!(!p.conflicts.iter().any(|c| c.code.starts_with("existing_installation")));
+    assert!(warning_codes(&p).contains(&"historical_presence_not_current"));
+    // two CURRENT records with different versions do conflict
+    let mut other = current.clone();
+    other.version = Some("2.0.0".to_string());
+    other.method = "native-install-location".to_string();
+    let p = build_plan(&e, &r, &host(platform), &[current, other]).unwrap();
+    assert!(p.conflicts.iter().any(|c| c.code == "conflicting_version_records"));
+}
+
+#[test]
+fn only_current_copies_count_as_multiple_copies() {
+    let platform = this_platform();
+    let conn = seeded();
+    let m = Machine::new("mc", "r");
+    m.program("gitleaks", platform);
+    m.scan(&conn, platform);
+    let base = discovery::store::latest_observations(&conn)
+        .unwrap()
+        .into_iter()
+        .find(|o| o.subject == "gitleaks" && o.presence == "present")
+        .unwrap();
+    let mut said = base.clone();
+    said.limitations.push("PATH içinde 2 farklı kopya bulundu; hangisinin kullanılacağı bilinmiyor.".to_string());
+    let e = entry(&conn, "gitleaks");
+    let r = req("gitleaks", platform, "local-cli");
+    let current = build_plan(&e, &r, &host(platform), &[said.clone()]).unwrap();
+    assert!(current.conflicts.iter().any(|c| c.code == "multiple_copies_found"));
+    said.current = false;
+    let historical = build_plan(&e, &r, &host(platform), &[said]).unwrap();
+    assert!(!historical.conflicts.iter().any(|c| c.code == "multiple_copies_found"));
+}
+
+#[test]
+fn consulting_history_changes_no_stored_record() {
+    let platform = this_platform();
+    let conn = seeded();
+    let m = Machine::new("hist", "r");
+    m.program("claude", platform);
+    m.scan(&conn, platform);
+    let auth = Authorization { path_executables: false, user_config: true, project: None, fingerprint_artifacts: false };
+    discovery::run_scan(&conn, &m.roots(platform), &auth).unwrap();
+    let before = dump(&conn);
+    let _ = plan(&conn, &claude_request(platform), &host(platform));
+    assert_eq!(dump(&conn), before);
+    assert!(crate::audit::verify(&conn).unwrap().ok);
+}
+
+// ---- RT-2D-02: a source commit is a declared pin, validated strictly ---------------------------------------------------
+
+fn pin_of(commit: Option<&str>) -> InstallPlan {
+    let conn = seeded();
+    let mut e = entry(&conn, "gitleaks");
+    match commit {
+        Some(c) => e.record["sourceSnapshot"]["immutableCommit"] = json!(c),
+        None => e.record["sourceSnapshot"]["immutableCommit"] = Value::Null,
+    }
+    build_plan(&e, &req("gitleaks", WIN, "local-cli"), &host(WIN), &[]).unwrap()
+}
+
+#[test]
+fn only_exact_lowercase_hex_of_the_right_length_is_a_declared_pin_and_even_that_is_not_proof_of_origin() {
+    let hex40 = "0123456789abcdef0123456789abcdef01234567";
+    let hex64 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    for ok in [hex40, hex64] {
+        let p = pin_of(Some(ok));
+        assert_eq!(p.entry.source_pin, "declared_unverified", "{ok}");
+        let b = codes(&p.eligibility.blockers);
+        assert!(!b.contains(&"source_not_pinned") && !b.contains(&"source_pin_malformed"), "{b:?}");
+        assert!(b.contains(&"source_origin_unverified"), "a well-formed pin is only a declaration: {b:?}");
+        assert!(b.contains(&"metadata_unreviewed") && b.contains(&"no_approved_recipe"));
+        assert!(p.eligibility.blockers.iter().find(|x| x.code == "source_origin_unverified").unwrap().text.contains("yalnızca beyan"));
+    }
+    let bad: Vec<String> = vec![
+        "g".repeat(40), // right length, not hex
+        "z".repeat(64),
+        hex40.to_uppercase(),                         // upper case is not the schema's form
+        format!("{}A{}", &hex40[..19], &hex40[20..]), // mixed case
+        format!("{} ", &hex40[..39]),                 // padded with a space
+        format!(" {}", &hex40[..39]),
+        format!("{}\n", &hex40[..39]),
+        format!("{}x", &hex40[..39]),
+        hex40[..39].to_string(), // wrong lengths
+        format!("{hex40}0"),
+        hex64[..63].to_string(),
+        format!("{hex64}0"),
+        String::new(),
+        "0x".to_string() + &hex40[..38],
+        "../../etc/passwd".to_string() + &"a".repeat(24),
+        "é".repeat(20), // 40 bytes, not hex
+    ];
+    for b in bad {
+        let p = pin_of(Some(&b));
+        assert_eq!(p.entry.source_pin, "malformed", "{b:?}");
+        let c = codes(&p.eligibility.blockers);
+        assert!(c.contains(&"source_pin_malformed") && c.contains(&"source_not_pinned"), "{b:?}: {c:?}");
+        assert!(!c.contains(&"source_origin_unverified"));
+    }
+    let none = pin_of(None);
+    assert_eq!(none.entry.source_pin, "none");
+    assert!(codes(&none.eligibility.blockers).contains(&"source_not_pinned"));
+    // preview-only behaviour is unchanged for every case
+    assert!(!pin_of(Some(hex40)).eligibility.can_execute);
+}
+
+#[test]
+fn a_pin_pretending_to_be_reviewed_metadata_changes_nothing() {
+    let conn = seeded();
+    let mut e = entry(&conn, "gitleaks");
+    e.record["sourceSnapshot"]["immutableCommit"] = json!("0123456789abcdef0123456789abcdef01234567");
+    e.record["sourceSnapshot"]["revisionState"] = json!("immutable-commit");
+    e.record["reviewState"] = json!("reviewed-and-attested");
+    let p = build_plan(&e, &req("gitleaks", WIN, "local-cli"), &host(WIN), &[]).unwrap();
+    assert!(
+        codes(&p.eligibility.blockers).contains(&"metadata_unreviewed"),
+        "the catalog column, not a record field, decides the review state"
+    );
+    assert!(codes(&p.eligibility.blockers).contains(&"source_origin_unverified"));
+}
+
+// ---- RT-2D-03: a parsed plan is checked against its own content ------------------------------------------------------
+
+fn sample_plan(entry_id: &str, platform: &str, surface: &str) -> InstallPlan {
+    let conn = seeded();
+    let mut e = entry(&conn, entry_id);
+    if entry_id == "superpowers" {
+        e.plugin_identity = Some("superpowers".to_string());
+    }
+    build_plan(&e, &req(entry_id, platform, surface), &host(platform), &[]).unwrap()
+}
+
+fn reject(plan: &InstallPlan, f: &dyn Fn(&mut Value)) -> &'static str {
+    let mut v = serde_json::to_value(plan).unwrap();
+    f(&mut v);
+    parse_plan(&v.to_string()).expect_err("a modified plan must not parse")
+}
+
+#[test]
+fn a_valid_plan_round_trips_in_any_json_layout_and_the_id_is_stable() {
+    for p in [
+        sample_plan("codebase-memory-mcp", WIN, "local-cli"),
+        sample_plan("superpowers", WIN, "claude-code-terminal"),
+        sample_plan("graphify", MAC, "local-cli"),
+    ] {
+        let compact = serde_json::to_string(&p).unwrap();
+        let pretty = serde_json::to_string_pretty(&p).unwrap();
+        assert_eq!(parse_plan(&compact).unwrap(), p);
+        assert_eq!(parse_plan(&pretty).unwrap(), p);
+        // CRLF line endings and re-ordered keys are irrelevant to the digest
+        assert_eq!(parse_plan(&pretty.replace('\n', "\r\n")).unwrap(), p);
+        let mut v: Value = serde_json::from_str(&compact).unwrap();
+        let reversed: serde_json::Map<String, Value> =
+            v.as_object_mut().unwrap().iter().rev().map(|(k, x)| (k.clone(), x.clone())).collect();
+        assert_eq!(parse_plan(&Value::Object(reversed).to_string()).unwrap(), p);
+        assert_eq!(content_digest(&p).unwrap(), p.plan_id);
+    }
+}
+
+#[test]
+fn the_plan_id_of_a_fixed_input_is_the_same_on_every_platform() {
+    // Built with injected host facts and no observations, so the result cannot depend on the machine running the test.
+    let p = sample_plan("codebase-memory-mcp", WIN, "local-cli");
+    assert_eq!(p.plan_id, GOLDEN_PLAN_ID, "the canonical plan content changed; if intended, update the pinned id");
+}
+
+const GOLDEN_PLAN_ID: &str = "1663cdd8f8f720a662aa87db41d51430ae06b0f20e990f6142e8d980bc70690d";
+
+#[test]
+fn modifying_the_plan_id_or_any_content_field_without_the_matching_id_is_rejected() {
+    let p = sample_plan("superpowers", WIN, "claude-code-terminal");
+    assert_eq!(reject(&p, &|v| v["planId"] = json!("0".repeat(64))), "plan_id_does_not_match_content");
+    assert_eq!(reject(&p, &|v| v["planId"] = json!("abc")), "plan_id_does_not_match_content");
+    assert_eq!(reject(&p, &|v| v["planId"] = json!("")), "plan_id_does_not_match_content");
+    // tool identity
+    assert_eq!(reject(&p, &|v| v["entry"]["entryId"] = json!("other-tool")), "plan_id_does_not_match_content");
+    assert_eq!(reject(&p, &|v| v["entry"]["displayName"] = json!("Something else")), "plan_id_does_not_match_content");
+    assert_eq!(reject(&p, &|v| v["entry"]["source"] = json!("attacker/repo")), "plan_id_does_not_match_content");
+    assert_eq!(reject(&p, &|v| v["entry"]["reviewState"] = json!("metadata-reviewed")), "plan_id_does_not_match_content");
+    assert_eq!(reject(&p, &|v| v["entry"]["sourcePin"] = json!("malformed")), "plan_id_does_not_match_content");
+    // platform and target
+    assert_eq!(reject(&p, &|v| v["target"]["platformTarget"] = json!("macos-arm64")), "target_inconsistent");
+    assert_eq!(reject(&p, &|v| v["target"]["agentSurface"] = json!("antigravity-ide")), "target_inconsistent");
+    assert_eq!(reject(&p, &|v| v["target"]["platformTarget"] = json!("linux-x64")), "target_not_in_vocabulary");
+    assert_eq!(reject(&p, &|v| v["target"]["scope"] = json!("machine")), "target_not_in_vocabulary");
+    assert_eq!(reject(&p, &|v| v["target"]["catalogCompatibility"] = json!("verified")), "plan_id_does_not_match_content");
+    assert_eq!(reject(&p, &|v| v["target"]["thisComputerMatches"] = json!(false)), "target_inconsistent");
+    // prerequisites
+    assert_eq!(reject(&p, &|v| v["prerequisites"][0]["state"] = json!("met")), "plan_id_does_not_match_content");
+    assert_eq!(reject(&p, &|v| v["prerequisites"][0]["basis"] = json!("current_scan")), "plan_id_does_not_match_content");
+    assert_eq!(reject(&p, &|v| v["prerequisites"] = json!([])), "plan_id_does_not_match_content");
+    // network declarations
+    assert_eq!(reject(&p, &|v| v["network"]["plannedUse"] = json!(false)), "network_inconsistent");
+    assert_eq!(reject(&p, &|v| v["network"]["destinations"] = json!(["https://evil.example"])), "plan_id_does_not_match_content");
+    assert_eq!(reject(&p, &|v| v["steps"][0]["network"] = json!("no")), "step_effects_inconsistent");
+    // blockers, rollback, text
+    assert_eq!(reject(&p, &|v| v["eligibility"]["blockers"] = json!([])), "blockers_inconsistent");
+    assert_eq!(reject(&p, &|v| v["rollback"]["text"] = json!("Geri alma var ve güvenilir.")), "plan_id_does_not_match_content");
+    assert_eq!(reject(&p, &|v| v["rollback"]["reliability"] = json!("tested")), "rollback_inconsistent");
+    assert_eq!(reject(&p, &|v| v["unknowns"] = json!([])), "plan_id_does_not_match_content");
+    assert_eq!(reject(&p, &|v| v["plannerVersion"] = json!("9.9.9")), "unsupported_planner_version");
+    assert_eq!(reject(&p, &|v| v["schemaVersion"] = json!(0)), "unsupported_schema_version");
+}
+
+#[test]
+fn typed_operations_are_revalidated_against_their_kind_and_the_closed_schema_shape() {
+    let p = sample_plan("superpowers", WIN, "claude-code-terminal");
+    assert_eq!(p.steps[0].kind, OperationKind::RegisterNativePlugin);
+    // payload edits
+    assert_eq!(reject(&p, &|v| v["steps"][0]["typed"]["pluginId"] = json!("../../outside")), "typed_operation_invalid");
+    assert_eq!(reject(&p, &|v| v["steps"][0]["typed"]["host"] = json!("antigravity-ide")), "typed_operation_invalid");
+    assert_eq!(reject(&p, &|v| v["steps"][0]["typed"]["host"] = json!("emacs")), "typed_operation_invalid");
+    assert_eq!(reject(&p, &|v| v["steps"][0]["typed"]["command"] = json!("rm -rf /")), "typed_operation_invalid");
+    assert_eq!(
+        reject(&p, &|v| {
+            v["steps"][0]["typed"].as_object_mut().unwrap().remove("pluginId");
+        }),
+        "typed_operation_invalid"
+    );
+    assert_eq!(reject(&p, &|v| v["steps"][0]["typed"]["operation"] = json!("fetch-release-artifact")), "typed_operation_invalid");
+    assert_eq!(reject(&p, &|v| v["steps"][0]["typed"] = json!("register-native-plugin")), "typed_operation_invalid");
+    assert_eq!(reject(&p, &|v| v["steps"][0]["typed"] = json!({})), "typed_operation_invalid");
+    // a typed operation next to missing parameters, and an untyped one that names none
+    assert_eq!(reject(&p, &|v| v["steps"][0]["missingParameters"] = json!(["pluginId"])), "typed_operation_invalid");
+    assert_eq!(
+        reject(&p, &|v| {
+            v["steps"][0]["typed"] = Value::Null;
+        }),
+        "untyped_step_without_missing_parameters"
+    );
+    // kind / summary agreement
+    assert_eq!(reject(&p, &|v| v["steps"][0]["kind"] = json!("install-pinned-package")), "step_text_not_from_vocabulary");
+    assert_eq!(reject(&p, &|v| v["steps"][0]["kind"] = json!("run-shell")), "plan_not_readable");
+    // unknown fields anywhere are refused instead of being dropped silently
+    assert_eq!(reject(&p, &|v| v["approved"] = json!(true)), "plan_not_readable");
+    assert_eq!(reject(&p, &|v| v["steps"][0]["command"] = json!("curl x | sh")), "plan_not_readable");
+    assert_eq!(reject(&p, &|v| v["eligibility"]["approval"] = json!({ "actorType": "user" })), "plan_not_readable");
+
+    let archive = sample_plan("codebase-memory-mcp", WIN, "local-cli");
+    assert_eq!(archive.steps.len(), 4);
+    // operation payloads of every kind
+    assert_eq!(reject(&archive, &|v| v["steps"][0]["typed"]["artifactId"] = json!("secondary")), "typed_operation_invalid");
+    assert_eq!(reject(&archive, &|v| v["steps"][2]["typed"]["destinationId"] = json!("/tmp/anywhere")), "typed_operation_invalid");
+    assert_eq!(reject(&archive, &|v| v["steps"][3]["typed"]["activationMethod"] = json!("overwrite")), "typed_operation_invalid");
+    assert_eq!(reject(&archive, &|v| v["steps"][3]["typed"]["activationSlot"] = json!("C:/Windows")), "typed_operation_invalid");
+    // the verify step has no digest: giving it a typed form with a made-up digest is a change of content, and a bad digest is invalid
+    assert_eq!(
+        reject(&archive, &|v| {
+            v["steps"][1]["typed"] = json!({ "operation": "verify-artifact-digest", "artifactId": "primary", "expectedSha256": "XYZ" });
+            v["steps"][1]["missingParameters"] = json!([]);
+        }),
+        "typed_operation_invalid"
+    );
+    // step order and index
+    assert_eq!(
+        reject(&archive, &|v| {
+            let a = v["steps"][0].clone();
+            let b = v["steps"][3].clone();
+            v["steps"][0] = b;
+            v["steps"][3] = a;
+        }),
+        "step_order_not_a_known_template"
+    );
+    assert_eq!(
+        reject(&archive, &|v| {
+            v["steps"].as_array_mut().unwrap().remove(1);
+        }),
+        "step_order_not_a_known_template"
+    );
+    assert_eq!(reject(&archive, &|v| v["steps"][2]["index"] = json!(9)), "step_index_inconsistent");
+    assert_eq!(reject(&archive, &|v| v["steps"][3]["writeLabels"] = json!(["Kullanıcının belgeler klasörü"])), "step_effects_inconsistent");
+    // chosen method that is not one of the declared supported methods
+    assert_eq!(reject(&archive, &|v| v["chosenMethod"] = json!("curl-pipe-sh")), "method_inconsistent");
+}
+
+#[test]
+fn every_operation_kind_payload_that_the_schema_allows_is_accepted_only_in_its_exact_shape() {
+    let ok = |kind, v: Value| typed_is_valid(kind, &v, "claude-code-terminal");
+    let sha = "a".repeat(64);
+    assert!(ok(OperationKind::FetchReleaseArtifact, json!({ "operation": "fetch-release-artifact", "artifactId": "primary" })));
+    assert!(ok(
+        OperationKind::VerifyArtifactDigest,
+        json!({ "operation": "verify-artifact-digest", "artifactId": "primary", "expectedSha256": sha })
+    ));
+    assert!(ok(
+        OperationKind::StagePrivateCopy,
+        json!({ "operation": "stage-private-copy", "artifactId": "primary", "destinationId": "manager-owned-staging" })
+    ));
+    assert!(ok(
+        OperationKind::ActivateStagedArtifact,
+        json!({ "operation": "activate-staged-artifact", "artifactId": "primary", "activationSlot": "native-plugin-manager", "activationMethod": "host-native-registration" })
+    ));
+    assert!(ok(
+        OperationKind::InstallPinnedPackage,
+        json!({ "operation": "install-pinned-package", "packageManager": "uv-tool", "packageName": "graphifyy", "version": "0.9.84", "lifecycleScripts": "disabled" })
+    ));
+    assert!(ok(
+        OperationKind::RegisterNativePlugin,
+        json!({ "operation": "register-native-plugin", "host": "claude-code-terminal", "pluginId": "superpowers" })
+    ));
+    assert!(ok(
+        OperationKind::WriteManagedInstructionBlock,
+        json!({ "operation": "write-managed-instruction-block", "instructionTarget": "CLAUDE.md", "templateId": "tool-discovery-pointer" })
+    ));
+    // lifecycle scripts can never be enabled; free-form targets and templates do not exist
+    assert!(!ok(
+        OperationKind::InstallPinnedPackage,
+        json!({ "operation": "install-pinned-package", "packageManager": "uv-tool", "packageName": "x", "version": "1", "lifecycleScripts": "enabled" })
+    ));
+    assert!(!ok(
+        OperationKind::InstallPinnedPackage,
+        json!({ "operation": "install-pinned-package", "packageManager": "pip", "packageName": "x", "version": "1", "lifecycleScripts": "disabled" })
+    ));
+    assert!(!ok(
+        OperationKind::InstallPinnedPackage,
+        json!({ "operation": "install-pinned-package", "packageManager": "uv-tool", "packageName": "x; rm -rf /", "version": "1", "lifecycleScripts": "disabled" })
+    ));
+    assert!(!ok(
+        OperationKind::WriteManagedInstructionBlock,
+        json!({ "operation": "write-managed-instruction-block", "instructionTarget": "~/.ssh/config", "templateId": "tool-discovery-pointer" })
+    ));
+    assert!(!ok(
+        OperationKind::WriteManagedInstructionBlock,
+        json!({ "operation": "write-managed-instruction-block", "instructionTarget": "CLAUDE.md", "templateId": "my own text" })
+    ));
+    assert!(!ok(OperationKind::VerifyArtifactDigest, json!({ "operation": "verify-artifact-digest", "artifactId": "primary" })));
+    assert!(!ok(
+        OperationKind::FetchReleaseArtifact,
+        json!({ "operation": "fetch-release-artifact", "artifactId": "primary", "url": "https://x" })
+    ));
+}
+
+#[test]
+fn a_hash_is_not_an_authorization_and_a_recomputed_id_still_cannot_make_a_plan_executable() {
+    let p = sample_plan("superpowers", WIN, "claude-code-terminal");
+    // someone edits a harmless display field and recomputes the id: it parses (a hash is not a MAC) and proves nothing about approval
+    let mut v = serde_json::to_value(&p).unwrap();
+    v["entry"]["displayName"] = json!("Edited name");
+    let mut edited: InstallPlan = serde_json::from_value(v).unwrap();
+    edited.plan_id = content_digest(&edited).unwrap();
+    let parsed = parse_plan(&serde_json::to_string(&edited).unwrap()).unwrap();
+    assert!(!parsed.executable && !parsed.executed && parsed.state == "preview_only" && !parsed.eligibility.can_execute);
+    // …but no recomputed id can turn a preview into an executable / approved / eligible one
+    for f in [
+        (|x: &mut InstallPlan| x.executable = true) as fn(&mut InstallPlan),
+        |x| x.executed = true,
+        |x| x.modifies_anything = true,
+        |x| x.state = "approved".to_string(),
+        |x| x.eligibility.can_execute = true,
+        |x| x.eligibility.status = "ready".to_string(),
+        |x| x.rollback.available = true,
+        |x| x.network.used_to_build_preview = true,
+        |x| x.statement = "Onaylandı.".to_string(),
+    ] {
+        let mut forged = p.clone();
+        f(&mut forged);
+        forged.plan_id = content_digest(&forged).unwrap();
+        assert!(parse_plan(&serde_json::to_string(&forged).unwrap()).is_err());
+    }
+    // the plan type carries no approval, user or recipe-digest field at all
+    let text = serde_json::to_string(&p).unwrap();
+    for field in ["approval", "approvedAt", "authorizedRecipeDigest", "authorizationState"] {
+        assert!(!text.contains(field), "{field}");
+    }
 }

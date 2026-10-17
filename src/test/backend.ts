@@ -58,7 +58,7 @@ export const PLAN_STATEMENT =
 export const makePlan = (r: PlanRequest, over: Partial<InstallPlan> = {}): InstallPlan => ({
   schemaVersion: 1, plannerVersion: "1.0.0", planId: "a".repeat(64), state: "preview_only", executable: false, executed: false, modifiesAnything: false,
   statement: PLAN_STATEMENT,
-  entry: { entryId: r.entryId, displayName: r.entryId, kind: "executable_tool", source: "example/" + r.entryId, reviewState: "unreviewed", executionPolicy: "manual-only", licenseState: "known", revision: "v1@abcdef", immutableCommitPinned: false },
+  entry: { entryId: r.entryId, displayName: r.entryId, kind: "executable_tool", source: "example/" + r.entryId, reviewState: "unreviewed", executionPolicy: "manual-only", licenseState: "known", revision: "v1@abcdef", sourcePin: "none" },
   target: { platformTarget: r.platformTarget, agentSurface: r.agentSurface, scope: r.scope, thisComputer: "windows-x64", thisComputerMatches: r.platformTarget === "windows-x64", recipeTargetId: null, catalogCompatibility: "vendor-declared" },
   eligibility: {
     status: "blocked", canExecute: false,
@@ -73,7 +73,7 @@ export const makePlan = (r: PlanRequest, over: Partial<InstallPlan> = {}): Insta
     { methodId: "skills-cli", label: "Desteklenmeyen yöntem", supported: false, note: "Üçüncü taraf 'skills' komut satırı aracı: tipli tarif türü yok." },
   ],
   chosenMethod: "verified-release-archive",
-  prerequisites: [{ id: "agent_present", text: "Ajanın bu bilgisayarda olup olmadığı bilinmiyor: izin verilmiş bir tarama kaydı yok.", state: "unknown", source: "observed_scan" }],
+  prerequisites: [{ id: "agent_present", text: "Ajanın bu bilgisayarda olup olmadığı bilinmiyor: izin verilmiş bir tarama kaydı yok.", state: "unknown", source: "observed_scan", basis: "no_current_evidence" }],
   declaredDependencies: ["Node.js >=22"],
   steps: [
     { index: 1, kind: "fetch-release-artifact", summary: "Yayıncının sürüm dosyası, onaylı tarifte yazılı adresten indirilecekti.", typed: { operation: "fetch-release-artifact", artifactId: "primary" }, missingParameters: [], network: "yes", writes: ["manager_staging"], writeLabels: ["Yöneticinin kendi hazırlık klasörü"], admin: "no", reversibility: "nothing_to_undo" },

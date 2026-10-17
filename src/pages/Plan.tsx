@@ -28,6 +28,14 @@ const REVERSIBILITY: Record<string, string> = {
 };
 const PREREQ: Record<string, string> = { met: "Karşılandı", unmet: "Karşılanmadı", unknown: "Bilinmiyor" };
 const PREREQ_ICON: Record<string, string> = { met: "✓", unmet: "✕", unknown: "?" };
+const BASIS: Record<string, string> = {
+  current_scan: "güncel tarama kanıtı", no_current_evidence: "güncel ve uygulanabilir kanıt yok — bilinmiyor, “yok” demek değil",
+  publisher_declared: "yayıncı beyanı", not_checked: "denetlenmedi",
+};
+const PIN: Record<string, string> = {
+  none: "katalogda commit bildirilmemiş", malformed: "bildirilen commit geçersiz (yok sayıldı)",
+  declared_unverified: "commit yalnızca BEYAN edilmiş; kaynağın bu commit’e ait olduğu doğrulanmadı",
+};
 const SOURCE: Record<string, string> = {
   observed_scan: "son tarama kaydından", publisher_declared: "yayıncının beyanı (doğrulanmadı)", not_checked: "denetlenmedi",
 };
@@ -39,6 +47,8 @@ export function PlanPage() {
   const [platform, setPlatform] = useState<string>("windows-x64");
   const [surface, setSurface] = useState<string>("local-cli");
   const [scope, setScope] = useState<string>("user");
+  const [alias, setAlias] = useState<string>("");
+  const projects = useLoad(api.listProjects);
   const [method, setMethod] = useState<string>("");
   const [plan, setPlan] = useState<InstallPlan | null>(null);
   const [error, setError] = useState<AppError | null>(null);
@@ -57,7 +67,7 @@ export function PlanPage() {
     if (!entryId) return;
     setBusy(true);
     setError(null);
-    const request: PlanRequest = { entryId, platformTarget: platform, agentSurface: surface, scope, methodId: chosenMethod || null };
+    const request: PlanRequest = { entryId, platformTarget: platform, agentSurface: surface, scope, methodId: chosenMethod || null, projectAlias: scope === "project" ? alias : null };
     try {
       setPlan(await api.planInstall(request));
     } catch (e) {
@@ -112,6 +122,15 @@ export function PlanPage() {
             {Object.entries(SCOPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
         </div>
+        {scope === "project" && (
+          <div className="field">
+            <label htmlFor="plan-project">Proje</label>
+            <select id="plan-project" value={alias} onChange={(e) => changed(setAlias)(e.target.value)}>
+              <option value="">Seçin…</option>
+              {(projects.data ?? []).map((p) => <option key={p.alias} value={p.alias}>{p.displayName}</option>)}
+            </select>
+          </div>
+        )}
         {plan && plan.methods.length > 0 && (
           <div className="field">
             <label htmlFor="plan-method">Kurulum yöntemi</label>
@@ -124,7 +143,7 @@ export function PlanPage() {
           </div>
         )}
         <p>
-          <button type="submit" disabled={!entryId || busy}>Planı göster (hiçbir şey kurulmaz)</button>
+          <button type="submit" disabled={!entryId || busy || (scope === "project" && alias === "")}>Planı göster (hiçbir şey kurulmaz)</button>
         </p>
         {error && <ErrorNotice error={error} />}
       </form>
@@ -164,7 +183,7 @@ function PlanView({ plan }: { plan: InstallPlan }) {
             : "Seçilen platform bu bilgisayarınkinden FARKLI: plan yalnızca incelenebilir."}
         </li>
         <li>Uyumluluk (yayıncı beyanı, test edilmedi): {compatLabel(plan.target.catalogCompatibility)}</li>
-        <li>Katalog incelemesi: {plan.entry.reviewState === "metadata-reviewed" ? "künye incelendi" : "bağımsız inceleme yok"} · kaynak sabitlendi mi: {plan.entry.immutableCommitPinned ? "evet" : "hayır"}</li>
+        <li>Katalog incelemesi: {plan.entry.reviewState === "metadata-reviewed" ? "künye incelendi" : "bağımsız inceleme yok"} · kaynak sabitleme: {PIN[plan.entry.sourcePin] ?? plan.entry.sourcePin}</li>
       </ul>
 
       <h3>Ön koşullar</h3>
@@ -173,7 +192,7 @@ function PlanView({ plan }: { plan: InstallPlan }) {
           {plan.prerequisites.map((p, i) => (
             <li key={`${p.id}-${i}`}>
               <span aria-hidden="true">{PREREQ_ICON[p.state] ?? "?"}</span> <strong>{PREREQ[p.state] ?? p.state}</strong> — {p.text}{" "}
-              <span className="muted small">({SOURCE[p.source] ?? p.source})</span>
+              <span className="muted small">({SOURCE[p.source] ?? p.source}; {BASIS[p.basis] ?? p.basis})</span>
             </li>
           ))}
         </ul>

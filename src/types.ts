@@ -426,9 +426,11 @@ export interface PlanRequest {
   agentSurface: string;
   scope: string;
   methodId: string | null;
+  /** Required when scope is "project"; null otherwise. */
+  projectAlias: string | null;
 }
 export interface PlanBlocker { code: string; text: string }
-export interface PlanPrerequisite { id: string; text: string; state: "met" | "unmet" | "unknown"; source: "observed_scan" | "publisher_declared" | "not_checked" }
+export interface PlanPrerequisite { id: string; text: string; state: "met" | "unmet" | "unknown"; source: "observed_scan" | "publisher_declared" | "not_checked"; basis: "current_scan" | "no_current_evidence" | "publisher_declared" | "not_checked" }
 export interface PlanStep {
   index: number;
   kind: string;
@@ -455,7 +457,7 @@ export interface InstallPlan {
   statement: string;
   entry: {
     entryId: string; displayName: string; kind: string; source: string; reviewState: string; executionPolicy: string;
-    licenseState: string; revision: string; immutableCommitPinned: boolean;
+    licenseState: string; revision: string; sourcePin: "none" | "malformed" | "declared_unverified";
   };
   target: {
     platformTarget: string; agentSurface: string; scope: string; thisComputer: string; thisComputerMatches: boolean;

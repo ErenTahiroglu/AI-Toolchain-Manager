@@ -5,6 +5,7 @@ that file; without it the tests are skipped. The plans are validated against sch
 operation must be a schema-valid recipe operation) and against the preview-only invariants.
 """
 
+import hashlib
 import json
 import os
 import pathlib
@@ -68,6 +69,38 @@ class PlanContract(unittest.TestCase):
         self.assertTrue(strix)
         codes = [b["code"] for b in strix[0]["eligibility"]["blockers"]]
         self.assertIn("execution_policy_blocked", codes)
+
+    @staticmethod
+    def canonical(value):
+        """Independent re-implementation of the application's canonical JSON (sorted keys, compact, UTF-8)."""
+        if isinstance(value, dict):
+            return "{" + ",".join(json.dumps(k, ensure_ascii=False) + ":" + PlanContract.canonical(value[k]) for k in sorted(value)) + "}"
+        if isinstance(value, list):
+            return "[" + ",".join(PlanContract.canonical(v) for v in value) + "]"
+        return json.dumps(value, ensure_ascii=False)
+
+    def test_the_plan_id_is_an_independently_recomputable_digest_of_the_plan_content(self):
+        for p in self.plans:
+            blank = dict(p, planId="")
+            digest = hashlib.sha256(self.canonical(blank).encode("utf-8")).hexdigest()
+            self.assertEqual(digest, p["planId"], p["entry"]["entryId"])
+            # any edit changes it
+            edited = json.loads(json.dumps(blank))
+            edited["entry"]["displayName"] += "x"
+            self.assertNotEqual(hashlib.sha256(self.canonical(edited).encode("utf-8")).hexdigest(), p["planId"])
+
+    def test_source_pin_and_prerequisite_basis_use_closed_vocabularies(self):
+        for p in self.plans:
+            self.assertIn(p["entry"]["sourcePin"], {"none", "malformed", "declared_unverified"})
+            self.assertNotIn("immutableCommitPinned", p["entry"])
+            if p["entry"]["sourcePin"] == "declared_unverified":
+                self.assertIn("source_origin_unverified", [b["code"] for b in p["eligibility"]["blockers"]])
+            for pre in p["prerequisites"]:
+                self.assertIn(pre["basis"], {"current_scan", "no_current_evidence", "publisher_declared", "not_checked"})
+                self.assertIn(pre["state"], {"met", "unmet", "unknown"})
+                if pre["basis"] != "current_scan" and pre["source"] == "observed_scan":
+                    self.assertEqual(pre["state"], "unknown", "no current evidence can never be met or unmet")
+            self.assertNotIn("approval", json.dumps(p))
 
 
 if __name__ == "__main__":

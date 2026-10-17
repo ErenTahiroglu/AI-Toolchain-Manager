@@ -41,9 +41,12 @@ describe("installation plan preview", () => {
     await userEvent.selectOptions(screen.getByLabelText("Hedef bilgisayar türü"), "macos-arm64");
     await userEvent.selectOptions(screen.getByLabelText("Hedef ajan yüzeyi"), "claude-code-terminal");
     await userEvent.selectOptions(screen.getByLabelText("Kapsam"), "project");
+    // a project plan cannot be requested without choosing which project
+    expect(screen.getByRole("button", { name: /Planı göster/ })).toBeDisabled();
+    await userEvent.selectOptions(await screen.findByLabelText("Proje"), "ornek-web-sitesi");
     await show();
     expect(calls("plan_install")[0].args).toEqual({
-      request: { entryId: "gitleaks", platformTarget: "macos-arm64", agentSurface: "claude-code-terminal", scope: "project", methodId: null },
+      request: { entryId: "gitleaks", platformTarget: "macos-arm64", agentSurface: "claude-code-terminal", scope: "project", methodId: null, projectAlias: "ornek-web-sitesi" },
     });
     expect(screen.getByText(/Bu plan uygulanamaz/)).toBeInTheDocument();
     const reasons = screen.getByRole("list", { name: "Engelleme nedenleri" });
@@ -84,7 +87,8 @@ describe("installation plan preview", () => {
     await show();
     const prereq = screen.getByRole("list", { name: "Ön koşullar" });
     expect(within(prereq).getByText("Bilinmiyor")).toBeInTheDocument();
-    expect(within(prereq).getByText(/son tarama kaydından/)).toBeInTheDocument();
+    expect(within(prereq).getByText(/son tarama kaydından; güncel ve uygulanabilir kanıt yok — bilinmiyor, “yok” demek değil/)).toBeInTheDocument();
+    expect(screen.getByText(/kaynak sabitleme: katalogda commit bildirilmemiş/)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Yayıncının bildirdiği bağımlılıklar \(doğrulanmadı\)/ })).toBeInTheDocument();
   });
 
@@ -111,7 +115,7 @@ describe("installation plan preview", () => {
   });
 
   it("a plan for a platform other than this computer says so", async () => {
-    const r = { entryId: "gitleaks", platformTarget: "macos-arm64", agentSurface: "local-cli", scope: "user", methodId: null };
+    const r = { entryId: "gitleaks", platformTarget: "macos-arm64", agentSurface: "local-cli", scope: "user", methodId: null, projectAlias: null };
     const plan = makePlan(r);
     expect(plan.target.thisComputerMatches).toBe(false);
     await open();

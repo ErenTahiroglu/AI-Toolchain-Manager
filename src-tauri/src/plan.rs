@@ -47,6 +47,9 @@ pub struct PlanRequest {
     pub scope: String,
     /// One of the entry's declared install methods; `None` = the first one this planner supports.
     pub method_id: Option<String>,
+    /// Required for `scope = project` (a project reference of this application), forbidden otherwise.
+    #[serde(default)]
+    pub project_alias: Option<String>,
 }
 
 /// What the planner may know about the computer it runs on. Injected so tests can describe any machine; nothing here is
@@ -256,7 +259,7 @@ fn method_spec(id: &str) -> Option<&'static MethodSpec> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MethodChoice {
     pub method_id: String,
     pub label: String,
@@ -270,7 +273,7 @@ pub struct MethodChoice {
 // ---------------------------------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PlannedStep {
     pub index: u32,
     pub kind: OperationKind,
@@ -287,14 +290,14 @@ pub struct PlannedStep {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Blocker {
     pub code: String,
     pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Prerequisite {
     pub id: String,
     pub text: String,
@@ -302,17 +305,20 @@ pub struct Prerequisite {
     pub state: String,
     /// `observed_scan` | `publisher_declared` | `not_checked`
     pub source: String,
+    /// What the state rests on: `current_scan` (a current, applicable observation), `no_current_evidence` (nothing current and
+    /// applicable exists; unknown, not absent), `publisher_declared`, `not_checked`.
+    pub basis: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Conflict {
     pub code: String,
     pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PlanEntry {
     pub entry_id: String,
     pub display_name: String,
@@ -323,11 +329,13 @@ pub struct PlanEntry {
     pub execution_policy: String,
     pub license_state: String,
     pub revision: String,
-    pub immutable_commit_pinned: bool,
+    /// `none` | `malformed` | `declared_unverified`. A well-formed commit id is only a DECLARED pin: no length or
+    /// pattern check can prove that it belongs to the repository or was reviewed.
+    pub source_pin: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PlanTarget {
     pub platform_target: String,
     pub agent_surface: String,
@@ -341,7 +349,7 @@ pub struct PlanTarget {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Eligibility {
     /// Always `blocked` in this phase.
     pub status: String,
@@ -351,7 +359,7 @@ pub struct Eligibility {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NetworkInfo {
     /// Would the (future) steps use the network?
     pub planned_use: bool,
@@ -361,7 +369,7 @@ pub struct NetworkInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Disclosure {
     /// Closed word, see the builder.
     pub state: String,
@@ -369,7 +377,7 @@ pub struct Disclosure {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConfigChange {
     pub area: WriteArea,
     /// `create_or_merge` | `unknown`
@@ -378,7 +386,7 @@ pub struct ConfigChange {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RollbackInfo {
     /// Always false in this phase: nothing is implemented.
     pub available: bool,
@@ -388,7 +396,7 @@ pub struct RollbackInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InstallPlan {
     pub schema_version: u32,
     pub planner_version: String,
@@ -428,6 +436,9 @@ impl InstallPlan {
         if self.schema_version != PLAN_SCHEMA_VERSION {
             return Err("unsupported_schema_version");
         }
+        if self.planner_version != PLANNER_VERSION {
+            return Err("unsupported_planner_version");
+        }
         if self.state != "preview_only" || self.executable || self.executed || self.modifies_anything {
             return Err("plan_claims_execution");
         }
@@ -444,11 +455,170 @@ impl InstallPlan {
     }
 }
 
-/// Reads a plan from JSON and rejects anything that is not a well-formed, versioned, non-executing preview.
+/// SHA-256 over the canonical plan content with the id blanked: exactly how [`build_plan`] derived `plan_id`.
+fn content_digest(plan: &InstallPlan) -> Result<String, &'static str> {
+    let mut blank = plan.clone();
+    blank.plan_id = String::new();
+    let value = serde_json::to_value(&blank).map_err(|_| "plan_not_readable")?;
+    Ok(sha256_hex(&canonical_json(&value)))
+}
+
+const ACTIVATION_SLOTS: &[&str] = &["manager-versioned-binary", "native-plugin-manager", "managed-instruction-block"];
+const ACTIVATION_METHODS: &[&str] = &["atomic-version-switch", "host-native-registration", "marker-delimited-merge"];
+const PACKAGE_MANAGERS: &[&str] = &["homebrew", "winget", "uv-tool", "pipx", "go-install", "native-plugin-manager"];
+const PLUGIN_HOSTS: &[&str] = &["claude-code-terminal", "claude-desktop-code", "antigravity-ide", "antigravity-cli", "antigravity-2"];
+const INSTRUCTION_TARGETS: &[&str] = &["CLAUDE.md", "GEMINI.md", "AGENTS.md", "agents-rules"];
+const INSTRUCTION_TEMPLATES: &[&str] = &["response-profile-caveman", "response-profile-ste-oriented", "tool-discovery-pointer"];
+
+fn is_package_name(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 180 && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'@' | b'.' | b'_' | b'/' | b'-'))
+}
+
+/// A typed operation must be exactly the schema's shape for its kind: the declared key set, closed values, valid patterns.
+fn typed_is_valid(kind: OperationKind, typed: &Value, target_surface: &str) -> bool {
+    let Some(obj) = typed.as_object() else { return false };
+    let keys: std::collections::BTreeSet<&str> = obj.keys().map(String::as_str).collect();
+    let want = |names: &[&str]| keys == names.iter().copied().collect::<std::collections::BTreeSet<&str>>();
+    let text = |k: &str| obj.get(k).and_then(Value::as_str);
+    if text("operation") != Some(kind.as_str()) {
+        return false;
+    }
+    match kind {
+        OperationKind::FetchReleaseArtifact => want(&["operation", "artifactId"]) && text("artifactId") == Some("primary"),
+        OperationKind::VerifyArtifactDigest => {
+            want(&["operation", "artifactId", "expectedSha256"])
+                && text("artifactId") == Some("primary")
+                && text("expectedSha256").map(is_sha256).unwrap_or(false)
+        }
+        OperationKind::StagePrivateCopy => {
+            want(&["operation", "artifactId", "destinationId"])
+                && text("artifactId") == Some("primary")
+                && text("destinationId") == Some("manager-owned-staging")
+        }
+        OperationKind::ActivateStagedArtifact => {
+            want(&["operation", "artifactId", "activationSlot", "activationMethod"])
+                && text("artifactId") == Some("primary")
+                && text("activationSlot").map(|v| ACTIVATION_SLOTS.contains(&v)).unwrap_or(false)
+                && text("activationMethod").map(|v| ACTIVATION_METHODS.contains(&v)).unwrap_or(false)
+        }
+        OperationKind::InstallPinnedPackage => {
+            want(&["operation", "packageManager", "packageName", "version", "lifecycleScripts"])
+                && text("packageManager").map(|v| PACKAGE_MANAGERS.contains(&v)).unwrap_or(false)
+                && text("packageName").map(is_package_name).unwrap_or(false)
+                && text("version").map(is_pinned_version).unwrap_or(false)
+                && text("lifecycleScripts") == Some("disabled")
+        }
+        OperationKind::RegisterNativePlugin => {
+            want(&["operation", "host", "pluginId"])
+                && text("host").map(|v| PLUGIN_HOSTS.contains(&v) && v == target_surface).unwrap_or(false)
+                && text("pluginId").map(is_plugin_id).unwrap_or(false)
+        }
+        OperationKind::WriteManagedInstructionBlock => {
+            want(&["operation", "instructionTarget", "templateId"])
+                && text("instructionTarget").map(|v| INSTRUCTION_TARGETS.contains(&v)).unwrap_or(false)
+                && text("templateId").map(|v| INSTRUCTION_TEMPLATES.contains(&v)).unwrap_or(false)
+        }
+    }
+}
+
+fn step_expects_network(kind: OperationKind) -> NetworkUse {
+    match kind {
+        OperationKind::FetchReleaseArtifact | OperationKind::InstallPinnedPackage | OperationKind::RegisterNativePlugin => NetworkUse::Yes,
+        _ => NetworkUse::No,
+    }
+}
+
+impl InstallPlan {
+    /// Internal consistency a plan built by [`build_plan`] always has. A parsed plan that fails any of these was not produced
+    /// by this planner (or was edited afterwards).
+    pub fn check_semantics(&self) -> Result<(), &'static str> {
+        let t = &self.target;
+        if !PLATFORMS.contains(&t.platform_target.as_str())
+            || !SURFACES.contains(&t.agent_surface.as_str())
+            || !SCOPES.contains(&t.scope.as_str())
+            || !(PLATFORMS.contains(&t.this_computer.as_str()) || t.this_computer == "unsupported")
+        {
+            return Err("target_not_in_vocabulary");
+        }
+        if t.recipe_target_id.as_deref() != recipe_target(&t.platform_target, &t.agent_surface)
+            || t.this_computer_matches != (t.this_computer == t.platform_target)
+        {
+            return Err("target_inconsistent");
+        }
+        if !matches!(self.entry.source_pin.as_str(), "none" | "malformed" | "declared_unverified") {
+            return Err("source_pin_not_in_vocabulary");
+        }
+        let codes: Vec<&str> = self.eligibility.blockers.iter().map(|b| b.code.as_str()).collect();
+        let unique = |v: &[&str]| v.iter().collect::<std::collections::BTreeSet<_>>().len() == v.len();
+        if !codes.contains(&"no_approved_recipe") || !unique(&codes) {
+            return Err("blockers_inconsistent");
+        }
+        if self.rollback.reliability != "none_implemented" {
+            return Err("rollback_inconsistent");
+        }
+        // steps: sequential, a known template, typed form consistent with the kind, derived texts unchanged
+        let kinds: Vec<OperationKind> = self.steps.iter().map(|s| s.kind).collect();
+        let template_ok = kinds.is_empty()
+            || kinds == [OperationKind::RegisterNativePlugin]
+            || kinds == [OperationKind::InstallPinnedPackage]
+            || kinds
+                == [
+                    OperationKind::FetchReleaseArtifact,
+                    OperationKind::VerifyArtifactDigest,
+                    OperationKind::StagePrivateCopy,
+                    OperationKind::ActivateStagedArtifact,
+                ];
+        if !template_ok {
+            return Err("step_order_not_a_known_template");
+        }
+        for (i, s) in self.steps.iter().enumerate() {
+            if s.index != i as u32 + 1 {
+                return Err("step_index_inconsistent");
+            }
+            if s.write_labels != s.writes.iter().map(|w| w.label().to_string()).collect::<Vec<_>>()
+                || s.network != step_expects_network(s.kind)
+            {
+                return Err("step_effects_inconsistent");
+            }
+            match &s.typed {
+                Some(v) => {
+                    if !s.missing_parameters.is_empty() || !typed_is_valid(s.kind, v, &t.agent_surface) {
+                        return Err("typed_operation_invalid");
+                    }
+                }
+                None => {
+                    if s.missing_parameters.is_empty() {
+                        return Err("untyped_step_without_missing_parameters");
+                    }
+                }
+            }
+        }
+        if self.network.planned_use != self.steps.iter().any(|s| s.network == NetworkUse::Yes) {
+            return Err("network_inconsistent");
+        }
+        let methods_ok = self.methods.iter().all(|m| !m.supported || method_spec(&m.method_id).is_some());
+        let chosen_ok = match &self.chosen_method {
+            Some(c) => self.methods.iter().any(|m| &m.method_id == c) && method_spec(c).is_some(),
+            None => self.steps.is_empty(),
+        };
+        if !methods_ok || !chosen_ok {
+            return Err("method_inconsistent");
+        }
+        Ok(())
+    }
+}
+
+/// Reads a plan from JSON and rejects anything that is not a well-formed, versioned, non-executing preview whose content
+/// still matches its id. A matching id shows the content was not altered after generation; it is NOT tamper-proof against a
+/// writer who recomputes it, and it is never an approval or an authorization.
 #[allow(dead_code)] // exercised by the tests and the self-check; no command accepts a plan from outside
 pub fn parse_plan(json: &str) -> Result<InstallPlan, &'static str> {
     let plan: InstallPlan = serde_json::from_str(json).map_err(|_| "plan_not_readable")?;
     plan.check_invariants()?;
+    plan.check_semantics()?;
+    if plan.plan_id.len() != 64 || content_digest(&plan)? != plan.plan_id {
+        return Err("plan_id_does_not_match_content");
+    }
     Ok(plan)
 }
 
@@ -469,6 +639,12 @@ fn validate_request(r: &PlanRequest) -> AppResult<()> {
     }
     if !SCOPES.contains(&r.scope.as_str()) {
         return Err(invalid("kapsam 'user' veya 'project' olmalı"));
+    }
+    match (r.scope.as_str(), &r.project_alias) {
+        ("project", Some(a)) if crate::discovery::privacy::is_safe_project_alias(a) => {}
+        ("project", _) => return Err(invalid("proje kapsamı için geçerli bir proje takma adı gerekir")),
+        (_, Some(_)) => return Err(invalid("proje takma adı yalnızca proje kapsamında verilebilir")),
+        _ => {}
     }
     if let Some(m) = &r.method_id {
         if m.len() > 64 || !m.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') {
@@ -514,6 +690,11 @@ fn is_pinned_version(s: &str) -> bool {
         && b.len() <= 128
         && b[0].is_ascii_alphanumeric()
         && b.iter().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'+' | b'_' | b'-'))
+}
+
+/// A git object id as the recipe schema writes it: exactly 40 or 64 LOWER-case hexadecimal characters.
+fn is_commit_id(s: &str) -> bool {
+    (s.len() == 40 || s.len() == 64) && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 fn is_sha256(s: &str) -> bool {
@@ -590,15 +771,100 @@ fn method_choice(id: &str, platform: &str) -> MethodChoice {
     MethodChoice { method_id: id.to_string(), label: "Desteklenmeyen yöntem".to_string(), supported: false, note }
 }
 
-fn observed<'a>(obs: &'a [StoredObservation], subject: &str) -> Vec<&'a StoredObservation> {
-    obs.iter().filter(|o| o.subject == subject).collect()
+/// Which part of the stored observations may speak about the question being asked.
+#[derive(Clone, Copy)]
+enum Want<'a> {
+    /// computer-wide (not tied to a project)
+    Global,
+    Project(&'a str),
 }
 
+/// What the observations of one subject say, sorted by how far they can be trusted for THIS question.
+#[derive(Default)]
+struct Evidence<'a> {
+    /// current (from the latest scan, fresh), same platform, same surface, same scope: may satisfy a prerequisite
+    current_present: Vec<&'a StoredObservation>,
+    /// current, applicable and from a scan that was authorised to look: the only thing that can mean "not there"
+    current_absent: Vec<&'a StoredObservation>,
+    /// applicable but not current (older scan, stale, or the latest scan did not look): history only
+    historical_present: usize,
+    /// present, but recorded for another platform
+    foreign_platform_present: usize,
+    /// present on this platform but for another agent surface (never merged with the asked one)
+    other_surface_present: usize,
+}
+
+fn scan_looked(o: &StoredObservation, want: Want) -> bool {
+    match o.method.as_str() {
+        "path-executable" | "native-install-location" | "legacy-local-install" => o.scan_authorized_path,
+        "claude-settings-file" | "claude-plugin-declaration" | "claude-mcp-config" => match want {
+            Want::Global => o.scan_authorized_user_config,
+            Want::Project(_) => o.scan_authorized_project,
+        },
+        _ => true,
+    }
+}
+
+fn in_scope(o: &StoredObservation, want: Want) -> bool {
+    match want {
+        Want::Global => o.scope == "global" && o.project_alias.is_none(),
+        Want::Project(alias) => o.scope == "project" && o.project_alias.as_deref() == Some(alias),
+    }
+}
+
+fn gather<'a>(obs: &'a [StoredObservation], subject: &str, platform: &str, surface: Option<&str>, want: Want) -> Evidence<'a> {
+    let mut e = Evidence::default();
+    for o in obs.iter().filter(|o| o.subject == subject && in_scope(o, want)) {
+        let present = o.presence == "present";
+        if o.platform_target != platform {
+            e.foreign_platform_present += present as usize;
+            continue;
+        }
+        if surface.map(|s| o.agent_surface != s).unwrap_or(false) {
+            e.other_surface_present += present as usize;
+            continue;
+        }
+        if o.current {
+            if present {
+                e.current_present.push(o);
+            } else if o.presence == "absent" && o.latest_scan_checked && scan_looked(o, want) {
+                e.current_absent.push(o);
+            }
+        } else if present {
+            e.historical_present += 1;
+        }
+    }
+    e
+}
+
+/// The one agent a surface can be judged by. Surfaces without a detector (Claude Desktop, Antigravity CLI / 2.0) are never
+/// borrowed from another surface's evidence.
 fn agent_subject(surface: &str) -> Option<&'static str> {
     match surface {
-        "claude-code-terminal" | "claude-desktop-code" => Some("agent:claude-code"),
-        "antigravity-ide" | "antigravity-cli" | "antigravity-2" => Some("agent:antigravity-ide"),
+        "claude-code-terminal" => Some("agent:claude-code"),
+        "antigravity-ide" => Some("agent:antigravity-ide"),
         _ => None,
+    }
+}
+
+fn evidence_notes(e: &Evidence, what: &str, warnings: &mut Vec<Blocker>) {
+    if e.current_present.is_empty() && e.historical_present > 0 {
+        warnings.push(blocker(
+            "historical_presence_not_current",
+            &format!("{what}: eski bir taramada bulunmuştu, ancak son taramada doğrulanmadı. Eski kayıt güncel kanıt sayılmaz."),
+        ));
+    }
+    if e.foreign_platform_present > 0 {
+        warnings.push(blocker(
+            "foreign_platform_record",
+            &format!("{what}: başka bir platform için kayıt var; seçilen hedef için kanıt sayılmaz."),
+        ));
+    }
+    if e.other_surface_present > 0 {
+        warnings.push(blocker(
+            "other_surface_record",
+            &format!("{what}: başka bir ajan yüzeyi için kayıt var; seçilen yüzeyle birleştirilmedi."),
+        ));
     }
 }
 
@@ -638,10 +904,21 @@ pub fn build_plan(entry: &CatalogEntry, req: &PlanRequest, host: &HostFacts, obs
         blockers
             .push(blocker("license_not_accepted", "Lisans beyan edilmiş ancak tarifin gerektirdiği 'kabul edildi' incelemesi yapılmadı."));
     }
-    let pinned =
-        record.pointer("/sourceSnapshot/immutableCommit").and_then(Value::as_str).map(|c| c.len() == 40 || c.len() == 64).unwrap_or(false);
-    if !pinned {
-        blockers.push(blocker("source_not_pinned", "Kaynak değişmez bir commit'e sabitlenmemiş; içerik zamanla değişebilir."));
+    let source_pin = match record.pointer("/sourceSnapshot/immutableCommit").and_then(Value::as_str) {
+        None => "none",
+        Some(c) if is_commit_id(c) => "declared_unverified",
+        Some(_) => "malformed",
+    };
+    match source_pin {
+        "declared_unverified" => blockers.push(blocker(
+            "source_origin_unverified",
+            "Katalogda bir commit numarası bildirilmiş, ancak bu yalnızca beyandır: numaranın bu depoya ait olduğu veya incelendiği doğrulanmadı.",
+        )),
+        "malformed" => {
+            blockers.push(blocker("source_pin_malformed", "Katalogdaki commit numarası geçerli bir 40 veya 64 haneli onaltılık değer değil; yok sayıldı."));
+            blockers.push(blocker("source_not_pinned", "Kaynak geçerli bir commit'e sabitlenmemiş; içerik zamanla değişebilir."));
+        }
+        _ => blockers.push(blocker("source_not_pinned", "Kaynak değişmez bir commit'e sabitlenmemiş; içerik zamanla değişebilir.")),
     }
 
     // ---- target ---------------------------------------------------------------------------------------------------
@@ -832,6 +1109,7 @@ pub fn build_plan(entry: &CatalogEntry, req: &PlanRequest, host: &HostFacts, obs
                     ),
                     state: "unknown".to_string(),
                     source: "not_checked".to_string(),
+                    basis: "not_checked".to_string(),
                 });
                 unknowns
                     .push("Paketin kendi kurulum adımının hangi ek dosyaları veya ajan ayarlarını değiştireceği bilinmiyor.".to_string());
@@ -844,43 +1122,71 @@ pub fn build_plan(entry: &CatalogEntry, req: &PlanRequest, host: &HostFacts, obs
     }
 
     // ---- prerequisites ---------------------------------------------------------------------------------------------
-    if let Some(subject) = agent_subject(&req.agent_surface) {
-        let seen = observed(observations, subject);
-        let present = seen.iter().any(|o| o.presence == "present");
-        let absent = seen.iter().any(|o| o.presence == "absent");
-        let (state, text) = if present {
-            ("met", "Ajan, son tarama kaydında bulundu (yalnızca varlığı; çalıştığı doğrulanmadı).")
-        } else if absent {
-            ("unmet", "Ajan, son tarama kaydında bulunamadı.")
-        } else {
-            ("unknown", "Ajanın bu bilgisayarda olup olmadığı bilinmiyor: izin verilmiş bir tarama kaydı yok.")
+    let project_want = req.project_alias.as_deref().map(Want::Project).unwrap_or(Want::Global);
+    if req.agent_surface != "local-cli" {
+        let subject = agent_subject(&req.agent_surface);
+        let (state, text, basis) = match subject {
+            None => {
+                ("unknown", "Bu ajan yüzeyi için bir algılayıcı yok; başka bir yüzeyin kaydı yerine kullanılmaz.", "no_current_evidence")
+            }
+            Some(subject) => {
+                // the agent itself is machine-wide: global observations of exactly this surface
+                let e = gather(observations, subject, &req.platform_target, Some(&req.agent_surface), Want::Global);
+                evidence_notes(&e, "Ajan", &mut warnings);
+                if !e.current_present.is_empty() {
+                    ("met", "Ajan, GÜNCEL taramada bulundu (yalnızca varlığı; çalıştığı doğrulanmadı).", "current_scan")
+                } else if !e.current_absent.is_empty() {
+                    ("unmet", "Ajan, güncel ve izinli taramada arandı ve bulunamadı.", "current_scan")
+                } else {
+                    (
+                        "unknown",
+                        "Ajanın bu hedefte olup olmadığı bilinmiyor: bu hedef için güncel, uygulanabilir ve izinli bir tarama kanıtı yok.",
+                        "no_current_evidence",
+                    )
+                }
+            }
         };
         prerequisites.push(Prerequisite {
             id: "agent_present".to_string(),
             text: text.to_string(),
             state: state.to_string(),
             source: "observed_scan".to_string(),
+            basis: basis.to_string(),
         });
-        if subject == "agent:claude-code" {
-            let settings = seen.iter().find(|o| o.method == "claude-settings-file" && o.scope == "global");
-            let (state, text) = match settings.map(|o| o.configuration.as_str()) {
-                Some("malformed") => {
-                    ("unmet", "Claude Code kullanıcı ayar dosyası bozuk görünüyor; plan bunu düzeltmeyi önermez ve üzerine yazmaz.")
+        if subject == Some("agent:claude-code") {
+            let settings_any = observations.iter().find(|o| {
+                o.subject == "agent:claude-code"
+                    && o.method == "claude-settings-file"
+                    && o.current
+                    && o.platform_target == req.platform_target
+                    && in_scope(o, project_want)
+            });
+            let which = if req.project_alias.is_some() { "Projenin" } else { "Kullanıcının" };
+            let (state, text, basis) = match settings_any.map(|o| (o.configuration.as_str(), scan_looked(o, project_want))) {
+                Some(("malformed", true)) => (
+                    "unmet",
+                    format!("{which} Claude Code ayar dosyası bozuk görünüyor; plan bunu düzeltmeyi önermez ve üzerine yazmaz."),
+                    "current_scan",
+                ),
+                Some(("configured" | "disabled" | "referenced_not_present", true)) => {
+                    ("met", format!("{which} Claude Code ayar dosyası güncel taramada okunabildi."), "current_scan")
                 }
-                Some("configured" | "disabled" | "referenced_not_present") => {
-                    ("met", "Claude Code kullanıcı ayar dosyası son taramada okunabildi.")
-                }
-                _ => ("unknown", "Claude Code ayar dosyasının durumu bilinmiyor (dosya okunmadı veya taranmadı)."),
+                _ => (
+                    "unknown",
+                    format!("{which} Claude Code ayar dosyasının durumu bilinmiyor (güncel taramada okunmadı veya izin verilmedi)."),
+                    "no_current_evidence",
+                ),
             };
             prerequisites.push(Prerequisite {
                 id: "agent_config_readable".to_string(),
-                text: text.to_string(),
+                text,
                 state: state.to_string(),
                 source: "observed_scan".to_string(),
+                basis: basis.to_string(),
             });
         }
-        if !present {
-            blockers.push(blocker("agent_not_confirmed", "Hedef ajanın bu bilgisayarda bulunduğu doğrulanmadı."));
+        if prerequisites.iter().find(|p| p.id == "agent_present").map(|p| p.state != "met").unwrap_or(true) {
+            blockers.push(blocker("agent_not_confirmed", "Hedef ajanın bu hedefte bulunduğu güncel kanıtla doğrulanmadı."));
         }
         // An open agent session could be using what an install would touch; the manager cannot see sessions yet.
         conflicts.push(Conflict {
@@ -905,6 +1211,7 @@ pub fn build_plan(entry: &CatalogEntry, req: &PlanRequest, host: &HostFacts, obs
             text: format!("Yayıncı şunu gerektirdiğini belirtiyor: {clean}"),
             state: "unknown".to_string(),
             source: "publisher_declared".to_string(),
+            basis: "publisher_declared".to_string(),
         });
     }
     if prerequisites.iter().any(|p| p.state != "met") {
@@ -1003,15 +1310,13 @@ pub fn build_plan(entry: &CatalogEntry, req: &PlanRequest, host: &HostFacts, obs
     unknowns.push("Aracın işlevinin bu bilgisayarda çalıştığı doğrulanmadı ve bu planla doğrulanmayacak.".to_string());
 
     // ---- conflicts from stored observations (existing installations, copies, versions) ---------------------------
-    let mine: Vec<&StoredObservation> = observed(observations, &entry.entry_id).into_iter().filter(|o| o.presence == "present").collect();
+    let tool = gather(observations, &entry.entry_id, &req.platform_target, None, Want::Global);
+    evidence_notes(&tool, "Araç", &mut warnings);
+    let mine = &tool.current_present;
     if !mine.is_empty() {
         conflicts.push(Conflict {
-            code: if this_matches { "existing_installation_found" } else { "existing_installation_other_platform" }.to_string(),
-            text: if this_matches {
-                "Son tarama bu aracın bu bilgisayarda zaten bulunduğunu gösteriyor; yeni kurulum mevcut kopyayla çakışabilir ve mevcut kopya değiştirilmez.".to_string()
-            } else {
-                "Bu bilgisayarda bu aracın bir kopyası bulunuyor, ancak plan başka bir platform içindir; sürüm/mimari uyumsuzluğu olabilir.".to_string()
-            },
+            code: "existing_installation_found".to_string(),
+            text: "Son (güncel) tarama bu aracın bu hedefte zaten bulunduğunu gösteriyor; yeni kurulum mevcut kopyayla çakışabilir ve mevcut kopya değiştirilmez.".to_string(),
         });
         let locations: std::collections::BTreeSet<&str> =
             mine.iter().filter(|o| o.method == "path-executable").filter_map(|o| o.location.as_deref()).collect();
@@ -1026,7 +1331,7 @@ pub fn build_plan(entry: &CatalogEntry, req: &PlanRequest, host: &HostFacts, obs
         if versions.len() > 1 {
             conflicts.push(Conflict {
                 code: "conflicting_version_records".to_string(),
-                text: "Aynı araç için çelişen sürüm kayıtları var; hangisinin doğru olduğu bilinmiyor.".to_string(),
+                text: "Aynı araç için güncel kayıtlarda çelişen sürümler var; hangisinin doğru olduğu bilinmiyor.".to_string(),
             });
         }
         if mine.iter().any(|o| o.ladder.identity == crate::discovery::types::IdentityState::Conflicted) {
@@ -1066,7 +1371,7 @@ pub fn build_plan(entry: &CatalogEntry, req: &PlanRequest, host: &HostFacts, obs
         execution_policy: entry.execution_policy.clone(),
         license_state: entry.license_state.clone(),
         revision: sanitize_claim(&entry.revision),
-        immutable_commit_pinned: pinned,
+        source_pin: source_pin.to_string(),
     };
     let target = PlanTarget {
         platform_target: req.platform_target.clone(),

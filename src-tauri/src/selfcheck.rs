@@ -93,6 +93,7 @@ fn plan_probe(conn: &rusqlite::Connection) -> crate::error::AppResult<serde_json
             agent_surface: surface.to_string(),
             scope: "user".to_string(),
             method_id: None,
+            project_alias: None,
         };
         plans.push(serde_json::to_value(crate::plan::plan_for(conn, &request, &host)?)?);
     }
