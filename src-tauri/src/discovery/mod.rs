@@ -5,6 +5,7 @@
 
 pub mod detect;
 pub mod fsx;
+pub mod privacy;
 pub mod store;
 pub mod types;
 
@@ -69,14 +70,23 @@ pub fn validate_project_dir(raw: &str) -> AppResult<PathBuf> {
             "Bir sürücünün veya dosya sisteminin kök klasörü seçilemez; belirli bir proje klasörü seçin.",
         ));
     }
-    match std::fs::symlink_metadata(path) {
-        Err(_) => Err(dir_error("PROJECT_DIR_NOT_FOUND", "Bu klasör bulunamadı veya erişilemiyor.")),
-        Ok(m) if fsx::is_link_like(&m) => Err(dir_error(
+    // The WHOLE chain from the volume root down to the folder is checked (not only the last component): a link,
+    // junction, `subst`/mapped drive or network file system anywhere above it is refused.
+    match fsx::walk(path, &[], fsx::FinalKind::Dir, false) {
+        fsx::Walk::Found { .. } => Ok(path.to_path_buf()),
+        fsx::Walk::NotFound => Err(dir_error("PROJECT_DIR_NOT_FOUND", "Bu klasör bulunamadı veya erişilemiyor.")),
+        fsx::Walk::Skipped(fsx::Skip::Link) => Err(dir_error(
             "PROJECT_DIR_LINK",
-            "Bu klasör bir sembolik bağlantı/junction; güvenlik için izlenmez. Gerçek klasörün yolunu yazın.",
+            "Bu klasör veya üst klasörlerinden biri sembolik bağlantı/junction ya da başka bir yere yönlendirilmiş; güvenlik için izlenmez. Gerçek klasörün yolunu yazın.",
         )),
-        Ok(m) if !m.is_dir() => Err(dir_error("PROJECT_DIR_NOT_A_DIRECTORY", "Bu yol bir klasör değil.")),
-        Ok(_) => Ok(path.to_path_buf()),
+        fsx::Walk::Skipped(fsx::Skip::Network) => {
+            Err(dir_error("PROJECT_DIR_NETWORK", "Ağ paylaşımları, uzak sürücüler ve aygıt yolları taranmaz; yerel bir klasör seçin."))
+        }
+        fsx::Walk::Skipped(fsx::Skip::AccessDenied) => {
+            Err(dir_error("PROJECT_DIR_UNREADABLE", "Bu klasöre veya üst klasörlerinden birine erişim izni yok."))
+        }
+        fsx::Walk::Skipped(fsx::Skip::NotRegularFile) => Err(dir_error("PROJECT_DIR_NOT_A_DIRECTORY", "Bu yol bir klasör değil.")),
+        fsx::Walk::Skipped(_) => Err(dir_error("PROJECT_DIR_INVALID", "Bu klasör güvenli biçimde doğrulanamadı; taranmadı.")),
     }
 }
 

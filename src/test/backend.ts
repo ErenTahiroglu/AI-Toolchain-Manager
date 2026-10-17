@@ -37,9 +37,11 @@ export const report = (overall: HealthReport["overall"]): HealthReport => ({
 export const obs = (over: Partial<StoredObservation> = {}): StoredObservation => ({
   id: 1, scanId: "s1", subject: "gitleaks", platformTarget: "windows-x64", agentSurface: "local-cli", method: "path-executable", presence: "present",
   configuration: "not_applicable", version: null, versionSource: null, scope: "global", projectAlias: null, confidence: "low",
-  evidence: "PATH klasörlerinden birinde 'gitleaks' adlı bir dosya bulundu. Bu yalnızca bir ad eşleşmesidir.", location: "~/bin/gitleaks.exe",
+  evidence: "PATH klasörlerinden birinde 'gitleaks' adlı bir dosya bulundu. Bu yalnızca bir ad eşleşmesidir.", location: "PATH girdisi #1 · başka bir klasör · gitleaks.exe",
   limitations: ["Ad eşleşmesi: aynı adlı başka bir program olabilir."], identityVerified: false, functionalityTested: false,
-  observedAt: new Date().toISOString(), stale: false, ageHours: 0, ...over,
+  observedAt: new Date().toISOString(), stale: false, ageHours: 0, legacy: false, scanFinishedAt: new Date().toISOString(),
+  scanAuthorizedPath: true, scanAuthorizedUserConfig: false, scanAuthorizedProject: false, provenance: "latest_scan", latestScanChecked: true,
+  current: true, notCurrentReason: null, ...over,
 });
 
 export const emptyInventory = (): Inventory => ({

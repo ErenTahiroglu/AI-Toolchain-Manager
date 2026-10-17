@@ -188,20 +188,35 @@ fn check_discovery(conn: &Connection) -> CheckResult {
     if scans == 0 {
         return check(ID, TITLE, "unknown", "Henüz bu bilgisayar taranmadı; hiçbir araç için gözlem yok.", None);
     }
-    // Stored text must already be redacted: running the redactor again must change nothing, and no
+    // Stored fields must already satisfy the privacy gate (closed grammars for location, version, version source and
+    // project alias; free text without absolute paths, server names or anything the redactor would change), and no
     // observation may claim a test (the SQL constraint says so too; this catches a bypassed database).
     let unsafe_rows = (|| -> rusqlite::Result<i64> {
-        let mut stmt =
-            conn.prepare("SELECT evidence, limitations_json, coalesce(version, ''), functionality_tested FROM discovery_observations")?;
+        use crate::discovery::privacy;
+        let mut stmt = conn.prepare(
+            "SELECT evidence, limitations_json, version, version_source, location, project_alias, functionality_tested FROM discovery_observations",
+        )?;
         let mut bad = 0;
-        for row in
-            stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?)))?
-        {
-            let (evidence, limitations, version, tested) = row?;
+        for row in stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<String>>(2)?,
+                r.get::<_, Option<String>>(3)?,
+                r.get::<_, Option<String>>(4)?,
+                r.get::<_, Option<String>>(5)?,
+                r.get::<_, i64>(6)?,
+            ))
+        })? {
+            let (evidence, limitations, version, source, location, alias, tested) = row?;
+            let limitation_list: Vec<String> = serde_json::from_str(&limitations).unwrap_or_else(|_| vec!["\u{1}".to_string()]); // an unreadable list counts as unsafe
             if tested != 0
-                || crate::redact::sanitize(&evidence, 4000) != evidence
-                || crate::redact::sanitize(&version, 200) != version
-                || crate::redact::sanitize(&limitations, 20000) != limitations
+                || !privacy::text_is_clean(&evidence)
+                || limitation_list.iter().any(|l| !privacy::text_is_clean(l))
+                || version.as_deref().map(|v| !privacy::is_documented_version(v)).unwrap_or(false)
+                || source.as_deref().map(|s| !privacy::VERSION_SOURCES.contains(&s)).unwrap_or(false)
+                || location.as_deref().map(|l| !privacy::is_safe_location(l)).unwrap_or(false)
+                || alias.as_deref().map(|a| !privacy::is_safe_project_alias(a)).unwrap_or(false)
             {
                 bad += 1;
             }

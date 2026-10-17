@@ -7,10 +7,21 @@ that file; without it these tests are reported as SKIPPED (never as passed). CI 
 import json
 import os
 import pathlib
+import re
 import unittest
 
 SELFCHECK = os.environ.get("ATM_SELFCHECK_JSON")
 FORBIDDEN_WORDS = ("install", "update", "approve", "verify", "rollback", "uninstall")
+
+# An absolute path in any common shape: drive letter, UNC share, or a well-known root such as /Users/.
+ABSOLUTE_PATH = re.compile(
+    r"(?i)(?:^|[\s(\[\"'=:,;])(?:[a-z]:[\\/]|\\\\[^\s\\]|//[^\s/]|/(?:users|home|var|tmp|etc|opt|usr|private|volumes|mnt|root|library|applications|system|windows|programdata)(?:/|$))"
+)
+# The closed grammar of `location` (documented in docs/PHASE-2A.md).
+LOCATION = re.compile(
+    r"^(?:~/[A-Za-z0-9._][A-Za-z0-9._/-]*|PATH girdisi #(?:[1-9]|[1-5][0-9]|6[0-4]) \u00b7 "
+    r"(?:kullan\u0131c\u0131 klas\u00f6r\u00fc alt\u0131nda|sistem veya paket y\u00f6neticisi klas\u00f6r\u00fc|ba\u015fka bir klas\u00f6r) \u00b7 [a-z0-9][a-z0-9._-]{0,40})$"
+)
 
 
 @unittest.skipUnless(SELFCHECK and pathlib.Path(SELFCHECK).is_file(), "ATM_SELFCHECK_JSON not provided; Rust self-check output not available")
@@ -31,7 +42,7 @@ class DiscoveryContract(unittest.TestCase):
     def test_scan_completed_twice_and_the_schema_version_includes_discovery(self):
         self.assertEqual(self.probe["scan"]["status"], "completed")
         self.assertNotEqual(self.probe["scan"]["scanId"], self.probe["secondScanId"])
-        self.assertGreaterEqual(self.data["dbVersion"], 4)
+        self.assertGreaterEqual(self.data["dbVersion"], 5)
 
     def test_nothing_in_the_scanned_tree_changed(self):
         self.assertTrue(self.probe["treeUnchanged"], "a read-only scan must leave sizes, contents and timestamps untouched")
@@ -82,6 +93,38 @@ class DiscoveryContract(unittest.TestCase):
                 self.assertEqual(o["versionSource"], "Claude Code kurulum kaydı", "only the plugin registry may supply a version")
             text = json.dumps(o, ensure_ascii=False)
             self.assertNotIn("discovery-probe/home", text.replace("\\", "/"), "the probe's home folder must be collapsed to ~")
+
+    def test_headless_observations_contain_no_absolute_path_and_only_grammar_conforming_locations(self):
+        for o in self.obs:
+            for field in ("evidence", "location", "versionSource", "projectAlias"):
+                value = o.get(field)
+                if value is not None:
+                    self.assertIsNone(ABSOLUTE_PATH.search(value), f"{o['subject']}.{field}: {value}")
+            for line in o["limitations"]:
+                self.assertIsNone(ABSOLUTE_PATH.search(line), line)
+            if o["location"] is not None:
+                self.assertRegex(o["location"], LOCATION)
+        self.assertIsNone(ABSOLUTE_PATH.search(json.dumps(self.probe, ensure_ascii=False)))
+        self.assertNotIn("discovery-probe", json.dumps(self.probe, ensure_ascii=False), "the probe folder name must not appear anywhere")
+
+    def test_a_path_hit_is_located_by_its_position_in_path_not_by_its_folder(self):
+        g = self.one("gitleaks", "path-executable", "global")
+        self.assertRegex(g["location"], r"^PATH girdisi #1 \u00b7 .+ \u00b7 gitleaks(\.exe)?$")
+
+    def test_mcp_evidence_counts_matches_and_never_names_a_server(self):
+        for scope in ("global", "project"):
+            m = self.one("codebase-memory-mcp", "claude-mcp-config", scope)
+            self.assertIn("1 MCP sunucu tan\u0131m\u0131 var", m["evidence"])
+            self.assertNotIn("(ad:", m["evidence"])
+            self.assertNotIn("codebase-memory", m["evidence"])
+
+    def test_every_observation_names_its_scan_and_is_current_after_a_fresh_scan(self):
+        for o in self.obs:
+            self.assertEqual(o["scanId"], self.probe["secondScanId"], "the shown row of every key comes from the latest scan")
+            self.assertEqual((o["provenance"], o["current"], o["legacy"]), ("latest_scan", True, False), o["subject"])
+            self.assertIsNone(o["notCurrentReason"])
+            self.assertTrue(o["scanAuthorizedPath"] and o["scanAuthorizedUserConfig"] and o["scanAuthorizedProject"])
+            self.assertIn("scanFinishedAt", o)
 
     def test_the_scan_is_audited_with_a_schema_valid_inspect_event_and_never_with_install_like_events(self):
         types = [e["eventType"] for e in self.data["auditEvents"]]

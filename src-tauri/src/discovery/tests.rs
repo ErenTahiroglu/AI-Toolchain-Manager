@@ -16,6 +16,13 @@ use std::{
 };
 use tempfile::TempDir;
 
+#[path = "tests_fs.rs"]
+mod fs_security;
+#[path = "tests_history.rs"]
+mod history;
+#[path = "tests_privacy.rs"]
+mod privacy_gate;
+
 /// A dummy token used to prove nothing from configuration files leaks. It is not a real credential.
 const SENTINEL: &str = "ghp_SENTINELSENTINELSENTINELSENTINEL12";
 const SENTINEL2: &str = "sk-SENTINEL-SECRET-VALUE-0123456789abcdef";
@@ -55,7 +62,7 @@ impl Env {
     }
 
     fn roots(&self) -> Roots {
-        Roots { platform: platform().to_string(), home: Some(self.home.clone()), path_entries: vec![self.bin.clone()] }
+        Roots { platform: platform().to_string(), home: Some(self.home.clone()), path_entries: vec![self.bin.clone()], system_dirs: vec![] }
     }
 
     fn write(&self, rel_from_root: &str, content: &str) -> PathBuf {
@@ -442,7 +449,8 @@ fn mcp_references_are_reported_as_configured_but_never_as_installed_or_working()
     let obs = detect::detect_all(&env.roots(), &all_auth(None));
     let m = find(&obs, "codebase-memory-mcp", Scope::Global, Method::ClaudeMcpConfig);
     assert_eq!((m.presence, m.configuration), (Presence::Unknown, Configuration::Configured));
-    assert!(m.evidence.contains("memory") && m.evidence.contains("çalıştırılmadı"));
+    assert!(m.evidence.contains("1 MCP sunucu tanımı") && m.evidence.contains("çalıştırılmadı"));
+    assert!(!m.evidence.contains("memory") && !m.evidence.contains("(ad:"), "server names are never kept: {}", m.evidence);
     assert!(m.limitations.iter().any(|l| l.contains("kurulu olduğunu göstermez")));
     assert!(!m.identity_verified);
     let json = json_of(&obs);
@@ -603,7 +611,7 @@ fn a_junction_in_place_of_the_claude_folder_is_not_followed() {
     let obs = detect::detect_all(&env.roots(), &all_auth(None));
     let s = find(&obs, "agent:claude-code", Scope::Global, Method::ClaudeSettingsFile);
     assert_eq!(s.configuration, Configuration::Unknown);
-    assert!(s.evidence.contains("sembolik bağlantı veya junction"), "{}", s.evidence);
+    assert!(s.evidence.contains("sembolik bağlantı/junction"), "{}", s.evidence);
     assert!(!json_of(&obs).contains("SENTINEL"));
     assert_eq!(plugin(&obs, FD, Scope::Global).configuration, Configuration::Unknown);
     remove_junction(&env.home.join(".claude"));
@@ -647,7 +655,7 @@ mod unix_links {
         let obs = detect::detect_all(&env.roots(), &all_auth(None));
         let s = find(&obs, "agent:claude-code", Scope::Global, Method::ClaudeSettingsFile);
         assert_eq!(s.configuration, Configuration::Unknown);
-        assert!(s.evidence.contains("sembolik bağlantı veya junction"));
+        assert!(s.evidence.contains("sembolik bağlantı/junction"));
         assert!(!json_of(&obs).contains("SENTINEL"));
         // A symlinked ~/.claude directory as well.
         let env2 = Env::new();
@@ -810,7 +818,12 @@ fn a_full_scan_changes_nothing_in_the_scanned_tree_not_even_timestamps() {
 
 #[test]
 fn the_discovery_code_contains_no_way_to_write_execute_or_use_the_network() {
-    let sources = [("fsx.rs", include_str!("fsx.rs")), ("detect.rs", include_str!("detect.rs")), ("types.rs", include_str!("types.rs"))];
+    let sources = [
+        ("fsx.rs", include_str!("fsx.rs")),
+        ("detect.rs", include_str!("detect.rs")),
+        ("types.rs", include_str!("types.rs")),
+        ("privacy.rs", include_str!("privacy.rs")),
+    ];
     let forbidden = [
         "Command::new",
         "std::process",
@@ -827,7 +840,30 @@ fn the_discovery_code_contains_no_way_to_write_execute_or_use_the_network() {
         "remove_dir",
         "fs::rename",
         "fs::copy",
-        "OpenOptions",
+        // fsx opens files read-only through `OpenOptions`/`openat`; every way to ask for write access is banned instead.
+        ".write(true",
+        ".append(true",
+        ".create(true",
+        ".create_new(true",
+        ".truncate(true",
+        "O_WRONLY",
+        "O_RDWR",
+        "O_CREAT",
+        "O_TRUNC",
+        "O_APPEND",
+        "libc::unlink",
+        "libc::rename",
+        "libc::mkdir",
+        "libc::chmod",
+        "libc::write",
+        "libc::symlink",
+        "libc::link(",
+        "libc::exec",
+        "libc::system",
+        "libc::fork",
+        "libc::socket",
+        "libc::connect",
+        "libc::kill",
         "set_permissions",
         "set_modified",
         "hard_link",
@@ -838,13 +874,19 @@ fn the_discovery_code_contains_no_way_to_write_execute_or_use_the_network() {
         "env::set_var",
     ];
     for (name, text) in sources {
-        // Only production code counts: strip everything from the unit-test module on.
-        let production = text.split("#[cfg(test)]").next().unwrap();
+        // Only production code counts: strip everything from the unit-test module on. (A test-only helper module
+        // that sits earlier in a file is tiny and holds no file-system calls, so it does not weaken the scan.)
+        let production = text.split("mod unit {").next().unwrap();
+        assert!(production.len() > 500, "{name}: the scan must really look at the production code");
         for word in forbidden {
             assert!(!production.contains(word), "{name} contains forbidden capability `{word}`");
         }
     }
     let cargo = include_str!("../../Cargo.toml");
+    // The Windows API surface is limited to file-system queries: no process, threading, networking or registry features.
+    for feature in ["Win32_System", "Win32_Networking", "Win32_Security", "Win32_UI", "Win32_NetworkManagement"] {
+        assert!(!cargo.contains(feature), "windows-sys feature `{feature}` must not be enabled in Phase 2A");
+    }
     for http in ["reqwest", "ureq", "hyper", "isahc", "surf", "attohttpc", "curl"] {
         assert!(!cargo.contains(http), "an HTTP client crate `{http}` must not be a dependency in Phase 2A");
     }
@@ -1050,17 +1092,17 @@ fn a_users_request_is_compared_with_the_observation_without_confusing_them() {
     let env = Env::new();
     let conn = seeded();
     projects::add_reference(&conn, "proje", "Proje", "").unwrap();
-    projects::set_preference(&conn, "proje", FD, "claude-code-terminal", PLATFORM_WINDOWS, "accepted", None).unwrap();
-    projects::set_preference(&conn, "proje", "agent-browser", "local-cli", PLATFORM_WINDOWS, "accepted", None).unwrap();
+    projects::set_preference(&conn, "proje", FD, "claude-code-terminal", platform(), "accepted", None).unwrap();
+    projects::set_preference(&conn, "proje", "agent-browser", "local-cli", platform(), "accepted", None).unwrap();
     let inv = store::inventory(&conn).unwrap();
-    assert!(inv.requests.iter().all(|r| r.observed == "not_scanned"), "before any scan nothing is claimed");
+    assert!(inv.requests.iter().all(|r| r.status == "not_scanned"), "before any scan nothing is claimed");
     env.fake_exe("agent-browser"); // only a name match
     super::run_scan(&conn, &env.roots(), &all_auth(None)).unwrap();
     let inv = store::inventory(&conn).unwrap();
     let by = |id: &str| inv.requests.iter().find(|r| r.entry_id == id).unwrap().clone();
-    assert_eq!(by("agent-browser").observed, "present");
+    assert_eq!(by("agent-browser").status, "present_current");
     assert!(by("agent-browser").note.contains("çalıştığı veya projede etkin olduğu anlamına gelmez"));
-    assert_eq!(by(FD).observed, "absent");
+    assert_eq!(by(FD).status, "absent_current");
     assert!(by(FD).note.contains("bulunamadı"));
 }
 

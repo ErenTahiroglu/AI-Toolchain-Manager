@@ -124,7 +124,7 @@ describe("computer inventory (read-only discovery)", () => {
   });
 
   it("marks old observations as stale and offers a refresh", async () => {
-    scanned([obs({ stale: true, ageHours: 49, observedAt: new Date(Date.now() - 49 * 3600_000).toISOString() })]);
+    scanned([obs({ stale: true, current: false, notCurrentReason: "Son tarama 24 saatten eski; yeniden tarayın.", provenance: "latest_scan", ageHours: 49, observedAt: new Date(Date.now() - 49 * 3600_000).toISOString() })]);
     await open();
     expect(await screen.findByText(/Bazı gözlemler 24 saatten eski/)).toBeInTheDocument();
     expect(screen.getByText(/Eski \(49 saat\)/)).toBeInTheDocument();
@@ -139,15 +139,74 @@ describe("computer inventory (read-only discovery)", () => {
     expect(within(section).getByText(/okunmadı \(yetki verilmedi\)/)).toBeInTheDocument();
   });
 
-  it("keeps the user's request and the observation apart", async () => {
+  it("keeps the user's request and the observation apart, one row per project, surface and platform", async () => {
     scanned();
     backend.inventory.requests = [
-      { entryId: "anthropic-frontend-design", entryName: "Anthropic Frontend Design", acceptedProjects: 2, observed: "absent", note: "Etkinleştirmek istediniz, ancak bu bilgisayarda bulunamadı." },
+      {
+        entryId: "anthropic-frontend-design", entryName: "Anthropic Frontend Design", projectAlias: "web", projectName: "Web sitesi",
+        agentSurface: "claude-code-terminal", platformTarget: "windows-x64", status: "absent_current",
+        note: "Etkinleştirmek istediniz, ancak son taramada bu bilgisayarda bulunamadı.",
+        basis: { scanId: "abcdef0123456789", finishedAt: new Date().toISOString(), authorizedPath: true, authorizedUserConfig: true, authorizedProject: false },
+      },
+      {
+        entryId: "gitleaks", entryName: "Gitleaks", projectAlias: "web", projectName: "Web sitesi", agentSurface: "local-cli", platformTarget: "macos-arm64",
+        status: "platform_mismatch", note: "Yalnızca başka bir işletim sistemi/mimari için gözlem var.", basis: null,
+      },
     ];
     await open();
-    const item = (await screen.findByText(/2 proje için etkinleştirmek istediniz/)).closest("li")!;
-    expect(item).toHaveTextContent("Bulunamadı");
+    const item = (await screen.findByText(/Anthropic Frontend Design/, { selector: "strong" })).closest("li")!;
+    expect(item).toHaveTextContent("Web sitesi");
+    expect(item).toHaveTextContent("Claude Code (terminal)");
+    expect(item).toHaveTextContent("Son taramada bulunamadı");
+    expect(item).toHaveTextContent("Tarama abcdef01");
+    expect(item).toHaveTextContent("program adları (PATH) + Claude Code kullanıcı dosyaları");
+    const other = screen.getByText(/Gitleaks/, { selector: "strong" }).closest("li")!;
+    expect(other).toHaveTextContent("Başka bir işletim sistemi için gözlem var");
     expect(screen.getByText(/aracın kurulu olduğu anlamına gelmez/)).toBeInTheDocument();
+  });
+
+  it("never presents an earlier result as a current answer for a request", async () => {
+    scanned();
+    backend.inventory.requests = [
+      {
+        entryId: "gitleaks", entryName: "Gitleaks", projectAlias: "web", projectName: "Web sitesi", agentSurface: "local-cli", platformTarget: "windows-x64",
+        status: "previously_present", note: "Eski sonuç (Son taramada bu bölüm denetlenmedi (yetki verilmedi)). Yeniden tarayın; eski bir sonuç hiçbir işlem için dayanak sayılmaz.",
+        basis: { scanId: "11111111-aaaa", finishedAt: "2026-10-16T09:00:00Z", authorizedPath: true, authorizedUserConfig: false, authorizedProject: false },
+      },
+    ];
+    await open();
+    const item = (await screen.findByText(/Eski taramada bulunmuştu \(güncel değil\)/)).closest("li")!;
+    expect(item).toHaveTextContent("dayanak sayılmaz");
+    expect(item).not.toHaveTextContent("Son taramada bulundu");
+  });
+
+  it("shows current and earlier observations in separate sections, with the scan and permissions of each", async () => {
+    scanned([
+      obs({ id: 1, subject: "strix", scanId: "cccccccc-1", scanAuthorizedPath: true, scanAuthorizedUserConfig: true }),
+      obs({
+        id: 2, subject: "gitleaks", scanId: "bbbbbbbb-2", provenance: "earlier_scan", current: false, latestScanChecked: false,
+        notCurrentReason: "Son taramada bu bölüm denetlenmedi (yetki verilmedi); bu, eski bir taramanın sonucudur.",
+        scanAuthorizedPath: true, scanAuthorizedUserConfig: false, scanAuthorizedProject: false,
+      }),
+    ]);
+    await open();
+    const current = (await screen.findByRole("heading", { name: /Güncel gözlemler/ })).closest("section")!;
+    const earlier = screen.getByRole("heading", { name: /Önceki taramalardan — güncel değil/ }).closest("section")!;
+    expect(within(current).getByRole("heading", { name: "strix" })).toBeInTheDocument();
+    expect(within(current).queryByRole("heading", { name: "gitleaks" })).not.toBeInTheDocument();
+    expect(within(earlier).getByRole("heading", { name: "gitleaks" })).toBeInTheDocument();
+    expect(within(earlier).queryByRole("heading", { name: "strix" })).not.toBeInTheDocument();
+    expect(within(earlier).getByText(/yetki verilmedi\); bu, eski bir taramanın sonucudur/)).toBeInTheDocument();
+    expect(within(earlier).getByText(/Tarama bbbbbbbb/)).toHaveTextContent("izinler: program adları (PATH)");
+    expect(within(earlier).getByText(/hiçbir işlem için dayanak sayılmaz/)).toBeInTheDocument();
+  });
+
+  it("labels records that were scrubbed by the privacy migration and shows only grammar-shaped locations", async () => {
+    scanned([obs({ legacy: true, location: "eski kayıt: konum gizlilik nedeniyle kaldırıldı" })]);
+    await open();
+    expect(await screen.findByText(/Eski kayıt biçimi — gizlilik için konum\/ad bilgisi temizlendi/)).toBeInTheDocument();
+    expect(screen.getByText(/Yer: eski kayıt: konum gizlilik nedeniyle kaldırıldı/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/[A-Za-z]:\\Users|\/Users\//);
   });
 
   it("shows a refused scan as an error with its code and records nothing", async () => {

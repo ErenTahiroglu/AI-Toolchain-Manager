@@ -2,9 +2,26 @@ import { useMemo, useState } from "react";
 import { api, toAppError } from "../api";
 import { ErrorNotice, useLoad } from "../components/common";
 import {
-  configurationLabel, confidenceLabel, formatTime, methodLabel, obsScopeLabel, observedLabel, platformLabel, presenceLabel, subjectLabel,
+  configurationLabel, confidenceLabel, formatTime, methodLabel, obsScopeLabel, observedLabel, platformLabel, presenceLabel, subjectLabel, surfaceLabel,
 } from "../labels";
-import type { AppError, StoredObservation } from "../types";
+import type { AppError, ScanRef, StoredObservation } from "../types";
+
+const permissionText = (p: { authorizedPath: boolean; authorizedUserConfig: boolean; authorizedProject: boolean }) => {
+  const parts = [
+    p.authorizedPath ? "program adları (PATH)" : null,
+    p.authorizedUserConfig ? "Claude Code kullanıcı dosyaları" : null,
+    p.authorizedProject ? "bir proje klasörü" : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(" + ") : "hiçbir bölüm";
+};
+
+function ScanProvenance({ scan }: { scan: ScanRef }) {
+  return (
+    <div className="small muted">
+      Tarama {scan.scanId.slice(0, 8)} · {formatTime(scan.finishedAt)} · izinler: {permissionText(scan)}
+    </div>
+  );
+}
 
 function PresenceBadge({ presence }: { presence: string }) {
   // Deliberately neutral: finding a file is evidence of presence, never a green "all good".
@@ -38,9 +55,34 @@ function ObservationRow({ o }: { o: StoredObservation }) {
       </td>
       <td className="small">
         {formatTime(o.observedAt)}
+        <ScanProvenance scan={{ scanId: o.scanId, finishedAt: o.scanFinishedAt, authorizedPath: o.scanAuthorizedPath, authorizedUserConfig: o.scanAuthorizedUserConfig, authorizedProject: o.scanAuthorizedProject }} />
         {o.stale && <div><span className="badge badge-unknown">Eski ({o.ageHours} saat)</span></div>}
+        {!o.current && o.notCurrentReason && <div className="muted">{o.notCurrentReason}</div>}
+        {o.legacy && <div><span className="badge badge-skipped">Eski kayıt biçimi — gizlilik için konum/ad bilgisi temizlendi</span></div>}
       </td>
     </tr>
+  );
+}
+
+function ObservationTable({ subject, rows, names, earlier = false }: { subject: string; rows: StoredObservation[]; names: Record<string, string>; earlier?: boolean }) {
+  const title = subjectLabel(subject, names);
+  const id = `inv-${earlier ? "old-" : ""}${subject}`;
+  return (
+    <section className="panel" aria-labelledby={id}>
+      <h3 id={id}>{title}</h3>
+      <div className="table-wrap">
+        <table>
+          <caption className="sr-only">{title} için {earlier ? "önceki taramalardan gözlemler" : "gözlemler"}</caption>
+          <thead>
+            <tr>
+              <th scope="col">Kapsam / yöntem</th><th scope="col">Bulundu mu?</th><th scope="col">Yapılandırıldı mı?</th><th scope="col">Sürüm</th>
+              <th scope="col">İşlev doğrulandı mı?</th><th scope="col">Neden böyle düşünüldü</th><th scope="col">Gözlem zamanı ve kaynağı</th>
+            </tr>
+          </thead>
+          <tbody>{rows.map((o) => <ObservationRow key={o.id} o={o} />)}</tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -78,11 +120,13 @@ export function InventoryPage() {
   };
 
   const data = inventory.data;
-  const bySubject = useMemo(() => {
+  const group = (list: StoredObservation[]) => {
     const groups = new Map<string, StoredObservation[]>();
-    for (const o of data?.observations ?? []) groups.set(o.subject, [...(groups.get(o.subject) ?? []), o]);
+    for (const o of list) groups.set(o.subject, [...(groups.get(o.subject) ?? []), o]);
     return [...groups.entries()];
-  }, [data]);
+  };
+  const currentBySubject = useMemo(() => group((data?.observations ?? []).filter((o) => o.current)), [data]);
+  const earlierBySubject = useMemo(() => group((data?.observations ?? []).filter((o) => !o.current)), [data]);
   const anyStale = (data?.observations ?? []).some((o) => o.stale);
 
   return (
@@ -157,32 +201,35 @@ export function InventoryPage() {
         )}
       </section>
 
-      {bySubject.map(([subject, rows]) => (
-        <section key={subject} className="panel" aria-labelledby={`inv-${subject}`}>
-          <h2 id={`inv-${subject}`}>{subjectLabel(subject, names)}</h2>
-          <div className="table-wrap">
-            <table>
-              <caption className="sr-only">{subjectLabel(subject, names)} için gözlemler</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Kapsam / yöntem</th><th scope="col">Bulundu mu?</th><th scope="col">Yapılandırıldı mı?</th><th scope="col">Sürüm</th>
-                  <th scope="col">İşlev doğrulandı mı?</th><th scope="col">Neden böyle düşünüldü</th><th scope="col">Gözlem zamanı</th>
-                </tr>
-              </thead>
-              <tbody>{rows.map((o) => <ObservationRow key={o.id} o={o} />)}</tbody>
-            </table>
-          </div>
+      {currentBySubject.length > 0 && (
+        <section aria-labelledby="h-current">
+          <h2 id="h-current">Güncel gözlemler (son taramadan)</h2>
+          <p className="muted small">Yalnızca son taramada, yetki verilen bölümlerde ve {data?.staleAfterHours} saat içinde görülenler burada gösterilir.</p>
+          {currentBySubject.map(([subject, rows]) => <ObservationTable key={subject} subject={subject} rows={rows} names={names} />)}
         </section>
-      ))}
+      )}
+
+      {earlierBySubject.length > 0 && (
+        <section aria-labelledby="h-earlier" className="panel">
+          <h2 id="h-earlier">Önceki taramalardan — güncel değil</h2>
+          <p role="note" className="small">
+            Bunlar eski sonuçlardır: son taramada bu bölüme bakılmadı, gözlem üretilmedi, tarama {data?.staleAfterHours} saatten eskidir ya da başka bir işletim sistemine aittir.
+            Geçmiş olarak saklanır; bugünkü durumu göstermez ve hiçbir işlem için dayanak sayılmaz.
+          </p>
+          {earlierBySubject.map(([subject, rows]) => <ObservationTable key={subject} subject={subject} rows={rows} names={names} earlier />)}
+        </section>
+      )}
 
       {(data?.requests.length ?? 0) > 0 && (
         <section aria-labelledby="h-req">
           <h2 id="h-req">İsteğiniz ile gözlem</h2>
-          <p className="muted small">“Etkinleştirmek istiyorum” demeniz aracın kurulu olduğu anlamına gelmez; ikisi ayrı tutulur.</p>
+          <p className="muted small">“Etkinleştirmek istiyorum” demeniz aracın kurulu olduğu anlamına gelmez; ikisi ayrı tutulur. Her satır tek bir tercih içindir: araç, proje, ajan yüzeyi ve platform.</p>
           <ul>
             {data!.requests.map((r) => (
-              <li key={r.entryId}>
-                <strong>{r.entryName}</strong>: {r.acceptedProjects} proje için etkinleştirmek istediniz · Gözlem: <strong>{observedLabel(r.observed)}</strong>. <span className="muted">{r.note}</span>
+              <li key={`${r.entryId}/${r.projectAlias}/${r.agentSurface}/${r.platformTarget}`}>
+                <strong>{r.entryName}</strong> · {r.projectName} · {surfaceLabel(r.agentSurface)} · {platformLabel(r.platformTarget)}: Gözlem: <strong>{observedLabel(r.status)}</strong>.{" "}
+                <span className="muted">{r.note}</span>
+                {r.basis && <ScanProvenance scan={r.basis} />}
               </li>
             ))}
           </ul>

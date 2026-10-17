@@ -279,14 +279,43 @@ export interface StoredObservation {
   observedAt: string;
   stale: boolean;
   ageHours: number;
+  /** Written before the privacy gate existed; scrubbed in place by migration 5. */
+  legacy: boolean;
+  scanFinishedAt: string;
+  scanAuthorizedPath: boolean;
+  scanAuthorizedUserConfig: boolean;
+  scanAuthorizedProject: boolean;
+  provenance: "latest_scan" | "earlier_scan";
+  /** Did the latest scan look at the area this observation belongs to? */
+  latestScanChecked: boolean;
+  /** From the latest scan, fresh, and for this computer's platform. Only a current observation describes today. */
+  current: boolean;
+  notCurrentReason: string | null;
 }
+
+export interface ScanRef {
+  scanId: string;
+  finishedAt: string;
+  authorizedPath: boolean;
+  authorizedUserConfig: boolean;
+  authorizedProject: boolean;
+}
+
+export type RequestStatus =
+  | "present_current" | "absent_current" | "unknown_current"
+  | "previously_present" | "previously_absent" | "previously_unknown"
+  | "platform_mismatch" | "not_scanned";
 
 export interface RequestVsObservation {
   entryId: string;
   entryName: string;
-  acceptedProjects: number;
-  observed: "present" | "absent" | "unknown" | "not_scanned";
+  projectAlias: string;
+  projectName: string;
+  agentSurface: string;
+  platformTarget: string;
+  status: RequestStatus;
   note: string;
+  basis: ScanRef | null;
 }
 
 export interface Inventory {

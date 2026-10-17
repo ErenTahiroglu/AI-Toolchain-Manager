@@ -217,22 +217,14 @@ impl Observation {
     }
 
     /// Every observation passes through here before it is stored or shown: text is redacted, control
-    /// characters removed and lengths capped, whatever a detector produced.
+    /// characters removed, lengths capped, and the privacy gate (`privacy.rs`) replaces any field that does not
+    /// match its closed grammar — whatever a detector produced.
     pub fn finalize(mut self) -> Self {
         self.evidence = redact::sanitize(&self.evidence, 400);
         self.limitations = self.limitations.iter().map(|l| redact::sanitize(l, 240)).filter(|l| !l.is_empty()).collect();
         self.location = self.location.map(|l| l.chars().filter(|c| !c.is_control()).take(300).collect());
-        // A version must look like one AND survive redaction unchanged (a token-shaped "version" is dropped).
-        self.version = self.version.filter(|v| is_plain_version(v) && redact::sanitize(v, 64) == *v);
-        if self.version.is_none() {
-            self.version_source = None;
-        }
+        super::privacy::scrub(&mut self);
         self.functionality_tested = false;
         self
     }
-}
-
-/// Versions are shown only if they look like versions; arbitrary text from a config file is dropped.
-pub fn is_plain_version(v: &str) -> bool {
-    (1..=64).contains(&v.len()) && v.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'+' | b'_'))
 }

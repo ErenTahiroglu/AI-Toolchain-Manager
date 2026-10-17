@@ -132,7 +132,16 @@ const METHOD: Record<string, string> = {
 };
 export const methodLabel = (s: string) => METHOD[s] ?? s;
 
-const OBSERVED: Record<string, string> = { present: "Bulundu", absent: "Bulunamadı", unknown: "Belirlenemedi", not_scanned: "Henüz taranmadı" };
+const OBSERVED: Record<string, string> = {
+  present_current: "Son taramada bulundu",
+  absent_current: "Son taramada bulunamadı",
+  unknown_current: "Son taramada belirlenemedi",
+  previously_present: "Eski taramada bulunmuştu (güncel değil)",
+  previously_absent: "Eski taramada bulunamamıştı (güncel değil)",
+  previously_unknown: "Eski taramada belirlenememişti (güncel değil)",
+  platform_mismatch: "Başka bir işletim sistemi için gözlem var (bu tercih için geçerli değil)",
+  not_scanned: "Henüz taranmadı",
+};
 export const observedLabel = (s: string) => OBSERVED[s] ?? s;
 
 export const subjectLabel = (subject: string, names: Record<string, string>) =>

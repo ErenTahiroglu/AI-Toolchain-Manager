@@ -72,6 +72,9 @@ fn tree_fingerprint(root: &Path) -> AppResult<String> {
 }
 
 pub fn synthetic_probe(conn: &Connection, dir: &Path) -> AppResult<Value> {
+    // Resolve the (trusted, app-owned) data folder once, so that platform aliases such as macOS `/var` -> `/private/var`
+    // or Windows 8.3 names do not look like a redirection inside the synthetic tree.
+    let dir = dir.canonicalize().map_err(io)?;
     let base = dir.join("discovery-probe");
     let _ = fs::remove_dir_all(&base);
     let home = base.join("home");
@@ -104,6 +107,7 @@ pub fn synthetic_probe(conn: &Connection, dir: &Path) -> AppResult<Value> {
         platform: if cfg!(windows) { PLATFORM_WINDOWS } else { PLATFORM_MACOS }.to_string(),
         home: Some(home.clone()),
         path_entries: vec![bin.clone()],
+        system_dirs: vec![],
     };
     let auth = Authorization {
         path_executables: true,

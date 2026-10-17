@@ -7,6 +7,7 @@
 
 use super::{
     fsx::{self, FinalKind, ReadOutcome, Skip, Walk, MAX_CONFIG_BYTES, MAX_SMALL_BYTES},
+    privacy,
     types::*,
 };
 use serde_json::Value;
@@ -62,6 +63,9 @@ pub struct Roots {
     pub platform: String,
     pub home: Option<PathBuf>,
     pub path_entries: Vec<PathBuf>,
+    /// Folders owned by the operating system or a package manager. Used only to *classify* a PATH folder in a
+    /// location label ("system or package manager folder"); the folder's own path is never shown.
+    pub system_dirs: Vec<PathBuf>,
 }
 
 impl Roots {
@@ -74,7 +78,37 @@ impl Roots {
         let home_var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
         let home = std::env::var_os(home_var).map(PathBuf::from).filter(|p| p.is_absolute());
         let path_entries = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
-        Roots { platform: platform.to_string(), home, path_entries }
+        let system_dirs = if cfg!(windows) {
+            ["SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"]
+                .iter()
+                .filter_map(std::env::var_os)
+                .map(PathBuf::from)
+                .collect()
+        } else {
+            ["/usr", "/bin", "/sbin", "/opt", "/System", "/Library", "/Applications"].iter().map(PathBuf::from).collect()
+        };
+        Roots { platform: platform.to_string(), home, path_entries, system_dirs }
+    }
+
+    /// A label for a PATH folder that carries no private folder name: its position in PATH and a coarse category.
+    fn path_label(&self, index: usize, dir: &Path, file: &str) -> String {
+        // Windows paths are case-insensitive; compare folded text so `c:\users\x` and `C:\Users\X` are one place.
+        let fold = |p: &Path| if self.is_windows() { PathBuf::from(p.to_string_lossy().to_lowercase()) } else { p.to_path_buf() };
+        let dir = fold(dir);
+        let under = |base: &Path| dir.starts_with(fold(base));
+        let category = if self.home.as_deref().map(under).unwrap_or(false) {
+            "kullanıcı klasörü altında"
+        } else if self.system_dirs.iter().any(|d| under(d)) {
+            "sistem veya paket yöneticisi klasörü"
+        } else {
+            "başka bir klasör"
+        };
+        format!("PATH girdisi #{} · {} · {}", index + 1, category, file.to_ascii_lowercase())
+    }
+
+    /// `~/<fixed documented components>` — only ever built from constants, never from a directory listing.
+    fn home_label(rel: &[&str]) -> String {
+        format!("~/{}", rel.join("/"))
     }
 
     fn is_windows(&self) -> bool {
@@ -130,6 +164,8 @@ fn doc_note(doc: &Doc) -> Option<String> {
 // ---------------------------------------------------------------------------------------------
 
 struct Hit {
+    /// 1-based position of the folder in PATH is `index + 1`.
+    index: usize,
     dir: PathBuf,
     file: String,
     link: bool,
@@ -153,7 +189,7 @@ fn candidates(base: &str, roots: &Roots) -> Vec<String> {
 /// skips network and relative entries, and never follows links out of a folder.
 fn scan_path(roots: &Roots, bases: &[&str]) -> PathScan {
     let mut scan = PathScan { usable: 0, skipped: 0, hits: BTreeMap::new() };
-    for dir in roots.path_entries.iter().take(MAX_PATH_ENTRIES) {
+    for (index, dir) in roots.path_entries.iter().take(MAX_PATH_ENTRIES).enumerate() {
         if dir.as_os_str().is_empty() || !dir.is_absolute() || fsx::is_network_or_device_path(dir) {
             scan.skipped += 1;
             continue;
@@ -173,7 +209,7 @@ fn scan_path(roots: &Roots, bases: &[&str]) -> PathScan {
             }
             for candidate in candidates(base, roots) {
                 if let Walk::Found { is_link, .. } = fsx::walk(dir, &[candidate.as_str()], FinalKind::File, true) {
-                    list.push(Hit { dir: dir.clone(), file: candidate, link: is_link });
+                    list.push(Hit { index, dir: dir.clone(), file: candidate, link: is_link });
                     break;
                 }
             }
@@ -194,7 +230,7 @@ fn path_observation(subject: &str, surface: &str, base: &str, roots: &Roots, sca
                 .presence(Presence::Present)
                 .configuration(Configuration::NotApplicable)
                 .confidence(Confidence::Low)
-                .location(Some(fsx::collapse_home(&first.dir.join(&first.file), roots.home.as_deref())))
+                .location(Some(roots.path_label(first.index, &first.dir, &first.file)))
                 .evidence(format!(
                     "PATH klasörlerinden birinde '{base}' adlı bir dosya bulundu. Bu yalnızca bir ad eşleşmesidir; dosyanın gerçekten bu araç olduğu doğrulanmadı."
                 ))
@@ -235,14 +271,14 @@ fn claude_install_observations(roots: &Roots, scan: &PathScan) -> Vec<Observatio
     if let Some(home) = &roots.home {
         // Documented native-installer location: ~/.local/bin/claude (macOS: a symlink by design) or
         // %USERPROFILE%\.local\bin\claude.exe (Windows).
-        if let Walk::Found { path, is_link } = fsx::walk(home, &[".local", "bin", exe], FinalKind::File, true) {
+        if let Walk::Found { is_link, .. } = fsx::walk(home, &[".local", "bin", exe], FinalKind::File, true) {
             found_any = true;
             let mut o = Observation::new(AGENT_CLAUDE, &roots.platform, SURFACE_CLAUDE, Method::NativeInstallLocation)
                 .presence(Presence::Present)
                 .configuration(Configuration::NotApplicable)
                 .scope(Scope::Global)
                 .confidence(Confidence::Medium)
-                .location(Some(fsx::collapse_home(&path, Some(home))))
+                .location(Some(Roots::home_label(&[".local", "bin", exe])))
                 .evidence("Claude Code'un belgelenmiş yerel kurulum konumunda 'claude' dosyası bulundu. Program çalıştırılmadı.")
                 .limit(NO_VERSION_NOTE)
                 .limit("Dosyanın varlığı çalıştığını göstermez.");
@@ -253,7 +289,7 @@ fn claude_install_observations(roots: &Roots, scan: &PathScan) -> Vec<Observatio
         }
         // Legacy local npm install created by older versions: ~/.claude/local/claude
         for candidate in candidates("claude", roots) {
-            if let Walk::Found { path, .. } = fsx::walk(home, &[".claude", "local", candidate.as_str()], FinalKind::File, true) {
+            if let Walk::Found { .. } = fsx::walk(home, &[".claude", "local", candidate.as_str()], FinalKind::File, true) {
                 found_any = true;
                 out.push(
                     Observation::new(AGENT_CLAUDE, &roots.platform, SURFACE_CLAUDE, Method::LegacyLocalInstall)
@@ -261,7 +297,7 @@ fn claude_install_observations(roots: &Roots, scan: &PathScan) -> Vec<Observatio
                         .configuration(Configuration::NotApplicable)
                         .scope(Scope::Global)
                         .confidence(Confidence::Low)
-                        .location(Some(fsx::collapse_home(&path, Some(home))))
+                        .location(Some(Roots::home_label(&[".claude", "local", candidate.as_str()])))
                         .evidence("Eski sürümlerin oluşturduğu yerel kurulum konumunda 'claude' dosyası bulundu. Program çalıştırılmadı.")
                         .limit(NO_VERSION_NOTE),
                 );
@@ -319,6 +355,9 @@ struct Record {
     name: String,
     market: String,
     scope: Scope,
+    /// Used only to look up the cache folder; it must be a safe path component and is never displayed.
+    cache_version: Option<String>,
+    /// Shown to the user only when it has a documented release/commit form.
     version: Option<String>,
 }
 
@@ -358,11 +397,14 @@ fn parse_registry(doc: Doc) -> Registry {
                     _ => continue,
                 };
                 for r in list {
-                    let version = r.get("version").and_then(Value::as_str).map(str::to_string).filter(|v| is_plain_version(v));
+                    let raw = r.get("version").and_then(Value::as_str);
+                    let cache_version = raw.filter(|v| safe_component(v)).map(str::to_string);
+                    let version = raw.filter(|v| privacy::is_documented_version(v)).map(str::to_string);
                     records.push(Record {
                         name: name.to_string(),
                         market: market.to_string(),
                         scope: scope_of(r.get("scope").and_then(Value::as_str)),
+                        cache_version,
                         version,
                     });
                 }
@@ -403,10 +445,10 @@ fn fetch_state(registry: &Registry, plugins_root: Option<&Path>, t: &Tracked, on
         return Fetch::NoRecord;
     }
     for r in &matching {
-        if let (Some(root), Some(version)) = (plugins_root, r.version.as_deref()) {
-            if safe_component(&r.market) && safe_component(&r.name) && safe_component(version) {
+        if let (Some(root), Some(version)) = (plugins_root, r.cache_version.as_deref()) {
+            if safe_component(&r.market) && safe_component(&r.name) {
                 if let Walk::Found { .. } = fsx::dir_exists(root, &["cache", &r.market, &r.name, version]) {
-                    return Fetch::Fetched(Some(version.to_string()));
+                    return Fetch::Fetched(r.version.clone());
                 }
             }
         }
@@ -529,13 +571,14 @@ fn basename_without_ext(command: &str) -> String {
 
 /// Matches a configured MCP server to the catalogued one by server name or by the command's file name.
 /// Arguments, environment and URLs are never read.
-fn mcp_matches(servers: &Value) -> (Vec<String>, usize) {
-    let Some(map) = servers.as_object() else { return (Vec::new(), 0) };
-    let mut matched = Vec::new();
+/// Only the NUMBER of matching definitions is returned: server names are user-chosen text and are never kept.
+fn mcp_matches(servers: &Value) -> (usize, usize) {
+    let Some(map) = servers.as_object() else { return (0, 0) };
+    let mut matched = 0usize;
     for (name, def) in map {
         let command = def.get("command").and_then(Value::as_str).map(basename_without_ext).unwrap_or_default();
         if name.to_ascii_lowercase().contains("codebase-memory") || command == MCP_ENTRY {
-            matched.push(name.chars().take(60).collect::<String>());
+            matched += 1;
         }
     }
     (matched, map.len())
@@ -559,7 +602,7 @@ fn mcp_observation(
         Doc::Parsed(_) => match servers {
             Some(s) => {
                 let (matched, total) = mcp_matches(s);
-                if matched.is_empty() {
+                if matched == 0 {
                     obs = obs
                         .configuration(Configuration::NotConfigured)
                         .confidence(Confidence::Medium)
@@ -569,9 +612,7 @@ fn mcp_observation(
                         .configuration(Configuration::Configured)
                         .confidence(Confidence::Medium)
                         .evidence(format!(
-                            "{label} içinde katalogdaki araçla eşleşen {} MCP sunucu tanımı var (ad: {}). Sunucu çalıştırılmadı.",
-                            matched.len(),
-                            matched.join(", ")
+                            "{label} içinde katalogdaki araçla eşleşen {matched} MCP sunucu tanımı var. Sunucu çalıştırılmadı."
                         ))
                         .limit("Eşleşme sunucu adına/komut dosyası adına dayanır; kimliği doğrulanmadı.");
                 }

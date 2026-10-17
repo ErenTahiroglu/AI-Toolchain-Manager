@@ -16,15 +16,22 @@ fn migrate_2(tx: &Transaction) -> AppResult<()> {
     crate::catalog::migrate_phase1a_data(tx)
 }
 
+fn migrate_5(tx: &Transaction) -> AppResult<()> {
+    tx.execute_batch(include_str!("../migrations/0005_discovery_privacy.sql"))?;
+    crate::discovery::store::scrub_legacy_observations(tx)
+}
+
 /// Ordered, append-only list of migrations. Index + 1 == `PRAGMA user_version` after applying it.
 /// 1 = Phase 1A foundation. 2 = Phase 1B registry (additive; copies Phase 1A data, then freezes the legacy tables).
 /// 3 = Phase 1B closure: project-scoped suggestion log, immutable classification of user-added entries.
 /// 4 = Phase 2A: local read-only discovery scans and observations (additive).
+/// 5 = Phase 2A closure: `record_version` column and in-place privacy scrub of legacy observation rows.
 const MIGRATIONS: &[Migration] = &[
     Migration::Sql(include_str!("../migrations/0001_init.sql")),
     Migration::Rust(migrate_2),
     Migration::Sql(include_str!("../migrations/0003_scoped_suggestion_log.sql")),
     Migration::Sql(include_str!("../migrations/0004_discovery.sql")),
+    Migration::Rust(migrate_5),
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
