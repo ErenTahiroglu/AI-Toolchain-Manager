@@ -1,7 +1,7 @@
 // In-memory stand-in for the Rust commands. It mirrors the wire shapes in src/types.ts so the UI can be
 // tested; the real behaviour of every command (validation, gates, migration, audit) is covered by the
 // Rust tests and by the --self-check contract test, not by this mock.
-import type { CatalogEntry, CleanupPlan, Evaluation, HealthReport, Inventory, PreferenceView, ProjectView, Recommendation, StoredObservation } from "../types";
+import type { CatalogEntry, CleanupPlan, Evaluation, HealthReport, InstallPlan, Inventory, PlanRequest, PreferenceView, ProjectView, Recommendation, StoredObservation } from "../types";
 
 export const SEED_IDS = [
   "ponytail", "codebase-memory-mcp", "graphify", "gitleaks", "markitdown", "caveman", "cloudflare-security-audit-skill", "superpowers", "betterleaks",
@@ -42,13 +42,54 @@ export const obs = (over: Partial<StoredObservation> = {}): StoredObservation =>
   observedAt: new Date().toISOString(), stale: false, ageHours: 0, legacy: false, scanFinishedAt: new Date().toISOString(),
   scanAuthorizedPath: true, scanAuthorizedUserConfig: false, scanAuthorizedProject: false, scanAuthorizedFingerprint: false, provenance: "latest_scan", latestScanChecked: true,
   current: true, notCurrentReason: null,
-  ladder: { assessed: true, filenameDetected: true, installRecord: false, publisher: "none", identity: "unknown", version: "unknown", versionTrust: "none", signatureBlock: "not_assessed", installedFilesSeen: false, artifactAuth: "none", reclassified: false, artifact: { policyVersion: 2, fingerprint: "not_requested", unknownReason: null, sha256: null, bytes: null, verifiedFormat: null, recordLink: "none", reference: "none", referenceKind: null, matchResult: "not_applicable", referenceEpoch: null, invalidated: false }, notPerformed: ["active_version_probe", "installed_file_digest", "no_package_detector_for_tool"] },
+  ladder: { assessed: true, filenameDetected: true, installRecord: false, publisher: "none", identity: "unknown", version: "unknown", versionTrust: "none", signatureBlock: "not_assessed", installedFilesSeen: false, artifactAuth: "none", reclassified: false, artifact: { policyVersion: 3, fingerprint: "not_requested", unknownReason: null, sha256: null, bytes: null, verifiedFormat: null, recordLink: "none", reference: "none", referenceKind: null, matchResult: "not_applicable", referenceEpoch: null, invalidated: false }, notPerformed: ["active_version_probe", "installed_file_digest", "no_package_detector_for_tool"] },
   ...over,
 });
 
 export const emptyInventory = (): Inventory => ({
   lastScan: null, observations: [], requests: [], staleAfterHours: 24,
   notChecked: ["Henüz hiç tarama yapılmadı; aşağıdakilerin hiçbirine bakılmadı.", "Programların sürümleri: kimliği doğrulanmamış hiçbir program çalıştırılmadı."],
+});
+
+export const PLAN_STATEMENT =
+  "Bu bir ÖNİZLEMEDİR. Hiçbir şey kurulmadı, indirilmedi, çalıştırılmadı veya değiştirilmedi; üçüncü taraf araçlara dokunulmadı. Bu plan bir izin değildir: onaylanmış bir tarif ve ayrı bir kullanıcı onayı olmadan hiçbir adım uygulanamaz.";
+
+/** A plan in the wire shape of the Rust planner (the real planner is covered by the Rust tests and the contract test). */
+export const makePlan = (r: PlanRequest, over: Partial<InstallPlan> = {}): InstallPlan => ({
+  schemaVersion: 1, plannerVersion: "1.0.0", planId: "a".repeat(64), state: "preview_only", executable: false, executed: false, modifiesAnything: false,
+  statement: PLAN_STATEMENT,
+  entry: { entryId: r.entryId, displayName: r.entryId, kind: "executable_tool", source: "example/" + r.entryId, reviewState: "unreviewed", executionPolicy: "manual-only", licenseState: "known", revision: "v1@abcdef", immutableCommitPinned: false },
+  target: { platformTarget: r.platformTarget, agentSurface: r.agentSurface, scope: r.scope, thisComputer: "windows-x64", thisComputerMatches: r.platformTarget === "windows-x64", recipeTargetId: null, catalogCompatibility: "vendor-declared" },
+  eligibility: {
+    status: "blocked", canExecute: false,
+    blockers: [
+      { code: "no_approved_recipe", text: "Bu araç için onaylanmış, tipli bir kurulum tarifi yok ve bu sürümde tarif onaylama/saklama mekanizması da yok." },
+      { code: "metadata_unreviewed", text: "Katalog bilgileri bağımsız olarak incelenmedi; yayıncı beyanlarına dayanıyor." },
+    ],
+    warnings: [{ code: "admin_unknown", text: "Yönetici izni gerekip gerekmediği bu yöntem için önceden bilinemez." }],
+  },
+  methods: [
+    { methodId: "verified-release-archive", label: "Doğrulanmış sürüm dosyası (yöneticinin kendi klasörüne)", supported: true, note: "" },
+    { methodId: "skills-cli", label: "Desteklenmeyen yöntem", supported: false, note: "Üçüncü taraf 'skills' komut satırı aracı: tipli tarif türü yok." },
+  ],
+  chosenMethod: "verified-release-archive",
+  prerequisites: [{ id: "agent_present", text: "Ajanın bu bilgisayarda olup olmadığı bilinmiyor: izin verilmiş bir tarama kaydı yok.", state: "unknown", source: "observed_scan" }],
+  declaredDependencies: ["Node.js >=22"],
+  steps: [
+    { index: 1, kind: "fetch-release-artifact", summary: "Yayıncının sürüm dosyası, onaylı tarifte yazılı adresten indirilecekti.", typed: { operation: "fetch-release-artifact", artifactId: "primary" }, missingParameters: [], network: "yes", writes: ["manager_staging"], writeLabels: ["Yöneticinin kendi hazırlık klasörü"], admin: "no", reversibility: "nothing_to_undo" },
+    { index: 2, kind: "verify-artifact-digest", summary: "İndirilen dosyanın SHA-256 özeti, tarifte yazılı beklenen değerle karşılaştırılacaktı.", typed: null, missingParameters: ["expectedSha256"], network: "no", writes: [], writeLabels: [], admin: "no", reversibility: "nothing_to_undo" },
+  ],
+  permissions: ["Geçerli kullanıcı hesabı (yönetici yetkisi gerekmediği varsayılır)", "İnternet erişimi (yalnızca onaylı bir uygulama aşamasında; bu önizleme bağlantı kurmadı)"],
+  network: { plannedUse: true, destinations: ["GitHub sürüm indirme adresi (tarifte yazılı)"], usedToBuildPreview: false },
+  telemetry: { state: "unknown", text: "Telemetri durumu bilinmiyor." },
+  dataAndCredentials: { state: "unknown", text: "Proje içeriğinin gönderilip gönderilmediği bilinmiyor. Bu uygulama hiçbir kimlik bilgisi istemez veya saklamaz." },
+  diskUsage: { state: "unknown", text: "Disk kullanımı güvenilir biçimde bilinmiyor (katalogda boyut bilgisi yok)." },
+  configChanges: [],
+  conflicts: [{ code: "existing_installation_found", text: "Son tarama bu aracın bu bilgisayarda zaten bulunduğunu gösteriyor; yeni kurulum mevcut kopyayla çakışabilir ve mevcut kopya değiştirilmez." }],
+  uninstall: { state: "manager_owned", text: "Yöneticinin sürümlü klasörü silinebilir; aracın kendi ürettiği dizinler/veriler kullanıcıya ait sayılır ve kalır." },
+  rollback: { available: false, reliability: "none_implemented", text: "Geri alma bu sürümde YOK." },
+  unknowns: ["Aracın işlevinin bu bilgisayarda çalıştığı doğrulanmadı ve bu planla doğrulanmayacak."],
+  ...over,
 });
 
 export interface Backend {
@@ -168,6 +209,11 @@ export function createBackend(): Backend {
         case "evaluate_task": return b.nextEvaluation;
         case "list_inventory": return JSON.parse(JSON.stringify(b.inventory));
         case "preview_backup_cleanup": return JSON.parse(JSON.stringify(b.backupPlan));
+        case "plan_install": {
+          const r = args?.request as PlanRequest;
+          if (!b.entries.some((e) => e.entryId === r.entryId)) throw { code: "CATALOG_ENTRY_NOT_FOUND", message: "Kayıt bulunamadı." };
+          return JSON.parse(JSON.stringify(makePlan(r)));
+        }
         case "run_discovery_scan": {
           const r = args?.request as { pathExecutables: boolean; userConfig: boolean; project: unknown };
           if (!r.pathExecutables && !r.userConfig && !r.project) throw { code: "SCAN_NOT_AUTHORIZED", message: "Taramak için en az bir bölüme izin vermelisiniz; hiçbir şey okunmadı." };

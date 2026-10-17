@@ -313,7 +313,7 @@ export interface ArtifactEvidence {
   sha256: string | null;
   bytes: number | null;
   /** The file format established from the first bytes of the hashed file (never from its name). */
-  verifiedFormat: "pe-x64" | "pe-arm64" | "pe-x86" | "macho-arm64" | "macho-x64" | "macho-universal" | "elf-x64" | "elf-arm64" | "script-shebang" | "zip" | "gzip" | "unrecognised" | null;
+  verifiedFormat: "pe-x64" | "pe-arm64" | "pe-x86" | "macho-arm64" | "macho-x64" | "macho-universal" | "macho-universal-arm64" | "macho-universal-x64" | "macho-universal-arm64-x64" | "elf-x64" | "elf-arm64" | "script-shebang" | "zip" | "gzip" | "unrecognised" | null;
   recordLink: "none" | "unverifiable" | "folder_by_name";
   reference: "none" | "unauthenticated" | "authenticated";
   referenceKind: "archive" | "installer" | "executable" | "script" | "plugin_file" | "package" | null;
@@ -417,4 +417,64 @@ export interface Inventory {
   requests: RequestVsObservation[];
   notChecked: string[];
   staleAfterHours: number;
+}
+
+// ---- Phase 2D: installation PLAN preview (read-only; a plan is data, never an action or a permission) ------------------
+export interface PlanRequest {
+  entryId: string;
+  platformTarget: string;
+  agentSurface: string;
+  scope: string;
+  methodId: string | null;
+}
+export interface PlanBlocker { code: string; text: string }
+export interface PlanPrerequisite { id: string; text: string; state: "met" | "unmet" | "unknown"; source: "observed_scan" | "publisher_declared" | "not_checked" }
+export interface PlanStep {
+  index: number;
+  kind: string;
+  summary: string;
+  typed: Record<string, unknown> | null;
+  missingParameters: string[];
+  network: "yes" | "no";
+  writes: string[];
+  writeLabels: string[];
+  admin: "no" | "maybe";
+  reversibility: "host_removable" | "version_switch" | "nothing_to_undo" | "unknown";
+}
+export interface PlanMethod { methodId: string; label: string; supported: boolean; note: string }
+export interface PlanDisclosure { state: string; text: string }
+export interface InstallPlan {
+  schemaVersion: number;
+  plannerVersion: string;
+  planId: string;
+  /** Always "preview_only": there is no installed / running / approved state. */
+  state: "preview_only";
+  executable: false;
+  executed: false;
+  modifiesAnything: false;
+  statement: string;
+  entry: {
+    entryId: string; displayName: string; kind: string; source: string; reviewState: string; executionPolicy: string;
+    licenseState: string; revision: string; immutableCommitPinned: boolean;
+  };
+  target: {
+    platformTarget: string; agentSurface: string; scope: string; thisComputer: string; thisComputerMatches: boolean;
+    recipeTargetId: string | null; catalogCompatibility: string;
+  };
+  eligibility: { status: "blocked"; canExecute: false; blockers: PlanBlocker[]; warnings: PlanBlocker[] };
+  methods: PlanMethod[];
+  chosenMethod: string | null;
+  prerequisites: PlanPrerequisite[];
+  declaredDependencies: string[];
+  steps: PlanStep[];
+  permissions: string[];
+  network: { plannedUse: boolean; destinations: string[]; usedToBuildPreview: false };
+  telemetry: PlanDisclosure;
+  dataAndCredentials: PlanDisclosure;
+  diskUsage: PlanDisclosure;
+  configChanges: { area: string; change: string; text: string }[];
+  conflicts: PlanBlocker[];
+  uninstall: PlanDisclosure;
+  rollback: { available: false; reliability: string; text: string };
+  unknowns: string[];
 }

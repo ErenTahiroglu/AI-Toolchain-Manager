@@ -35,6 +35,7 @@ fn run(out: PathBuf) -> i32 {
         let probe = preference_probe(&conn).map_err(|e| e.to_string())?;
         let closure = closure_probe(&conn).map_err(|e| e.to_string())?;
         let discovery_probe = crate::discovery_probe::synthetic_probe(&conn, &dir).map_err(|e| e.to_string())?;
+        let plan_probe = plan_probe(&conn).map_err(|e| e.to_string())?;
         let report = health::run_and_record(&conn, &ctx).map_err(|e| e.to_string())?;
         let chain = audit::verify(&conn).map_err(|e| e.to_string())?;
         Ok(json!({
@@ -46,6 +47,7 @@ fn run(out: PathBuf) -> i32 {
             "preferenceProbe": probe,
             "closureProbe": closure,
             "discoveryProbe": discovery_probe,
+            "planProbe": plan_probe,
             "report": report,
             "auditChain": chain,
             "auditEvents": audit::list_ascending(&conn).map_err(|e| e.to_string())?,
@@ -68,6 +70,33 @@ fn run(out: PathBuf) -> i32 {
             2
         }
     }
+}
+
+/// Builds read-only installation plans for a few catalog entries with the built binary's planner, so the contract tests can
+/// check them against the install-recipe schema. Nothing is executed or written.
+fn plan_probe(conn: &rusqlite::Connection) -> crate::error::AppResult<serde_json::Value> {
+    let host = crate::plan::HostFacts::detect();
+    let mut plans = Vec::new();
+    for (entry, platform, surface) in [
+        ("codebase-memory-mcp", host.platform.as_str(), "local-cli"),
+        ("superpowers", host.platform.as_str(), "claude-code-terminal"),
+        ("graphify", host.platform.as_str(), "local-cli"),
+        ("strix", host.platform.as_str(), "local-cli"),
+    ] {
+        // an unsupported host (neither Windows x64 nor macOS ARM64) has no valid platform label to plan for
+        if !crate::plan::PLATFORMS.contains(&platform) {
+            continue;
+        }
+        let request = crate::plan::PlanRequest {
+            entry_id: entry.to_string(),
+            platform_target: platform.to_string(),
+            agent_surface: surface.to_string(),
+            scope: "user".to_string(),
+            method_id: None,
+        };
+        plans.push(serde_json::to_value(crate::plan::plan_for(conn, &request, &host)?)?);
+    }
+    Ok(serde_json::Value::Array(plans))
 }
 
 /// Runs every synthetic scenario through the real engine of the built binary (read-only apart from the

@@ -25,7 +25,7 @@
         "unknownReason": { "type": ["string", "null"], "pattern": "^[a-z_]{1,24}$" },
         "sha256": { "oneOf": [{ "$ref": "#/$defs/hex64" }, { "type": "null" }] },
         "bytes": { "type": ["integer", "null"], "minimum": 0 },
-        "verifiedFormat": { "enum": ["pe-x64", "pe-arm64", "pe-x86", "macho-arm64", "macho-x64", "macho-universal", "elf-x64", "elf-arm64", "script-shebang", "zip", "gzip", "unrecognised", null] },
+        "verifiedFormat": { "enum": ["pe-x64", "pe-arm64", "pe-x86", "macho-arm64", "macho-x64", "macho-universal", "macho-universal-arm64", "macho-universal-x64", "macho-universal-arm64-x64", "elf-x64", "elf-arm64", "script-shebang", "zip", "gzip", "unrecognised", null] },
         "recordLink": { "enum": ["none", "unverifiable", "folder_by_name"] },
         "reference": { "enum": ["none", "unauthenticated", "authenticated"] },
         "referenceKind": { "enum": ["archive", "installer", "executable", "script", "plugin_file", "package", null] },
@@ -63,7 +63,7 @@
             "fingerprint": { "const": "computed" },
             "reference": { "const": "authenticated" },
             "referenceKind": { "enum": ["executable", "script"] },
-            "verifiedFormat": { "enum": ["pe-x64", "pe-arm64", "pe-x86", "macho-arm64", "macho-x64", "macho-universal", "elf-x64", "elf-arm64", "script-shebang"] },
+            "verifiedFormat": { "enum": ["pe-x64", "pe-arm64", "pe-x86", "macho-arm64", "macho-x64", "macho-universal-arm64", "macho-universal-x64", "macho-universal-arm64-x64", "elf-x64", "elf-arm64", "script-shebang"] },
             "matchResult": { "const": "matches_authenticated" },
             "invalidated": { "const": false },
             "sha256": { "$ref": "#/$defs/hex64" }

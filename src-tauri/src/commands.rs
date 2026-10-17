@@ -56,7 +56,7 @@ pub fn get_app_info(state: State<'_, AppState>) -> AppResult<AppInfo> {
     let db_version = state.with_db(db::user_version).ok();
     Ok(AppInfo {
         version: env!("CARGO_PKG_VERSION"),
-        phase: "2B",
+        phase: "2D",
         platform: std::env::consts::OS,
         arch: std::env::consts::ARCH,
         db_version,
@@ -226,6 +226,13 @@ pub fn run_discovery_scan(state: State<'_, AppState>, request: ScanRequest) -> A
 pub fn preview_backup_cleanup(state: State<'_, AppState>) -> AppResult<crate::backups::CleanupPlan> {
     let dir = std::path::Path::new(&state.data_dir).join("backups");
     state.with_db(|c| crate::backups::cleanup_plan(c, &dir))
+}
+
+/// Builds a read-only installation PLAN preview. It reads the catalog entry and the stored observations from this
+/// application's own database and nothing else: no file, no process, no network, no write.
+#[tauri::command]
+pub fn plan_install(state: State<'_, AppState>, request: crate::plan::PlanRequest) -> AppResult<crate::plan::InstallPlan> {
+    state.with_db(|c| crate::plan::plan_for(c, &request, &crate::plan::HostFacts::detect()))
 }
 
 #[tauri::command]

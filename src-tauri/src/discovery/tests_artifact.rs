@@ -472,10 +472,10 @@ fn a_verified_observation_is_persisted_current_and_then_loses_its_standing_when_
     let prod = store::latest_observations(&conn).unwrap();
     assert!(prod.iter().all(|o| !o.identity_verified));
     // 3. the policy version changes
-    conn.execute("UPDATE discovery_observations SET provenance_json = replace(provenance_json, '\"policyVersion\":2', '\"policyVersion\":0') WHERE subject = 'gitleaks'", []).unwrap();
+    conn.execute("UPDATE discovery_observations SET provenance_json = replace(provenance_json, '\"policyVersion\":3', '\"policyVersion\":0') WHERE subject = 'gitleaks'", []).unwrap();
     assert!(stored_gitleaks(&conn, &set).ladder.artifact.invalidated);
     // 4. a stale scan does not count as verified even if the ladder says so
-    conn.execute("UPDATE discovery_observations SET provenance_json = replace(provenance_json, '\"policyVersion\":0', '\"policyVersion\":2') WHERE subject = 'gitleaks'", []).unwrap();
+    conn.execute("UPDATE discovery_observations SET provenance_json = replace(provenance_json, '\"policyVersion\":0', '\"policyVersion\":3') WHERE subject = 'gitleaks'", []).unwrap();
     assert!(stored_gitleaks(&conn, &set).identity_verified);
     let old = (chrono::Utc::now() - chrono::Duration::hours(30)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     conn.execute("UPDATE discovery_scans SET finished_at = ?1", [&old]).unwrap();
@@ -522,7 +522,7 @@ fn a_hand_edited_row_cannot_claim_a_verification_the_evidence_does_not_support()
     let production = reference::ReferenceSet::production(&conn).unwrap();
     // forge a fully "verified" ladder by editing the database directly
     let forged = format!(
-        "{{\"assessed\":true,\"filenameDetected\":true,\"identity\":\"validated\",\"artifactAuth\":\"digest_match\",\"versionTrust\":\"validated\",\"version\":\"known\",\"artifact\":{{\"policyVersion\":2,\"fingerprint\":\"computed\",\"sha256\":\"{}\",\"reference\":\"authenticated\",\"referenceKind\":\"executable\",\"matchResult\":\"matches_authenticated\",\"referenceEpoch\":\"{}\"}}}}",
+        "{{\"assessed\":true,\"filenameDetected\":true,\"identity\":\"validated\",\"artifactAuth\":\"digest_match\",\"versionTrust\":\"validated\",\"version\":\"known\",\"artifact\":{{\"policyVersion\":3,\"fingerprint\":\"computed\",\"sha256\":\"{}\",\"reference\":\"authenticated\",\"referenceKind\":\"executable\",\"matchResult\":\"matches_authenticated\",\"referenceEpoch\":\"{}\"}}}}",
         sha(b"unknown build"),
         production.epoch()
     );

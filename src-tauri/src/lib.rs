@@ -13,6 +13,7 @@ mod error;
 mod gate;
 mod github_url;
 mod health;
+mod plan;
 mod projects;
 mod recommend;
 mod redact;
@@ -209,6 +210,7 @@ pub fn run() {
             commands::run_discovery_scan,
             commands::list_inventory,
             commands::preview_backup_cleanup,
+            commands::plan_install,
             commands::list_prompt_sources,
             commands::run_health_checks,
             commands::list_audit_events,

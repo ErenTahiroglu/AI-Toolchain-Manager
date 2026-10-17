@@ -19,7 +19,7 @@
 //! executable extracted from it, and one file digest does not authenticate a plugin directory or a skill collection:
 //! only `executable`, `script` and `plugin_file` references (an exact file) are compared with an exact file.
 //!
-//! # Type binding (policy version 2)
+//! # Type binding (policy version 2, universal Mach-O strictness since version 3)
 //!
 //! A matching digest is not enough. A reference authenticates the opened file only if **all** of these agree:
 //! catalog entry, operating system and architecture (`platform_target`), the **artifact kind** (the role: executable,
@@ -40,7 +40,7 @@ use sha2::{Digest, Sha256};
 use crate::error::{AppError, AppResult};
 
 /// Bump when the matching rules change: stored verdicts made under another version are invalidated on read.
-pub const POLICY_VERSION: u32 = 2;
+pub const POLICY_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -103,8 +103,19 @@ pub enum ArtifactFormat {
     MachOArm64,
     #[serde(rename = "macho-x64")]
     MachOX64,
+    /// LEGACY label of policy v2 (container magic only). Never produced any more and never binds to anything: the
+    /// presence of the universal-file magic says nothing about which CPUs the file supports.
     #[serde(rename = "macho-universal")]
     MachOUniversal,
+    /// Universal Mach-O whose verified slices are arm64 only (native on Apple Silicon).
+    #[serde(rename = "macho-universal-arm64")]
+    MachOUniversalArm64,
+    /// Universal Mach-O whose verified slices are x86_64 only (Rosetta-only on Apple Silicon; NOT native arm64).
+    #[serde(rename = "macho-universal-x64")]
+    MachOUniversalX64,
+    /// Universal Mach-O with both a verified arm64 and a verified x86_64 slice.
+    #[serde(rename = "macho-universal-arm64-x64")]
+    MachOUniversalArm64X64,
     #[serde(rename = "elf-x64")]
     ElfX64,
     #[serde(rename = "elf-arm64")]
@@ -121,13 +132,16 @@ pub enum ArtifactFormat {
 }
 
 impl ArtifactFormat {
-    const ALL: [ArtifactFormat; 12] = [
+    const ALL: [ArtifactFormat; 15] = [
         ArtifactFormat::PeX64,
         ArtifactFormat::PeArm64,
         ArtifactFormat::PeX86,
         ArtifactFormat::MachOArm64,
         ArtifactFormat::MachOX64,
         ArtifactFormat::MachOUniversal,
+        ArtifactFormat::MachOUniversalArm64,
+        ArtifactFormat::MachOUniversalX64,
+        ArtifactFormat::MachOUniversalArm64X64,
         ArtifactFormat::ElfX64,
         ArtifactFormat::ElfArm64,
         ArtifactFormat::ScriptShebang,
@@ -144,6 +158,9 @@ impl ArtifactFormat {
             ArtifactFormat::MachOArm64 => "macho-arm64",
             ArtifactFormat::MachOX64 => "macho-x64",
             ArtifactFormat::MachOUniversal => "macho-universal",
+            ArtifactFormat::MachOUniversalArm64 => "macho-universal-arm64",
+            ArtifactFormat::MachOUniversalX64 => "macho-universal-x64",
+            ArtifactFormat::MachOUniversalArm64X64 => "macho-universal-arm64-x64",
             ArtifactFormat::ElfX64 => "elf-x64",
             ArtifactFormat::ElfArm64 => "elf-arm64",
             ArtifactFormat::ScriptShebang => "script-shebang",
@@ -166,43 +183,154 @@ impl ArtifactFormat {
             | ArtifactFormat::PeX86
             | ArtifactFormat::MachOArm64
             | ArtifactFormat::MachOX64
-            | ArtifactFormat::MachOUniversal
+            | ArtifactFormat::MachOUniversalArm64
+            | ArtifactFormat::MachOUniversalX64
+            | ArtifactFormat::MachOUniversalArm64X64
             | ArtifactFormat::ElfX64
             | ArtifactFormat::ElfArm64 => Some(ArtifactKind::Executable),
             ArtifactFormat::ScriptShebang => Some(ArtifactKind::Script),
             ArtifactFormat::Zip | ArtifactFormat::Gzip => Some(ArtifactKind::Archive),
-            ArtifactFormat::Unrecognised => None,
+            ArtifactFormat::Unrecognised | ArtifactFormat::MachOUniversal => None,
         }
     }
 
     /// (operating system, architecture) a native binary format belongs to; `None` for formats without one.
-    fn target(self) -> Option<(&'static str, Option<&'static str>)> {
+    fn target(self) -> Option<(&'static str, &'static [&'static str])> {
         match self {
-            ArtifactFormat::PeX64 => Some(("windows", Some("x64"))),
-            ArtifactFormat::PeArm64 => Some(("windows", Some("arm64"))),
-            ArtifactFormat::PeX86 => Some(("windows", Some("x86"))),
-            ArtifactFormat::MachOArm64 => Some(("macos", Some("arm64"))),
-            ArtifactFormat::MachOX64 => Some(("macos", Some("x64"))),
-            ArtifactFormat::MachOUniversal => Some(("macos", None)),
-            ArtifactFormat::ElfX64 => Some(("linux", Some("x64"))),
-            ArtifactFormat::ElfArm64 => Some(("linux", Some("arm64"))),
+            ArtifactFormat::PeX64 => Some(("windows", &["x64"])),
+            ArtifactFormat::PeArm64 => Some(("windows", &["arm64"])),
+            ArtifactFormat::PeX86 => Some(("windows", &["x86"])),
+            ArtifactFormat::MachOArm64 | ArtifactFormat::MachOUniversalArm64 => Some(("macos", &["arm64"])),
+            ArtifactFormat::MachOX64 | ArtifactFormat::MachOUniversalX64 => Some(("macos", &["x64"])),
+            ArtifactFormat::MachOUniversalArm64X64 => Some(("macos", &["arm64", "x64"])),
+            // legacy container-only label: no architecture was ever established, so it fits no target
+            ArtifactFormat::MachOUniversal => Some(("macos", &[])),
+            ArtifactFormat::ElfX64 => Some(("linux", &["x64"])),
+            ArtifactFormat::ElfArm64 => Some(("linux", &["arm64"])),
             _ => None,
         }
     }
 
-    /// Can a file of this format exist for `platform_target` (`windows-x64`, `macos-arm64`, …)? A PE file can never be the
-    /// artifact of a macOS target, and so on. Script and archive formats are platform-neutral.
+    /// Can a file of this format be a NATIVE artifact of `platform_target` (`windows-x64`, `macos-arm64`, …)? A PE file
+    /// can never be the artifact of a macOS target; an x86_64-only universal binary is not a native arm64 artifact
+    /// (running it needs Rosetta, which is a different claim). Script and archive formats are platform-neutral.
     pub fn consistent_with(self, platform_target: &str) -> bool {
         match self.target() {
             None => true,
-            Some((os, Some(arch))) => platform_target == format!("{os}-{arch}"),
-            Some((os, None)) => platform_target.starts_with(&format!("{os}-")),
+            Some((os, archs)) => archs.iter().any(|a| platform_target == format!("{os}-{a}")),
         }
     }
 }
 
-/// Identifies the format from the first bytes of a file (up to 4 KiB are enough). Pure and bounded: it never reads
-/// anything else, never executes anything and answers `Unrecognised` for anything that is not positively identified.
+/// Most architecture entries a universal Mach-O may have to be accepted (real files have 2-3).
+const MAX_FAT_ARCHES: usize = 8;
+const CPU_ARM64: u32 = 0x0100_000c;
+const CPU_X64: u32 = 0x0100_0007;
+/// Size of a `mach_header_64`: a slice smaller than this cannot be a Mach-O file.
+const MACH_HEADER_64: u64 = 32;
+
+/// One entry of a universal header, as declared (not yet verified against the slice itself).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FatEntry {
+    cpu: u32,
+    offset: u64,
+    size: u64,
+}
+
+/// Parses and bounds-checks the universal header in `head` (big- or little-endian fields, 32- or 64-bit entries) against
+/// the real file length. `None` = not a universal header, truncated, or structurally invalid (count out of range, a
+/// slice outside the file, overlapping the table or another slice, shorter than a Mach-O header, a repeated CPU).
+fn parse_fat(head: &[u8], file_len: u64) -> Option<Vec<FatEntry>> {
+    let magic: [u8; 4] = head.get(..4)?.try_into().ok()?;
+    // (fields are big-endian, entries are 64-bit)
+    let (big_endian, wide) = match magic {
+        [0xca, 0xfe, 0xba, 0xbe] => (true, false),
+        [0xca, 0xfe, 0xba, 0xbf] => (true, true),
+        [0xbe, 0xba, 0xfe, 0xca] => (false, false),
+        [0xbf, 0xba, 0xfe, 0xca] => (false, true),
+        _ => return None,
+    };
+    let u32_at = |at: usize| -> Option<u32> {
+        let b: [u8; 4] = head.get(at..at + 4)?.try_into().ok()?;
+        Some(if big_endian { u32::from_be_bytes(b) } else { u32::from_le_bytes(b) })
+    };
+    let u64_at = |at: usize| -> Option<u64> {
+        let b: [u8; 8] = head.get(at..at + 8)?.try_into().ok()?;
+        Some(if big_endian { u64::from_be_bytes(b) } else { u64::from_le_bytes(b) })
+    };
+    let count = u32_at(4)? as usize;
+    if count == 0 || count > MAX_FAT_ARCHES {
+        return None;
+    }
+    let entry_len = if wide { 32 } else { 20 };
+    let table_end = 8 + count * entry_len;
+    if table_end > head.len() {
+        return None; // the table is cut off
+    }
+    let mut out: Vec<FatEntry> = Vec::with_capacity(count);
+    for i in 0..count {
+        let at = 8 + i * entry_len;
+        let cpu = u32_at(at)?;
+        let (offset, size) =
+            if wide { (u64_at(at + 8)?, u64_at(at + 16)?) } else { (u64::from(u32_at(at + 8)?), u64::from(u32_at(at + 12)?)) };
+        let end = offset.checked_add(size)?;
+        if size < MACH_HEADER_64 || offset < table_end as u64 || end > file_len || out.iter().any(|e| e.cpu == cpu) {
+            return None;
+        }
+        out.push(FatEntry { cpu, offset, size });
+    }
+    // slices may not overlap each other
+    let mut by_offset = out.clone();
+    by_offset.sort_by_key(|e| e.offset);
+    if by_offset.windows(2).any(|w| w[0].offset + w[0].size > w[1].offset) {
+        return None;
+    }
+    Some(out)
+}
+
+/// Establishes the architecture of a universal Mach-O: the table must be valid and every slice must start with a
+/// little-endian 64-bit Mach-O header (read with two bounded 8-byte reads from the SAME handle) whose CPU equals the
+/// table's claim, and be arm64 or x86_64. Anything else (32-bit or other-CPU slices, a slice header that disagrees with
+/// the table, a failed read) fails closed to `Unrecognised`.
+fn classify_fat<R: std::io::Read + std::io::Seek>(head: &[u8], file_len: u64, reader: &mut R) -> ArtifactFormat {
+    let Some(entries) = parse_fat(head, file_len) else { return ArtifactFormat::Unrecognised };
+    let (mut arm64, mut x64) = (false, false);
+    for e in entries {
+        let mut header = [0u8; 8];
+        if reader.seek(std::io::SeekFrom::Start(e.offset)).is_err() || reader.read_exact(&mut header).is_err() {
+            return ArtifactFormat::Unrecognised;
+        }
+        let cpu = u32::from_le_bytes([header[4], header[5], header[6], header[7]]);
+        if header[..4] != [0xcf, 0xfa, 0xed, 0xfe] || cpu != e.cpu {
+            return ArtifactFormat::Unrecognised;
+        }
+        match cpu {
+            CPU_ARM64 => arm64 = true,
+            CPU_X64 => x64 = true,
+            _ => return ArtifactFormat::Unrecognised,
+        }
+    }
+    match (arm64, x64) {
+        (true, true) => ArtifactFormat::MachOUniversalArm64X64,
+        (true, false) => ArtifactFormat::MachOUniversalArm64,
+        (false, true) => ArtifactFormat::MachOUniversalX64,
+        (false, false) => ArtifactFormat::Unrecognised,
+    }
+}
+
+/// Identifies the format from the first bytes of a file (up to 4 KiB are enough) and, for a universal Mach-O, from two
+/// bounded reads per slice header from `reader` (the same opened handle) plus the file length. Pure and bounded: it
+/// never reads anything else, never executes anything and answers `Unrecognised` for anything that is not positively
+/// identified.
+pub fn sniff_reader<R: std::io::Read + std::io::Seek>(head: &[u8], file_len: u64, reader: &mut R) -> ArtifactFormat {
+    if matches!(head.get(..4), Some([0xca, 0xfe, 0xba, 0xbe | 0xbf] | [0xbe | 0xbf, 0xba, 0xfe, 0xca])) {
+        return classify_fat(head, file_len, reader);
+    }
+    sniff(head)
+}
+
+/// Format from the leading bytes alone. A universal Mach-O cannot be judged from the container header: it is
+/// `Unrecognised` here; use [`sniff_reader`] to read the slices.
 pub fn sniff(head: &[u8]) -> ArtifactFormat {
     let le16 = |at: usize| head.get(at..at + 2).map(|b| u16::from_le_bytes([b[0], b[1]]));
     let le32 = |at: usize| head.get(at..at + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
@@ -220,15 +348,8 @@ pub fn sniff(head: &[u8]) -> ArtifactFormat {
     }
     if head.starts_with(&[0xcf, 0xfa, 0xed, 0xfe]) {
         return match le32(4) {
-            Some(0x0100_000c) => ArtifactFormat::MachOArm64,
-            Some(0x0100_0007) => ArtifactFormat::MachOX64,
-            _ => ArtifactFormat::Unrecognised,
-        };
-    }
-    if head.starts_with(&[0xca, 0xfe, 0xba, 0xbe]) {
-        // A universal Mach-O has a small architecture count; a Java class file (same magic) has a version here.
-        return match head.get(4..8).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]])) {
-            Some(n) if (1..=8).contains(&n) => ArtifactFormat::MachOUniversal,
+            Some(CPU_ARM64) => ArtifactFormat::MachOArm64,
+            Some(CPU_X64) => ArtifactFormat::MachOX64,
             _ => ArtifactFormat::Unrecognised,
         };
     }
@@ -285,12 +406,10 @@ pub fn synthetic_file(format: ArtifactFormat, payload: &[u8]) -> Vec<u8> {
             h.extend_from_slice(&[0u8; 24]);
             h
         }
-        ArtifactFormat::MachOUniversal => {
-            let mut h = vec![0xca, 0xfe, 0xba, 0xbe];
-            h.extend_from_slice(&2u32.to_be_bytes());
-            h.extend_from_slice(&[0u8; 24]);
-            h
-        }
+        ArtifactFormat::MachOUniversal | ArtifactFormat::Unrecognised => Vec::new(),
+        ArtifactFormat::MachOUniversalArm64 => synthetic_fat(&[CPU_ARM64], FatStyle::Be32),
+        ArtifactFormat::MachOUniversalX64 => synthetic_fat(&[CPU_X64], FatStyle::Be32),
+        ArtifactFormat::MachOUniversalArm64X64 => synthetic_fat(&[CPU_X64, CPU_ARM64], FatStyle::Be32),
         ArtifactFormat::ElfX64 | ArtifactFormat::ElfArm64 => {
             let mut h = vec![0u8; 64];
             h[..4].copy_from_slice(&[0x7f, b'E', b'L', b'F']);
@@ -303,9 +422,58 @@ pub fn synthetic_file(format: ArtifactFormat, payload: &[u8]) -> Vec<u8> {
         ArtifactFormat::ScriptShebang => b"#!/bin/sh\n".to_vec(),
         ArtifactFormat::Zip => b"PK\x03\x04".to_vec(),
         ArtifactFormat::Gzip => vec![0x1f, 0x8b, 8, 0],
-        ArtifactFormat::Unrecognised => Vec::new(),
     };
     v.extend_from_slice(payload);
+    v
+}
+
+/// Container variants the synthetic universal builder can emit (the parser accepts all four).
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FatStyle {
+    Be32,
+    Be64,
+    Le32,
+    Le64,
+}
+
+/// A synthetic universal Mach-O: a table of `cpus` and, for each, a 4 KiB-aligned slice that begins with a valid 64-bit
+/// Mach-O header of that CPU followed by padding. For tests and the probe only; never executed.
+#[allow(dead_code)]
+pub fn synthetic_fat(cpus: &[u32], style: FatStyle) -> Vec<u8> {
+    let (big, wide) = match style {
+        FatStyle::Be32 => (true, false),
+        FatStyle::Be64 => (true, true),
+        FatStyle::Le32 => (false, false),
+        FatStyle::Le64 => (false, true),
+    };
+    let put32 = |v: &mut Vec<u8>, x: u32| v.extend_from_slice(&if big { x.to_be_bytes() } else { x.to_le_bytes() });
+    let put64 = |v: &mut Vec<u8>, x: u64| v.extend_from_slice(&if big { x.to_be_bytes() } else { x.to_le_bytes() });
+    let mut v: Vec<u8> = Vec::new();
+    let magic: u32 = if wide { 0xcafe_babf } else { 0xcafe_babe };
+    v.extend_from_slice(&if big { magic.to_be_bytes() } else { magic.to_le_bytes() });
+    put32(&mut v, cpus.len() as u32);
+    for (i, cpu) in cpus.iter().enumerate() {
+        let offset = 0x1000u64 * (i as u64 + 1);
+        put32(&mut v, *cpu);
+        put32(&mut v, 0); // cpu subtype
+        if wide {
+            put64(&mut v, offset);
+            put64(&mut v, 0x100);
+            put32(&mut v, 12); // align
+            put32(&mut v, 0); // reserved
+        } else {
+            put32(&mut v, offset as u32);
+            put32(&mut v, 0x100);
+            put32(&mut v, 12);
+        }
+    }
+    for (i, cpu) in cpus.iter().enumerate() {
+        v.resize(0x1000 * (i + 1), 0);
+        v.extend_from_slice(&[0xcf, 0xfa, 0xed, 0xfe]);
+        v.extend_from_slice(&cpu.to_le_bytes());
+        v.resize(0x1000 * (i + 1) + 0x100, 0);
+    }
     v
 }
 
@@ -742,8 +910,23 @@ mod unit {
     #[test]
     fn the_format_is_established_from_bytes_and_unclear_input_is_unrecognised() {
         use ArtifactFormat::*;
-        for f in [PeX64, PeArm64, PeX86, MachOArm64, MachOX64, MachOUniversal, ElfX64, ElfArm64, ScriptShebang, Zip, Gzip] {
-            assert_eq!(sniff(&synthetic_file(f, b"payload")), f, "{f:?}");
+        for f in [
+            PeX64,
+            PeArm64,
+            PeX86,
+            MachOArm64,
+            MachOX64,
+            MachOUniversalArm64,
+            MachOUniversalX64,
+            MachOUniversalArm64X64,
+            ElfX64,
+            ElfArm64,
+            ScriptShebang,
+            Zip,
+            Gzip,
+        ] {
+            let bytes = synthetic_file(f, b"payload");
+            assert_eq!(sniff_reader(&bytes, bytes.len() as u64, &mut std::io::Cursor::new(&bytes)), f, "{f:?}");
             assert_eq!(ArtifactFormat::parse(f.as_str()), Some(f));
         }
         assert_eq!(sniff(b""), Unrecognised);
@@ -766,8 +949,174 @@ mod unit {
         // the name never matters: there is no name in this API at all
         assert_eq!(sniff(&synthetic_file(ScriptShebang, b"echo hi")), ScriptShebang);
         assert!(PeX64.consistent_with("windows-x64") && !PeX64.consistent_with("macos-arm64"));
-        assert!(MachOUniversal.consistent_with("macos-arm64") && !MachOUniversal.consistent_with("windows-x64"));
+        assert!(MachOUniversalArm64.consistent_with("macos-arm64") && !MachOUniversalArm64.consistent_with("macos-x64"));
+        assert!(
+            MachOUniversalX64.consistent_with("macos-x64") && !MachOUniversalX64.consistent_with("macos-arm64"),
+            "Rosetta is not native arm64"
+        );
+        assert!(MachOUniversalArm64X64.consistent_with("macos-arm64") && MachOUniversalArm64X64.consistent_with("macos-x64"));
+        assert!(!MachOUniversal.consistent_with("macos-arm64"), "the legacy container-only label fits no target");
+        assert!(!MachOUniversalArm64.consistent_with("windows-x64"));
         assert!(Zip.consistent_with("windows-x64") && Zip.consistent_with("macos-arm64"));
+    }
+
+    fn judged_fat(bytes: &[u8]) -> ArtifactFormat {
+        sniff_reader(&bytes[..bytes.len().min(4096)], bytes.len() as u64, &mut std::io::Cursor::new(bytes.to_vec()))
+    }
+
+    const ARM: u32 = CPU_ARM64;
+    const X64: u32 = CPU_X64;
+
+    #[test]
+    fn a_universal_mach_o_is_judged_by_its_verified_slices_not_by_its_magic() {
+        use ArtifactFormat::*;
+        for style in [FatStyle::Be32, FatStyle::Be64, FatStyle::Le32, FatStyle::Le64] {
+            assert_eq!(judged_fat(&synthetic_fat(&[ARM], style)), MachOUniversalArm64, "{style:?}");
+            assert_eq!(judged_fat(&synthetic_fat(&[X64], style)), MachOUniversalX64, "{style:?}");
+            assert_eq!(judged_fat(&synthetic_fat(&[X64, ARM], style)), MachOUniversalArm64X64, "{style:?}");
+            assert_eq!(judged_fat(&synthetic_fat(&[ARM, X64], style)), MachOUniversalArm64X64, "{style:?}");
+        }
+        // an x86_64-only universal file is NOT compatible with a native Apple Silicon target
+        assert!(!MachOUniversalX64.consistent_with("macos-arm64"));
+        // the container header alone (no reader for the slices) is never enough
+        assert_eq!(sniff(&synthetic_fat(&[ARM], FatStyle::Be32)), Unrecognised);
+    }
+
+    #[test]
+    fn malformed_universal_headers_fail_closed() {
+        use ArtifactFormat::Unrecognised;
+        let good = synthetic_fat(&[X64, ARM], FatStyle::Be32);
+        assert_ne!(judged_fat(&good), Unrecognised, "control");
+        let put_be = |b: &mut Vec<u8>, at: usize, v: u32| b[at..at + 4].copy_from_slice(&v.to_be_bytes());
+        // entry 0 starts at byte 8: cpu(8) subtype(12) offset(16) size(20) align(24); entry 1 at 28
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            ("zero architectures", {
+                let mut b = good.clone();
+                put_be(&mut b, 4, 0);
+                b
+            }),
+            ("absurd architecture count", {
+                let mut b = good.clone();
+                put_be(&mut b, 4, 0x4000_0000);
+                b
+            }),
+            ("count larger than the table that is present", {
+                let mut b = good.clone();
+                put_be(&mut b, 4, 8);
+                b.truncate(40);
+                b
+            }),
+            ("table truncated inside an entry", good[..20].to_vec()),
+            ("header only", good[..8].to_vec()),
+            ("offset points past the end of the file", {
+                let mut b = good.clone();
+                put_be(&mut b, 16, 0x00ff_0000);
+                b
+            }),
+            ("offset overlaps the table", {
+                let mut b = good.clone();
+                put_be(&mut b, 16, 4);
+                b
+            }),
+            ("slice runs past the end of the file", {
+                let mut b = good.clone();
+                put_be(&mut b, 20, 0x0100_0000);
+                b
+            }),
+            ("slice shorter than a Mach-O header", {
+                let mut b = good.clone();
+                put_be(&mut b, 20, 8);
+                b
+            }),
+            ("zero-length slice", {
+                let mut b = good.clone();
+                put_be(&mut b, 20, 0);
+                b
+            }),
+            ("huge offset and size", {
+                let mut b = good.clone();
+                put_be(&mut b, 16, u32::MAX);
+                put_be(&mut b, 20, u32::MAX);
+                b
+            }),
+            ("overlapping slices", {
+                let mut b = good.clone();
+                put_be(&mut b, 36, 0x1000 + 0x10);
+                b
+            }),
+            ("the same CPU twice", {
+                let mut b = good.clone();
+                put_be(&mut b, 28, X64);
+                b
+            }),
+            ("slice header does not carry the Mach-O magic", {
+                let mut b = good.clone();
+                b[0x1000] = 0;
+                b
+            }),
+            ("slice header CPU disagrees with the table", {
+                let mut b = good.clone();
+                b[0x1000 + 4] = 0x09;
+                b
+            }),
+            ("an unsupported (32-bit i386) slice", {
+                let mut b = good.clone();
+                put_be(&mut b, 8, 7);
+                b[0x1000 + 4..0x1000 + 8].copy_from_slice(&7u32.to_le_bytes());
+                b
+            }),
+            ("a slice in an unsupported container (32-bit Mach-O magic)", {
+                let mut b = good.clone();
+                b[0x1000..0x1004].copy_from_slice(&[0xce, 0xfa, 0xed, 0xfe]);
+                b
+            }),
+            ("file shorter than the declared slices", good[..0x1080].to_vec()),
+        ];
+        for (name, bytes) in cases {
+            assert_eq!(judged_fat(&bytes), Unrecognised, "{name}");
+        }
+        // an unreadable handle (the slice reads fail): fail closed
+        struct Broken;
+        impl std::io::Read for Broken {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("denied"))
+            }
+        }
+        impl std::io::Seek for Broken {
+            fn seek(&mut self, _: std::io::SeekFrom) -> std::io::Result<u64> {
+                Ok(0)
+            }
+        }
+        assert_eq!(sniff_reader(&good[..4096.min(good.len())], good.len() as u64, &mut Broken), Unrecognised);
+    }
+
+    #[test]
+    fn a_java_class_file_and_other_cafebabe_files_are_not_universal_binaries() {
+        let mut class = vec![0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 52];
+        class.extend_from_slice(&[0u8; 200]);
+        assert_eq!(judged_fat(&class), ArtifactFormat::Unrecognised);
+    }
+
+    #[test]
+    fn an_x64_only_universal_digest_never_authenticates_on_apple_silicon_and_the_legacy_label_binds_nothing() {
+        let mac = "macos-arm64";
+        let reference = |format: &str| r("t", ArtifactKind::Executable, format, mac, "1.0.0", A);
+        // the file is x86_64-only universal; every reference variant refuses to bind it on an arm64 target
+        for f in ["macho-universal-x64", "macho-universal", "macho-universal-arm64", "macho-universal-arm64-x64"] {
+            let v = evaluate(&seen("t", mac, ArtifactFormat::MachOUniversalX64, A), &auth(vec![reference(f)]));
+            assert_eq!(v.result, MatchResult::Incomparable, "reference format {f} vs x64-only file on arm64");
+        }
+        // the genuine arm64-capable cases bind
+        for (file, f) in [
+            (ArtifactFormat::MachOUniversalArm64, "macho-universal-arm64"),
+            (ArtifactFormat::MachOUniversalArm64X64, "macho-universal-arm64-x64"),
+        ] {
+            let v = evaluate(&seen("t", mac, file, A), &auth(vec![reference(f)]));
+            assert_eq!(v.result, MatchResult::MatchesAuthenticated, "{f}");
+        }
+        // the legacy label (container magic only) binds to nothing, even to itself
+        let v = evaluate(&seen("t", mac, ArtifactFormat::MachOUniversal, A), &auth(vec![reference("macho-universal")]));
+        assert_eq!(v.result, MatchResult::Incomparable);
     }
 
     #[test]

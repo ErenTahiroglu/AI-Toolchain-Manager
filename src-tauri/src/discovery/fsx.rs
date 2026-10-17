@@ -363,6 +363,8 @@ pub fn hash_file(root: &Path, rel: &[&str], limits: HashLimits, cancel: &std::sy
             head.extend_from_slice(&buf[..take]);
         }
     }
+    // Format from the same handle: the leading bytes, plus (universal Mach-O only) bounded reads of each slice header.
+    let format = super::reference::sniff_reader(&head, size, &mut file);
     if total != size || stamp(&file) != Some((size, modified)) {
         return HashOutcome::Unknown(HashUnknown::ChangedWhileReading);
     }
@@ -371,7 +373,7 @@ pub fn hash_file(root: &Path, rel: &[&str], limits: HashLimits, cancel: &std::sy
     for b in digest {
         hex.push_str(&format!("{b:02x}"));
     }
-    HashOutcome::Computed { sha256: hex, bytes: total, format: super::reference::sniff(&head) }
+    HashOutcome::Computed { sha256: hex, bytes: total, format }
 }
 
 /// Reads at most `max_bytes` from the START of one regular file (no UTF-8 requirement). Used for file headers only.

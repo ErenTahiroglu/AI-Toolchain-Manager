@@ -321,6 +321,7 @@ pub const ALLOWED_PERMISSIONS: &[&str] = &[
     "allow-run-discovery-scan",
     "allow-list-inventory",
     "allow-preview-backup-cleanup",
+    "allow-plan-install",
     "allow-list-prompt-sources",
     "allow-run-health-checks",
     "allow-list-audit-events",

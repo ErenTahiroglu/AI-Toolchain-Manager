@@ -224,7 +224,7 @@ describe("computer inventory (read-only discovery)", () => {
   });
 
   const art = (over: Partial<ArtifactEvidence> = {}): ArtifactEvidence => ({
-    policyVersion: 2, fingerprint: "not_requested", unknownReason: null, sha256: null, bytes: null, verifiedFormat: null, recordLink: "none", reference: "none", referenceKind: null,
+    policyVersion: 3, fingerprint: "not_requested", unknownReason: null, sha256: null, bytes: null, verifiedFormat: null, recordLink: "none", reference: "none", referenceKind: null,
     matchResult: "not_applicable", referenceEpoch: null, invalidated: false, ...over,
   });
   const ladder = (over: Partial<Ladder>): Ladder => ({

@@ -20,6 +20,7 @@ const COMMANDS: &[&str] = &[
     "run_discovery_scan",
     "list_inventory",
     "preview_backup_cleanup",
+    "plan_install",
     "list_prompt_sources",
     "run_health_checks",
     "list_audit_events",

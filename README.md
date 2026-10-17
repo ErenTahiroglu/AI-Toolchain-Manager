@@ -1,66 +1,95 @@
-# AI Toolchain Manager | Phase 0
+# AI Toolchain Manager
 
-**Tarih:** 10 Ekim 2026  
-**Durum:** Phase 0 R1 duzeltmeleri hazir; bagimsiz Red Team yeniden degerlendirmesi bekleniyor. Uygulama kodu ve arac kurulumu yok.  
-**Dal:** `phase0/architecture` (yalnizca yerel; commit veya push yapilmadi).
+Yapay zekâ kodlama ajanları (Claude Code, Antigravity) için geliştirici araçlarını **ileride** kurmayı, yapılandırmayı, güncellemeyi ve yönetmeyi hedefleyen bir masaüstü uygulaması (Tauri 2 + Rust + React/TypeScript + SQLite).
 
-## Phase 2A Durumu (guncel)
+> **Durum: Phase 2D — geliştirme aşaması. Uygulama yayın için hazır DEĞİLDİR.** Bugün hiçbir araç kurmaz, indirmez, çalıştırmaz veya güncellemez; ajan ayarlarını değiştirmez; ağa kendiliğinden bağlanmaz. Yalnızca **salt okunur** işler yapar. İmzalı bir dağıtım paketi, otomatik güncelleyici veya kurucu henüz yoktur.
 
-Phase 1B'nin ustune bilgisayarin **salt okunur** envanteri eklendi: bilinen program adlari, Claude Code kullanici/proje ayar dosyalari, eklenti kayitlari ve MCP tanimlari izinle taranir. "Bulundu", "yapilandirildi" ve "calisiyor" ayri tutulur; hicbir program calistirilmaz, hicbir sey kurulmaz veya degistirilmez, internete baglanilmaz. Ayrintilar ve kanitlar: [docs/PHASE-2A.md](docs/PHASE-2A.md). Bagimsiz Red Team incelemesi beklenir; `main` degistirilmedi.
+Bu proje bir kullanıcı (programcı olmayan bir kişi) tarafından, bağımsız bir "Red Team" incelemesi eşliğinde adım adım geliştirilir. Her aşama ayrı raporlanır; hiçbir aşama bir önceki aşamanın yetkisini genişletmez.
 
-## Phase 1B Durumu
+## Bugün neler yapabilirsiniz?
 
-Phase 1A'nin ustune dinamik katalog (13 kayit: dokuz arac + Frontend Design, Strix, agent-browser, agentic-awesome-skills), kullanicinin GitHub baglantisi ekleyebildigi aday kayitlari, proje tercihleri (istek ile gercek durum ayri) ve sabit kurallarla calisan, yapay zeka cagirmayan oneri onizlemesi eklendi. Hicbir sey kurulmaz, indirilmez veya calistirilmaz. Ayrintilar ve kanitlar: [docs/PHASE-1B.md](docs/PHASE-1B.md). Bagimsiz Red Team incelemesi beklenir; `main` degistirilmedi.
+| Özellik | Ne yapar | Ne yapmaz |
+| --- | --- | --- |
+| Araç Kütüphanesi | 13 hazır kayıtlı araç/eklenti için künye bilgisi; GitHub bağlantısı ekleyerek aday kayıt oluşturma | Bağlantıdaki hiçbir şeyi indirmez veya çalıştırmaz; yayıncının README'sindeki komutlar asla uygulanmaz |
+| Projeler ve tercihler | Örnek projeler ve takma adlı proje kayıtları; proje başına "istiyorum / ertele / reddet" tercihleri | Tercih "istek"tir; kurulu olduğu anlamına gelmez |
+| Öneriler | Sabit kurallarla çalışan, yapay zekâ çağırmayan öneri önizlemesi | Hiçbir şey kurmaz veya etkinleştirmez |
+| **Bilgisayar Envanteri** | İzin verdiğiniz bölümlerde (PATH, Claude Code kullanıcı dosyaları, tek bir proje klasörü) araçların **varlığını** salt okunur olarak gözlemler; isteğe bağlı SHA-256 parmak izi | Program çalıştırmaz, sürüm sormaz, ağa bağlanmaz; "bulundu ≠ yapılandırıldı ≠ çalışıyor" ayrımını korur; hiçbir gerçek aracı "doğrulanmış" saymaz |
+| Yedek önizlemesi | Eski veritabanı yedeklerinde kişisel veri izi olup olmadığını (kapsamı ve sınırlarıyla) gösterir | Hiçbir yedeği silmez, taşımaz veya değiştirmez |
+| **Kurulum Planı (yeni, Phase 2D)** | Seçtiğiniz araç/platform/ajan için "kurulsaydı neler olurdu" planını gösterir: adımlar, ön koşullar, ağ/telemetri, değişecek yapılandırma, çakışmalar, geri alma durumu, planın neden uygulanamayacağı | **Hiçbir şey kurmaz.** Plan bir izin değildir; "Kur" düğmesi yoktur |
+| Etkinlik ve denetim | Zincirleme (hash) denetim kaydı, sağlık kontrolleri, tanılama | Gizli değerleri saklamaz |
+| Ayarlar | Tema, sistem tepsisi, kullanıcı kontrollü otomatik başlatma | — |
 
-## Phase 1A Durumu
+## Henüz yapamadıkları
 
-`development` dalinda Phase 1A masaustu temeli bulunur (Tauri 2 + React/TypeScript + SQLite): pano, ornek projeler, dokuz aracin katalogu, uc kaynakli istem kutuphanesi (salt okunur, planli), ayarlar, sistem tepsisi, tek ornek, kullanici kontrollu baslangic ve kendi kendini denetleme. Hicbir arac kurulmaz, hicbir ajan ayari degistirilmez, ag istegi yapilmaz. Ayrintilar ve kanitlar: [docs/PHASE-1A.md](docs/PHASE-1A.md). Bagimsiz Red Team incelemesi beklenir; `main` degistirilmedi.
+- Araç kurma, kaldırma, güncelleme, sürüm sorgulama, geri alma — **hiçbiri yok**.
+- Onaylanmış tipli kurulum tarifi (`schemas/install-recipe.schema.json`) için saklama/onay mekanizması yok; bu yüzden her plan "uygulanamaz" durumundadır.
+- Bağımsız olarak doğrulanmış bir referans özeti (imzalı kaynak) yok; yerleşik yetkili liste **bilerek boştur**. Bu nedenle hiçbir gerçek araç "kimliği doğrulanmış" olamaz.
+- Ajan yapılandırma dosyalarını (ör. `settings.json`, `CLAUDE.md`) düzenleme yok.
+- Cihazlar arası eşitleme, otomatik güncelleyici, imzalı kurulum paketi yok.
+- Aktif sürüm yoklaması ve aktif güvenlik testi (Strix vb.) yok; yalnızca bir [ilke önerisi](docs/ACTIVE-PROBE-POLICY-PROPOSAL.md) var.
 
-## Yonetici Ozeti
+## Desteklenen ve doğrulanmamış platformlar
 
-### Neler dogrulandi
+"Hedef" = yazılımın amaçladığı platform; "Test edilen" = bu depoda gerçekten kanıtı olan ortam. İkisi aynı şey değildir.
 
-- Tauri 2; macOS ve Windows'ta sistem tepsisi, otomatik baslatma ve tek uygulama ornegi icin resmi API'lere sahip. Rust, React/TypeScript arayuzu ve SQLite ile onerilen taban teknik olarak makul. Bu, uygulamanin paketlenip imzalandigi veya hedef bilgisayarlarda dogrulandigi anlamina gelmez.
-- Google Antigravity belgeleri IDE, CLI ve Antigravity 2.0'i ayri urun yuzeyleri olarak ele aliyor. MCP ve eklenti destegi ile Apple Silicon macOS ve Windows x64 resmi olarak belgelenmis. Bir arac icin Antigravity CLI destegi, Antigravity IDE destegi sayilmayacak.
-- Dokuz katalog girdisi ayni turde degil: komut satiri ikilileri, Python araci, MCP sunucusu ve AI ajan talimat/eklenti paketleri var. Bunlar tek bir kurulum yontemine zorlanmayacak.
-- Guvenli varsayilan: GitHub icerigini calistirmadan incele; bilinmeyen kuruculari otomatik calistirma; her proje etkinlestirmesini kullaniciya sor; gizli degerleri yerel kayitlarda dahi tutma.
-- Bagimsiz Red Team'in R1 bulgularina gore katalog metadata'si kurulum yetkisi vermez; yetki ayri, tipli tarif ve kullanici onayi gerektirir. Dokuz arac icin makine-okunur baslangic katalogu `unreviewed` durumundadir.
-- Proje secimleri ajan yuzeyine gore ayrilir; audit basarisi bagimsiz test ve kanit ozeti gerektirir; cihaz senkronizasyonu makine ozel verileri dislar.
+| Platform | Hedef | Gerçekte test edilen | Test edilmeyen |
+| --- | --- | --- | --- |
+| Windows x64 | Evet (Windows 10/11 + WebView2) | Geliştirici makinesinde Windows 11 x64: birim testleri, hata ayıklama derlemesi, WebView2 ile elle arayüz denemesi. GitHub Actions `windows-latest`: derleme + tüm testler | **Release (yayın) derlemesinin yerel olarak çalıştırılması** (Windows Akıllı Uygulama Denetimi yerel imzasız derlemeleri engelleyebilir; yalnızca CI'da doğrulanıyor); başka Windows sürümleri; ARM Windows (desteklenmez) |
+| macOS Apple Silicon (arm64) | Evet | Yalnızca GitHub Actions `macos-14` (arm64): derleme, testler, başsız `--self-check`, ikilinin `Mach-O arm64` olduğu | **Gerçek bir Mac'te arayüz (GUI) doğrulaması hiç yapılmadı.** CI başarısı, masaüstü deneyiminin doğrulandığı anlamına gelmez |
+| macOS Intel, Linux | Hayır | — | — |
 
-### Belirsiz kalanlar
+Asgari işletim sistemi sürümleri bu projede ayrıca **sınanmamıştır**; Tauri/WebView2 belgelerindeki gereksinimlere bağlıdır. Evrensel uyumluluk iddia edilmez.
 
-- Aracin belirli surumunun hedef OS/CPU'da ve hedef ajan yuzeyinde gercekten calistigi; upstream README iddialari tek basina islevsel kanit degil. Bagimsiz Red Team kabul testi tamamlanmadi.
-- Imza, kurulum, temiz kaldirma ve geri alma davranisi her paket/surum icin ayni degil. Uygulama guncelleyicisinin imzalama anahtari ve dagitim/paketleme hatti henuz tasarlanmadi.
-- ASD-STE100 metnini veya sozlugunu urunle yeniden dagitma izni dogrulanmadi. Tasarim bu metinleri urune gommez ve resmi uygunluk iddia etmez.
-- Claude Code ve Antigravity etkin oturumlarini tum durumlarda guvenilir bicimde algilama henuz kanitlanmadi. Algilanamayan durumda guncelleme durdurulmali.
+## Güvenlik sınırları (özet)
 
-### Kritik Red Team bulgulari
+- Üçüncü taraf program çalıştırılmaz; keşfedilen çalıştırılabilir dosyalar açılmaz (yalnızca isteğe bağlı olarak baytları SHA-256 için okunur). Paket yöneticisi, kabuk veya ajan başlatılmaz.
+- Ağ isteği, telemetri ve LLM çağrısı yok.
+- Gizli değerler (anahtarlar, parolalar, jetonlar) günlüklere, arayüze, veritabanına veya Git'e yazılmaz; makineye özgü gözlemler yerelde kalır.
+- WebView yalnızca tek tek listelenmiş tipli komutları çağırabilir (kabuk, dosya sistemi, HTTP izni yok).
+- Dosya okumaları bağlantı (symlink/junction) izlemeyen katmandan geçer; ağ birimleri reddedilir.
+- Bilinen sınırlar: [Phase 2C belgesi](docs/PHASE-2C.md) (özet doğrulama, WAL, TOCTOU sınırları) ve [Phase 2D belgesi](docs/PHASE-2D.md).
 
-1. GitHub'dan alinmis bir kurulum betigini okumadan calistirmak, kullanici yetkileriyle kod calistirma riskidir.
-2. Ajan ayarlarini veya `CLAUDE.md` / `GEMINI.md` dosyalarini ezmek, talimat kaybi ve gizli politika degisikligi yaratabilir.
-3. Gizli anahtar tarayicilarinin raporlari sirlarin kendisini icerebilir; rapor ve komut ciktilari varsayilan olarak senkronize edilmemeli veya loglanmamalidir.
-4. Caveman CLI telemetrisi varsayilan olarak aciktir; proxy ve sikistirma da ayri veri akislaridir.
-5. Arac guncellemesi acik bir ajan oturumunun kullandigi ikiliyi veya ayari degistirebilir. Oturumun kapali oldugu kanitlanamiyorsa guncelleme beklemelidir.
+## Yerel geliştirme
 
-### Faz 1 karari
+Gerekenler: Rust (1.90+), Node.js (CI'da 24), Python 3.12 (yalnızca sözleşme testleri), Windows'ta WebView2, macOS'ta Xcode komut satırı araçları.
 
-R1 duzeltmeleri yerel dalda ve otomatik kontrat testlerinde hazir; bagimsiz yeniden adjudikasyon bekleniyor. Bu paket Phase 1 izni degildir. R1 onaylanirsa bile yalnizca sahte araclarla, degisiklik yapmayan lifecycle/UI prototipi icin ayri kullanici yetkisi istenir. Daha sonraki kurulum, MCP/ajan ayari, senkronizasyon veya updater calismalari kendi kapilarina tabidir.
+```bash
+npm ci                              # ön yüz bağımlılıkları
+npm run typecheck && npm test       # tip denetimi + arayüz testleri (vitest)
+npm run tauri dev                   # geliştirme modunda uygulama
+cd src-tauri
+cargo fmt --check && cargo clippy --all-targets -- -D warnings
+cargo test                          # Rust birim ve entegrasyon testleri
+cd ..
+python -m pip install -r requirements-test.txt
+python -m unittest discover -s tests -v    # JSON Schema ve sözleşme testleri
+```
 
-**Karar: PHASE 0 R1 REVIEW PENDING. Phase 1: NOT AUTHORIZED.**
+Başsız kendi kendini denetleme (arayüz açmaz; sözleşme testlerinin girdisini üretir):
 
-## Teknik Paket
+```bash
+src-tauri/target/debug/ai-toolchain-manager --self-check out.json
+ATM_SELFCHECK_JSON=out.json python -m unittest discover -s tests -v
+```
 
-- [Teknik mimari, kontratlar, semalar ve kabul testleri](docs/PHASE-0-HANDOFF.md)
-- [Dokuz arac icin uyumluluk ve kurulum matrisi](docs/TOOL-COMPATIBILITY.md)
-- [Red Team bulgulari ve risk kaydi](docs/RED-TEAM.md)
-- [Kaynaklar, surumler ve kanit sinirlari](docs/RESEARCH-SOURCES.md)
-- [JSON Schema dosyalari](schemas/)
-- [Dokuz araclik, unreviewed seed katalogu](data/catalog-seed.json)
-- [Tipli install recipe kontrati](schemas/install-recipe.schema.json)
-- [Senkronizasyon envelope kontrati](schemas/sync-envelope.schema.json)
-- [Adversarial kontrat testleri ve sahte fixture'lar](tests/)
-- [Bagimsiz Red Team adjudikasyonu](reviews/AI_Toolchain_Manager_Phase0_RedTeam_Adjudication.md)
+`ATM_DATA_DIR` ortam değişkeni, veritabanı ve yedekler için yalıtılmış bir klasör seçer (testler ve CI bunu kullanır). Verilen değer yoksa işletim sisteminin kullanıcı başına uygulama verisi klasörü kullanılır.
 
-## Kapsam Siniri
+## Test ve CI kanıtı
 
-Bu dalda yalnizca Phase 0 mimari belgeleri, semalar, seed metadata ve kurcalamaya yonelik fixture testleri bulunur. Arac kurulumu, gelistirme ortami degisikligi, ozel GitHub deposu veya kimlik bilgisi olusturma, commit/push ya da Phase 1 uygulamasi yapilmamistir.
+- Her `development` itme işlemi GitHub Actions'ta Windows x64 ve macOS arm64 üzerinde şunları çalıştırır: Rust biçim/lint (`-D warnings`) ve testler, ön yüz tip denetimi/testi/derlemesi, Python sözleşme testleri, derlenen ikilinin başsız `--self-check` çalıştırması. Kesin SHA ve sonuçlar için [Actions sayfasına](https://github.com/ErenTahiroglu/AI-Toolchain-Manager/actions) bakın; yeşil bir CI yalnızca o koşucunun gerçekten yaptığını kanıtlar.
+- Phase 2D yerel sonuçları (Windows 11 x64): Rust 318 test, ön yüz 68 test, Python sözleşme 69 test, hata ayıklama derlemesi ve WebView2 üzerinde elle arayüz denemesi. Sayılar aşama raporlarında güncellenir; bu satır bir sürüm vaadi değildir.
+- Kanıt sınırı: macOS CI'ı gerçek Mac masaüstü testi değildir; Windows release derlemesinin yerel doğrulaması yoktur.
+
+## Aşama raporları ve belgeler
+
+- Phase 0 (mimari, şemalar, risk kaydı): [docs/PHASE-0-OVERVIEW.md](docs/PHASE-0-OVERVIEW.md) (eski README, olduğu gibi korundu), [docs/PHASE-0-HANDOFF.md](docs/PHASE-0-HANDOFF.md), [docs/TOOL-COMPATIBILITY.md](docs/TOOL-COMPATIBILITY.md), [docs/RED-TEAM.md](docs/RED-TEAM.md), [docs/RESEARCH-SOURCES.md](docs/RESEARCH-SOURCES.md), [reviews/](reviews/)
+- [Phase 1A](docs/PHASE-1A.md) — masaüstü temeli, denetim zinciri, sağlık kontrolleri
+- [Phase 1B](docs/PHASE-1B.md) — dinamik katalog, proje tercihleri, öneri önizlemesi
+- [Phase 2A](docs/PHASE-2A.md), [Phase 2B](docs/PHASE-2B.md) — salt okunur envanter, geçiş ve gizlilik kapısı, kanıt merdiveni
+- [Phase 2C](docs/PHASE-2C.md) — güvenli yedek incelemesi, pasif artefakt kimliği, güven sözleşmesi
+- [Phase 2D](docs/PHASE-2D.md) — kurulum planı önizlemesi, taşınabilirlik, evrensel Mach-O doğrulaması
+- [Aktif yoklama ilke önerisi](docs/ACTIVE-PROBE-POLICY-PROPOSAL.md) (uygulanmadı), [Windows Akıllı Uygulama Denetimi notu](docs/WINDOWS-SMART-APP-CONTROL.md), [dal yönetimi](docs/BRANCH-GOVERNANCE.md), [ADR'ler](docs/adr/)
+
+## Dallar
+
+Yalnızca iki kalıcı dal vardır: `main` (kararlı; değiştirilmez) ve `development` (tüm çalışma). Aşama dalları açılmaz; ayrıntı için [dal yönetimi](docs/BRANCH-GOVERNANCE.md).
