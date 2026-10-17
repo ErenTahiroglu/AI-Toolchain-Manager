@@ -61,7 +61,13 @@ fn a_link_in_a_parent_of_the_project_folder_is_refused_and_nothing_below_it_is_o
     let stages = Rc::new(RefCell::new(Vec::<String>::new()));
     let seen = stages.clone();
     fsx::hook::set(move |stage| seen.borrow_mut().push(stage.to_string()));
-    let obs = detect::detect_all(&env.roots(), &all_auth(Some(&through_link)));
+    // Only the project permission is given, so every read in this scan would be below the redirected folder.
+    let only_project = Authorization {
+        path_executables: false,
+        user_config: false,
+        project: Some(ProjectScan { alias: "proje".to_string(), dir: through_link.clone() }),
+    };
+    let obs = detect::detect_all(&env.roots(), &only_project);
     fsx::hook::clear();
     assert!(!stages.borrow().iter().any(|s| s == "before-open"), "no file below the redirect was even opened: {:?}", stages.borrow());
     assert!(!json_of(&obs).contains("SENTINEL"));
