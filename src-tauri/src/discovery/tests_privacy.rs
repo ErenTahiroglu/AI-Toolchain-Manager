@@ -393,7 +393,7 @@ fn migration_5_scrubs_a_legacy_v4_database_in_place_and_preserves_everything_els
     let before = preserved_state(&conn);
     let scans_before = table_text(&conn, "SELECT count(*) FROM discovery_observations");
     db::migrate(&mut conn).unwrap();
-    assert_eq!(db::user_version(&conn).unwrap(), 5);
+    assert_eq!(db::user_version(&conn).unwrap(), db::LATEST_VERSION);
     assert_eq!(preserved_state(&conn), before, "preferences, history, audit chain, catalog, scans and observation facts are untouched");
     assert_eq!(table_text(&conn, "SELECT count(*) FROM discovery_observations"), scans_before, "no observation was deleted");
     assert_eq!(
@@ -467,7 +467,7 @@ fn the_committed_v4_fixture_migrates_to_v5_through_the_real_file_path_with_a_bac
     drop(raw);
     let backups = dir.path().join("backups");
     let conn = db::open_file(&path, Some(&backups)).unwrap();
-    assert_eq!(db::user_version(&conn).unwrap(), 5);
+    assert_eq!(db::user_version(&conn).unwrap(), db::LATEST_VERSION);
     assert_eq!(preserved_state(&conn), before);
     assert_clean_after_migration(&conn);
     let made: Vec<_> = fs::read_dir(&backups).unwrap().map(|e| e.unwrap().file_name()).collect();

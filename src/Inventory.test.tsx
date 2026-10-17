@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { createBackend, obs, type Backend } from "./test/backend";
+import type { Ladder } from "./types";
 
 let backend: Backend;
 vi.mock("@tauri-apps/api/core", () => ({
@@ -220,5 +221,95 @@ describe("computer inventory (read-only discovery)", () => {
     await userEvent.click(screen.getByRole("button", { name: "Bu bilgisayarı tara" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("PROJECT_DIR_NETWORK");
     await waitFor(() => expect(screen.queryByText(/Tarama tamamlandı/)).not.toBeInTheDocument());
+  });
+
+  const ladder = (over: Partial<Ladder>): Ladder => ({
+    assessed: true, filenameDetected: true, installRecord: false, publisher: "none", identity: "unknown", version: "unknown", versionTrust: "none",
+    signatureBlock: "not_assessed", notPerformed: ["active_version_probe"], ...over,
+  });
+
+  it("shows each rung of the evidence ladder separately and never a green success for a merely detected tool", async () => {
+    scanned([
+      obs({ id: 1, subject: "gitleaks" }),
+      obs({
+        id: 2, subject: "anthropic-frontend-design", agentSurface: "claude-code-terminal", method: "claude-plugin-declaration", configuration: "configured",
+        identityVerified: true, version: "1.0.0", versionSource: "Claude Code kurulum kaydı",
+        ladder: ladder({ installRecord: true, publisher: "marketplace", identity: "validated", version: "known", versionTrust: "trusted", notPerformed: [] }),
+      }),
+      obs({
+        id: 3, subject: "agent-browser", ladder: ladder({ installRecord: true, publisher: "self_declared", identity: "evidence_available", version: "known", versionTrust: "declared" }),
+        version: "0.39.1", versionSource: "npm paket kaydı",
+      }),
+    ]);
+    await open();
+    const g = (await screen.findByRole("heading", { name: "gitleaks" })).closest("section")!;
+    const gl = within(g).getByRole("list", { name: "Kanıt basamakları" });
+    for (const t of ["Tespit edildi", "Yapılandırma kanıtı yok", "Kimlik kanıtı yok", "Kimlik doğrulanmadı", "Sürüm bilinmiyor", "İşlev test edilmedi"]) {
+      expect(within(gl).getByText(new RegExp(t))).toBeInTheDocument();
+    }
+    const fd = screen.getByRole("heading", { name: "anthropic-frontend-design" }).closest("section")!;
+    const fl = within(fd).getByRole("list", { name: "Kanıt basamakları" });
+    expect(within(fl).getByText(/Kimlik doğrulandı \(kayıt \+ sabitlenmiş kaynak\)/)).toBeInTheDocument();
+    expect(within(fl).getByText(/Sürüm biliniyor \(kurulum kaydından\)/)).toBeInTheDocument();
+    expect(within(fl).getByText(/İşlev test edilmedi/)).toBeInTheDocument();
+    const ab = screen.getByRole("heading", { name: "agent-browser" }).closest("section")!;
+    const al = within(ab).getByRole("list", { name: "Kanıt basamakları" });
+    expect(within(al).getByText(/Kimlik kanıtı mevcut/)).toBeInTheDocument();
+    expect(within(al).getByText(/Kimlik doğrulanmadı/)).toBeInTheDocument();
+    expect(within(al).getByText(/paketin kendi beyanından/)).toBeInTheDocument();
+    expect(document.querySelector(".badge-passed")).toBeNull();
+    expect(screen.queryByText(/işlev doğrulandı: evet/i)).not.toBeInTheDocument();
+  });
+
+  it("links every conclusion to its local evidence text and lists the checks that were not performed, with reasons", async () => {
+    scanned([obs({ id: 7, ladder: ladder({ notPerformed: ["active_version_probe", "signature_chain_validation", "installed_file_digest"], signatureBlock: "present_unvalidated" }) })]);
+    await open();
+    const section = (await screen.findByRole("heading", { name: "gitleaks" })).closest("section")!;
+    const links = within(section).getAllByRole("link", { name: "(kanıt)" });
+    expect(links.length).toBeGreaterThan(3);
+    links.forEach((a) => expect(a).toHaveAttribute("href", "#ev-7"));
+    expect(section.querySelector("#ev-7")).not.toBeNull();
+    const summary = within(section).getByText(/Yapılmayan kontroller \(3\)/);
+    await userEvent.click(summary);
+    expect(within(section).getByText(/hiçbir program çalıştırılmadı/)).toBeInTheDocument();
+    expect(within(section).getByText(/imza bloğunun varlığı güven anlamına gelmez/)).toBeInTheDocument();
+    expect(within(section).getByText(/katalogda kurulu dosya için sabitlenmiş özet yok/)).toBeInTheDocument();
+  });
+
+  it("reports conflicting observations and stale ones as their own states, and old records as not assessed", async () => {
+    scanned([
+      obs({ id: 1, subject: "agent-browser", ladder: ladder({ identity: "conflicted", installRecord: true }) }),
+      obs({ id: 2, subject: "strix", stale: true, current: false, notCurrentReason: "Son tarama 24 saatten eski; yeniden tarayın.", ladder: ladder({}) }),
+      obs({ id: 3, subject: "markitdown", legacy: true, ladder: ladder({ assessed: false }) }),
+    ]);
+    await open();
+    const ab = (await screen.findByRole("heading", { name: "agent-browser" })).closest("section")!;
+    expect(within(ab).getByText(/Çelişkili gözlemler var/)).toBeInTheDocument();
+    const strix = screen.getByRole("heading", { name: "strix" }).closest("section")!;
+    expect(within(strix).getByText(/Eski \/ güncel olmayan gözlem/)).toBeInTheDocument();
+    const md = screen.getByRole("heading", { name: "markitdown" }).closest("section")!;
+    expect(within(md).getByText(/Kanıt basamakları bu kayıt için değerlendirilmedi/)).toBeInTheDocument();
+    expect(within(md).queryByRole("list", { name: "Kanıt basamakları" })).not.toBeInTheDocument();
+  });
+
+  it("previews old backups without any way to delete them and states the retention trade-off", async () => {
+    backend.backupPlan = {
+      entries: [{ fileName: "atm-v4-20261016T100000Z.sqlite", schemaVersion: 4, sizeBytes: 204800, modified: "2026-10-16T10:00:00Z", mayHoldOldPersonalData: "yes", rowsFailingPrivacyGate: 4 }],
+      preconditions: [{ id: "integrity", ok: true, text: "SQLite bütünlük denetimi (integrity_check) başarılı." }],
+      candidates: ["atm-v4-20261016T100000Z.sqlite"], keep: [], deletionAvailable: false, executed: false,
+      notes: ["Bu bir ÖNİZLEMEDİR: hiçbir yedek silinmedi, taşınmadı veya değiştirilmedi.", "Dosyanın silinmesi, içeriğin fiziksel olarak yok edildiğini garanti etmez: SSD'lerde aşınma dengeleme olabilir."],
+    };
+    await open();
+    expect(await screen.findByText(/birebir kopyasıdır/)).toBeInTheDocument();
+    expect(calls("preview_backup_cleanup")).toHaveLength(0);
+    await userEvent.click(screen.getByRole("button", { name: "Yedekleri incele" }));
+    expect(await screen.findByText("atm-v4-20261016T100000Z.sqlite")).toBeInTheDocument();
+    expect(screen.getByText(/Evet \(4 kayıt\)/)).toBeInTheDocument();
+    expect(screen.getByText(/hiçbir yedek silinmedi/)).toBeInTheDocument();
+    expect(screen.getByText(/fiziksel olarak yok edildiğini garanti etmez/)).toBeInTheDocument();
+    expect(screen.getByText(/Silme bu sürümde yoktur/)).toBeInTheDocument();
+    const labels = screen.getAllByRole("button").map((b) => b.textContent ?? "");
+    expect(labels.filter((l) => /sil|kaldır|temizle|delete|remove/i.test(l))).toEqual([]);
+    expect(document.body.textContent).not.toMatch(/[A-Za-z]:\Users|\/Users\//);
   });
 });

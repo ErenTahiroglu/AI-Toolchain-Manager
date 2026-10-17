@@ -42,7 +42,7 @@ class DiscoveryContract(unittest.TestCase):
     def test_scan_completed_twice_and_the_schema_version_includes_discovery(self):
         self.assertEqual(self.probe["scan"]["status"], "completed")
         self.assertNotEqual(self.probe["scan"]["scanId"], self.probe["secondScanId"])
-        self.assertGreaterEqual(self.data["dbVersion"], 5)
+        self.assertGreaterEqual(self.data["dbVersion"], 6)
 
     def test_nothing_in_the_scanned_tree_changed(self):
         self.assertTrue(self.probe["treeUnchanged"], "a read-only scan must leave sizes, contents and timestamps untouched")
@@ -125,6 +125,46 @@ class DiscoveryContract(unittest.TestCase):
             self.assertIsNone(o["notCurrentReason"])
             self.assertTrue(o["scanAuthorizedPath"] and o["scanAuthorizedUserConfig"] and o["scanAuthorizedProject"])
             self.assertIn("scanFinishedAt", o)
+
+    # ---- Phase 2B: passive provenance ladder, checked independently of the Rust code ----------------------------
+    VOCAB = {
+        "publisher": {"none", "self_declared", "marketplace"},
+        "identity": {"not_assessed", "unknown", "evidence_available", "validated", "conflicted"},
+        "version": {"unknown", "known", "conflicted"},
+        "versionTrust": {"none", "declared", "trusted"},
+        "signatureBlock": {"not_assessed", "absent", "present_unvalidated", "unreadable"},
+    }
+    NOT_PERFORMED = {
+        "active_version_probe", "signature_chain_validation", "signature_parsing_unsupported", "installed_file_digest",
+        "package_metadata_not_found", "no_package_detector_for_tool", "record_to_file_linkage",
+    }
+
+    def test_every_ladder_uses_closed_vocabulary_and_obeys_the_invariants(self):
+        for o in self.obs:
+            l = o["ladder"]
+            self.assertTrue(l["assessed"], o["subject"])
+            for key, allowed in self.VOCAB.items():
+                self.assertIn(l[key], allowed, f"{o['subject']}.{key}")
+            self.assertTrue(set(l["notPerformed"]) <= self.NOT_PERFORMED, l["notPerformed"])
+            if l["identity"] == "validated":
+                self.assertTrue(l["installRecord"] and l["publisher"] == "marketplace", "validated needs a record and a marketplace publisher")
+            self.assertEqual(o["identityVerified"], l["identity"] == "validated", o["subject"])
+            if o["version"] is not None:
+                self.assertEqual(l["version"], "known")
+                self.assertNotEqual(l["versionTrust"], "none")
+            else:
+                self.assertNotEqual(l["version"], "known")
+            self.assertFalse(o["functionalityTested"])
+            if l["signatureBlock"] == "present_unvalidated":
+                self.assertIn("signature_chain_validation", l["notPerformed"])
+
+    def test_a_validated_plugin_and_a_name_only_program_sit_on_different_rungs(self):
+        fd = self.one("anthropic-frontend-design", "claude-plugin-declaration", "global")["ladder"]
+        self.assertEqual((fd["identity"], fd["publisher"], fd["installRecord"], fd["versionTrust"]), ("validated", "marketplace", True, "trusted"))
+        g = self.one("gitleaks", "path-executable", "global")["ladder"]
+        self.assertEqual((g["filenameDetected"], g["installRecord"], g["identity"], g["version"]), (True, False, "unknown", "unknown"))
+        self.assertIn("active_version_probe", g["notPerformed"])
+        self.assertIn("installed_file_digest", g["notPerformed"])
 
     def test_the_scan_is_audited_with_a_schema_valid_inspect_event_and_never_with_install_like_events(self):
         types = [e["eventType"] for e in self.data["auditEvents"]]

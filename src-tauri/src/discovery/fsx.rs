@@ -42,6 +42,9 @@ pub enum Skip {
     Link,
     /// A network share, remote drive, network file system or device path.
     Network,
+    /// The kind of file system could not be determined, or is not one known to be local. Treated like a network
+    /// file system: nothing below it is read (fail closed).
+    UnknownFilesystem,
     NotRegularFile,
     TooLarge,
     AccessDenied,
@@ -54,6 +57,7 @@ impl Skip {
         match self {
             Skip::Link => "yolun bir parçası sembolik bağlantı/junction olduğu veya başka bir yere yönlendiği için izlenmedi",
             Skip::Network => "ağ paylaşımı, uzak sürücü veya aygıt yolu olduğu için okunmadı",
+            Skip::UnknownFilesystem => "dosya sistemi türü belirlenemedi veya yerel olduğu bilinmiyor; güvenlik için okunmadı",
             Skip::NotRegularFile => "beklenen türde normal dosya/klasör değil",
             Skip::TooLarge => "dosya güvenli boyut sınırından büyük",
             Skip::AccessDenied => "erişim izni yok",
@@ -127,6 +131,24 @@ pub fn is_network_fstype(name: &str) -> bool {
     )
 }
 
+/// File-system types known to be local storage. Anything not listed here (including FUSE/macFUSE, which can proxy a
+/// remote machine) is refused: unknown means "do not read".
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn is_local_fstype(name: &str) -> bool {
+    matches!(name.to_ascii_lowercase().as_str(), "apfs" | "hfs" | "msdos" | "exfat" | "ntfs" | "udf" | "cd9660" | "tmpfs" | "ufs" | "zfs")
+}
+
+/// The single decision point for a directory's file system. `Err(())` is a failed lookup and is NEVER read as local.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn judge_fstype(name: Result<&str, ()>) -> Result<(), Skip> {
+    match name {
+        Err(()) => Err(Skip::UnknownFilesystem),
+        Ok(n) if is_network_fstype(n) => Err(Skip::Network),
+        Ok(n) if is_local_fstype(n) => Ok(()),
+        Ok(_) => Err(Skip::UnknownFilesystem),
+    }
+}
+
 fn valid_component(c: &str) -> bool {
     !c.is_empty() && c != "." && c != ".." && !c.contains(['/', '\\', '\0', ':'])
 }
@@ -147,6 +169,24 @@ pub(crate) mod hook {
 
     pub fn clear() {
         HOOK.with(|h| *h.borrow_mut() = None);
+        FSTYPE.with(|h| *h.borrow_mut() = None);
+    }
+
+    type FsTypeHook = Box<dyn Fn(u64) -> Option<Result<String, ()>>>;
+    thread_local! {
+        static FSTYPE: RefCell<Option<FsTypeHook>> = const { RefCell::new(None) };
+    }
+
+    /// Simulates `fstatfs` for the directory with this inode: `Some(Ok(name))` is a reported type, `Some(Err(()))` a
+    /// failed lookup, `None` leaves the real lookup in charge.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pub fn set_fstype(f: impl Fn(u64) -> Option<Result<String, ()>> + 'static) {
+        FSTYPE.with(|h| *h.borrow_mut() = Some(Box::new(f)));
+    }
+
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pub fn fstype_override(inode: u64) -> Option<Result<String, ()>> {
+        FSTYPE.with(|h| h.borrow().as_ref().and_then(|f| f(inode)))
     }
 
     pub fn fire(stage: &str) {
@@ -162,6 +202,12 @@ pub(crate) mod hook {
 mod hook {
     #[inline(always)]
     pub fn fire(_stage: &str) {}
+
+    #[cfg_attr(not(unix), allow(dead_code))]
+    #[inline(always)]
+    pub fn fstype_override(_inode: u64) -> Option<Result<String, ()>> {
+        None
+    }
 }
 
 /// Walks `rel` below `root`, refusing links and redirections anywhere on the chain.
@@ -171,7 +217,39 @@ pub fn walk(root: &Path, rel: &[&str], final_kind: FinalKind, allow_final_link: 
 
 /// Reads one regular UTF-8 text file below `root` (links refused, size capped). Never writes.
 pub fn read_text(root: &Path, rel: &[&str], max_bytes: u64) -> ReadOutcome {
-    imp::read_text(root, rel, max_bytes)
+    match imp::open_file(root, rel) {
+        Ok(file) => finish_read(file, max_bytes),
+        Err(OpenFail::NotFound) => ReadOutcome::NotFound,
+        Err(OpenFail::Skip(s)) => ReadOutcome::Skipped(s),
+    }
+}
+
+/// Reads at most `max_bytes` from the START of one regular file (no UTF-8 requirement). Used for file headers only.
+pub fn read_prefix(root: &Path, rel: &[&str], max_bytes: u64) -> Result<Vec<u8>, ReadFail> {
+    let file = match imp::open_file(root, rel) {
+        Ok(f) => f,
+        Err(OpenFail::NotFound) => return Err(ReadFail::NotFound),
+        Err(OpenFail::Skip(s)) => return Err(ReadFail::Skipped(s)),
+    };
+    match file.metadata() {
+        Ok(m) if m.is_file() => {}
+        Ok(_) => return Err(ReadFail::Skipped(Skip::NotRegularFile)),
+        Err(_) => return Err(ReadFail::Skipped(Skip::Io)),
+    }
+    let mut bytes = Vec::new();
+    file.take(max_bytes).read_to_end(&mut bytes).map_err(|_| ReadFail::Skipped(Skip::Io))?;
+    Ok(bytes)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ReadFail {
+    NotFound,
+    Skipped(Skip),
+}
+
+pub(crate) enum OpenFail {
+    NotFound,
+    Skip(Skip),
 }
 
 /// Is `rel` below `root` a real directory (not a link)?
@@ -403,23 +481,21 @@ mod imp {
         Walk::Found { path: current, is_link: false }
     }
 
-    pub(super) fn read_text(root: &Path, rel: &[&str], max_bytes: u64) -> ReadOutcome {
+    pub(super) fn open_file(root: &Path, rel: &[&str]) -> Result<fs::File, OpenFail> {
         let path = match walk(root, rel, FinalKind::File, false) {
             Walk::Found { path, .. } => path,
-            Walk::NotFound => return ReadOutcome::NotFound,
-            Walk::Skipped(s) => return ReadOutcome::Skipped(s),
+            Walk::NotFound => return Err(OpenFail::NotFound),
+            Walk::Skipped(s) => return Err(OpenFail::Skip(s)),
         };
         hook::fire("before-open");
         let file = match fs::OpenOptions::new().read(true).open(&path) {
             Ok(f) => f,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return ReadOutcome::NotFound,
-            Err(e) => return ReadOutcome::Skipped(skip_of(&e)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(OpenFail::NotFound),
+            Err(e) => return Err(OpenFail::Skip(skip_of(&e))),
         };
         // The decisive check: the object we hold is at the path we meant, so nothing was redirected in between.
-        if let Err(s) = handle_is_at(&file, &path) {
-            return ReadOutcome::Skipped(s);
-        }
-        finish_read(file, max_bytes)
+        handle_is_at(&file, &path).map_err(OpenFail::Skip)?;
+        Ok(file)
     }
 }
 
@@ -475,10 +551,11 @@ mod imp {
         // SAFETY: valid NUL-terminated path, read-only flags.
         let fd = unsafe { libc::open(slash.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC) };
         if fd < 0 {
-            Err(classify(errno()))
-        } else {
-            Ok(Fd(fd))
+            return Err(classify(errno()));
         }
+        let root = Fd(fd);
+        check_filesystem(&root).map_err(Fail::Skip)?;
+        Ok(root)
     }
 
     /// Stat without following a final link, relative to an open directory.
@@ -498,7 +575,9 @@ mod imp {
         // SAFETY: `parent` is a valid directory descriptor, `c` a valid NUL-terminated name.
         let fd = unsafe { libc::openat(parent.0, c.as_ptr(), DIR_FLAGS) };
         if fd >= 0 {
-            return Ok(Fd(fd));
+            let child = Fd(fd);
+            check_filesystem(&child).map_err(Fail::Skip)?;
+            return Ok(child);
         }
         let code = errno();
         // ENOTDIR/ELOOP: tell a symbolic link apart from a plain file sitting where a folder was expected.
@@ -512,20 +591,44 @@ mod imp {
         Err(classify(code))
     }
 
+    fn inode_of(fd: &Fd) -> u64 {
+        // SAFETY: zeroed stat is a valid out-parameter; `fd` is a valid descriptor.
+        let mut st: libc::stat = unsafe { std::mem::zeroed() };
+        if unsafe { libc::fstat(fd.0, &mut st) } == 0 {
+            st.st_ino as u64
+        } else {
+            0
+        }
+    }
+
     #[cfg(target_os = "macos")]
-    fn on_network_fs(dir: &Fd) -> bool {
+    fn fstype_name(dir: &Fd) -> Result<String, ()> {
         // SAFETY: zeroed statfs is a valid out-parameter; `dir` is a valid descriptor.
         let mut sf: libc::statfs = unsafe { std::mem::zeroed() };
         if unsafe { libc::fstatfs(dir.0, &mut sf) } != 0 {
-            return false;
+            return Err(());
         }
         let bytes: Vec<u8> = sf.f_fstypename.iter().take_while(|c| **c != 0).map(|c| *c as u8).collect();
-        is_network_fstype(&String::from_utf8_lossy(&bytes))
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
     }
 
-    #[cfg(not(target_os = "macos"))]
-    fn on_network_fs(_dir: &Fd) -> bool {
-        false
+    /// Every directory handle — the root, each component of the selected root and each child below it — is judged
+    /// here, so a network volume mounted at ANY depth is refused before a single entry of it is opened. A failed
+    /// lookup or an unrecognised type is refused too. (Other Unix systems are not a supported target; they are not
+    /// judged.)
+    fn check_filesystem(dir: &Fd) -> Result<(), Skip> {
+        if let Some(simulated) = hook::fstype_override(inode_of(dir)) {
+            return judge_fstype(simulated.as_deref().map_err(|_| ()));
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let name = fstype_name(dir);
+            judge_fstype(name.as_deref().map_err(|_| ()))
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Ok(())
+        }
     }
 
     /// Opens `root` and then each directory in `dirs`, every step relative to the previous handle with O_NOFOLLOW.
@@ -543,9 +646,6 @@ mod imp {
                 }
                 _ => return Err(Fail::Skip(Skip::Io)),
             }
-        }
-        if on_network_fs(&dir) {
-            return Err(Fail::Skip(Skip::Network));
         }
         for name in dirs {
             if !valid_component(name) {
@@ -603,42 +703,36 @@ mod imp {
         }
         if final_kind == FinalKind::Dir {
             // Re-open without following to prove it is still a real directory and to apply the network check.
-            match open_child_dir(&dir, std::ffi::OsStr::new(last)) {
-                Ok(d) if on_network_fs(&d) => return Walk::Skipped(Skip::Network),
-                Ok(_) => {}
-                Err(f) => return lift(f),
+            if let Err(f) = open_child_dir(&dir, std::ffi::OsStr::new(last)) {
+                return lift(f);
             }
         }
         Walk::Found { path, is_link: false }
     }
 
-    pub(super) fn read_text(root: &Path, rel: &[&str], max_bytes: u64) -> ReadOutcome {
-        let Some((last, parents)) = rel.split_last() else { return ReadOutcome::Skipped(Skip::NotRegularFile) };
+    pub(super) fn open_file(root: &Path, rel: &[&str]) -> Result<fs::File, OpenFail> {
+        let Some((last, parents)) = rel.split_last() else { return Err(OpenFail::Skip(Skip::NotRegularFile)) };
         let dir = match open_chain(root, parents) {
             Ok(d) => d,
-            Err(Fail::NotFound) => return ReadOutcome::NotFound,
-            Err(Fail::Skip(s)) => return ReadOutcome::Skipped(s),
+            Err(Fail::NotFound) => return Err(OpenFail::NotFound),
+            Err(Fail::Skip(s)) => return Err(OpenFail::Skip(s)),
         };
         if !valid_component(last) {
-            return ReadOutcome::Skipped(Skip::Io);
+            return Err(OpenFail::Skip(Skip::Io));
         }
-        let name = match CString::new(last.as_bytes()) {
-            Ok(n) => n,
-            Err(_) => return ReadOutcome::Skipped(Skip::Io),
-        };
+        let name = CString::new(last.as_bytes()).map_err(|_| OpenFail::Skip(Skip::Io))?;
         hook::fire("before-open");
         // O_NOFOLLOW: a link in the last position makes the open fail. O_NONBLOCK: a FIFO cannot hang the scan.
         // SAFETY: `dir` is a valid directory descriptor and `name` a valid NUL-terminated name.
         let fd = unsafe { libc::openat(dir.0, name.as_ptr(), libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK) };
         if fd < 0 {
-            return match classify(errno()) {
-                Fail::NotFound => ReadOutcome::NotFound,
-                Fail::Skip(s) => ReadOutcome::Skipped(s),
-            };
+            return Err(match classify(errno()) {
+                Fail::NotFound => OpenFail::NotFound,
+                Fail::Skip(s) => OpenFail::Skip(s),
+            });
         }
         // SAFETY: `fd` was just opened and is owned by no one else; `File` takes ownership and closes it.
-        let file = unsafe { fs::File::from_raw_fd(fd) };
-        finish_read(file, max_bytes)
+        Ok(unsafe { fs::File::from_raw_fd(fd) })
     }
 }
 
@@ -653,8 +747,8 @@ mod imp {
         Walk::Skipped(Skip::Io)
     }
 
-    pub(super) fn read_text(_: &Path, _: &[&str], _: u64) -> ReadOutcome {
-        ReadOutcome::Skipped(Skip::Io)
+    pub(super) fn open_file(_: &Path, _: &[&str]) -> Result<fs::File, OpenFail> {
+        Err(OpenFail::Skip(Skip::Io))
     }
 }
 
@@ -669,6 +763,20 @@ mod unit {
         }
         for n in ["apfs", "hfs", "ntfs", "ext4", "msdos", "exfat", "tmpfs", ""] {
             assert!(!is_network_fstype(n), "{n}");
+        }
+    }
+
+    #[test]
+    fn the_file_system_judgement_fails_closed() {
+        assert_eq!(judge_fstype(Err(())), Err(Skip::UnknownFilesystem), "a failed lookup is never read as local");
+        for n in ["smbfs", "nfs", "afpfs", "webdav", "autofs", "SMBFS"] {
+            assert_eq!(judge_fstype(Ok(n)), Err(Skip::Network), "{n}");
+        }
+        for n in ["apfs", "hfs", "msdos", "exfat", "tmpfs", "APFS"] {
+            assert_eq!(judge_fstype(Ok(n)), Ok(()), "{n}");
+        }
+        for n in ["", "fusefs", "macfuse", "osxfuse", "somethingnew", "lifs"] {
+            assert_eq!(judge_fstype(Ok(n)), Err(Skip::UnknownFilesystem), "unknown type {n:?} is refused");
         }
     }
 

@@ -9,7 +9,7 @@
 use super::{
     detect::{Authorization, Roots},
     privacy,
-    types::{Method, Observation, Scope},
+    types::{IdentityState, Method, Observation, Provenance, Scope, VersionState},
 };
 use crate::{
     audit::{self, now_utc, NewEvent},
@@ -72,8 +72,9 @@ pub fn save_scan(
         tx.execute(
             "INSERT INTO discovery_observations
              (scan_id, subject, platform_target, agent_surface, method, presence, configuration, version, version_source, scope, project_alias,
-              confidence, evidence, location, limitations_json, identity_verified, functionality_tested, observed_at, record_version)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 0, ?17, ?18)",
+              confidence, evidence, location, limitations_json, identity_verified, functionality_tested, observed_at, record_version,
+              identity_state, version_state, provenance_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 0, ?17, ?18, ?19, ?20, ?21)",
             rusqlite::params![
                 scan_id,
                 o.subject,
@@ -92,7 +93,10 @@ pub fn save_scan(
                 serde_json::to_string(&o.limitations)?,
                 o.identity_verified as i64,
                 finished,
-                RECORD_VERSION
+                RECORD_VERSION,
+                o.provenance.identity.as_str(),
+                o.provenance.version.as_str(),
+                serde_json::to_string(&o.provenance)?
             ],
         )?;
     }
@@ -226,6 +230,8 @@ pub struct StoredObservation {
     /// From the latest scan, fresh, and for this computer's platform. Only a current observation describes today.
     pub current: bool,
     pub not_current_reason: Option<String>,
+    /// The Phase 2B evidence ladder. `assessed = false` for rows written before it existed.
+    pub ladder: Provenance,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -293,6 +299,21 @@ fn last_scan(conn: &Connection) -> AppResult<Option<ScanSummary>> {
             },
         )
         .optional()?)
+}
+
+/// Parses the stored ladder. Unreadable or legacy (`{}`) content is "not assessed"; the identity and version columns
+/// (which migration 6 filled from Phase 2A facts) still show through. Unknown enum text never survives parsing.
+fn stored_provenance(json: &str, identity: &str, version: &str) -> Provenance {
+    let mut p = serde_json::from_str::<Provenance>(json).unwrap_or_default();
+    if !p.assessed {
+        p = Provenance::default();
+        p.identity = match identity {
+            "validated" => IdentityState::Validated,
+            _ => IdentityState::NotAssessed,
+        };
+        p.version = if version == "known" { VersionState::Known } else { VersionState::Unknown };
+    }
+    p
 }
 
 /// The privacy gate on the way out: whatever a (legacy or tampered) row holds, the UI and headless output only ever
@@ -392,7 +413,8 @@ pub fn latest_observations(conn: &Connection) -> AppResult<Vec<StoredObservation
     let mut stmt = conn.prepare(
         "SELECT o.id, o.scan_id, o.subject, o.platform_target, o.agent_surface, o.method, o.presence, o.configuration, o.version, o.version_source,
                 o.scope, o.project_alias, o.confidence, o.evidence, o.location, o.limitations_json, o.identity_verified, o.functionality_tested, o.observed_at,
-                o.record_version, s.finished_at, s.authorized_path, s.authorized_user_config, s.authorized_project
+                o.record_version, s.finished_at, s.authorized_path, s.authorized_user_config, s.authorized_project,
+                o.identity_state, o.version_state, o.provenance_json
          FROM discovery_observations o JOIN discovery_scans s ON s.scan_id = o.scan_id
          WHERE o.id IN (SELECT max(id) FROM discovery_observations GROUP BY subject, platform_target, agent_surface, method, scope, COALESCE(project_alias, ''))
          ORDER BY o.subject, o.scope, o.method",
@@ -432,6 +454,7 @@ pub fn latest_observations(conn: &Connection) -> AppResult<Vec<StoredObservation
             latest_scan_checked: false,
             current: false,
             not_current_reason: None,
+            ladder: stored_provenance(&r.get::<_, String>(26)?, &r.get::<_, String>(24)?, &r.get::<_, String>(25)?),
         })
     })?;
     let mut out = rows.collect::<Result<Vec<_>, _>>()?;

@@ -17,7 +17,7 @@ use std::sync::OnceLock;
 pub const LOCATION_REMOVED: &str = "eski kayıt: konum gizlilik nedeniyle kaldırıldı";
 pub const TEXT_REMOVED: &str = "[konum gizlendi]";
 /// The only provenance label a version may carry.
-pub const VERSION_SOURCES: &[&str] = &["Claude Code kurulum kaydı"];
+pub const VERSION_SOURCES: &[&str] = &["Claude Code kurulum kaydı", "npm paket kaydı"];
 
 /// Folders below the user's home where a PATH entry is recognisable and carries no private name.
 pub const KNOWN_HOME_DIRS: &[&str] = &[
@@ -158,6 +158,20 @@ pub fn scrub_text(text: &str) -> String {
 pub fn strip_server_names(text: &str) -> String {
     static R: OnceLock<Regex> = OnceLock::new();
     re(&R, r" \(ad: [^)]*\)").replace_all(text, "").into_owned()
+}
+
+/// Strict view of a stored ladder, used by the self-audit: the whole document must be valid closed vocabulary
+/// (`Provenance` rejects unknown words) and its identity word is compared with the identity column.
+#[derive(serde::Deserialize)]
+#[serde(from = "super::types::Provenance")]
+pub struct LadderCheck {
+    pub identity: String,
+}
+
+impl From<super::types::Provenance> for LadderCheck {
+    fn from(p: super::types::Provenance) -> Self {
+        LadderCheck { identity: p.identity.as_str().to_string() }
+    }
 }
 
 #[cfg(test)]

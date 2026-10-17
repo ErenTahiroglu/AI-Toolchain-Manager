@@ -110,8 +110,28 @@ pub fn authorize(conn: &Connection, request: &ScanRequest) -> AppResult<Authoriz
     Ok(Authorization { path_executables: request.path_executables, user_config: request.user_config, project })
 }
 
+/// The origin each (non-removed) catalog entry pins: `owner/repo` parsed from its repository link.
+pub fn load_pins(conn: &Connection) -> AppResult<Vec<detect::CatalogPin>> {
+    let mut stmt = conn.prepare("SELECT entry_id, repo_url FROM catalog_entries WHERE removed_at IS NULL")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    let mut pins = Vec::new();
+    for row in rows {
+        let (id, url) = row?;
+        if let Some(pin) = detect::CatalogPin::from_repo_url(&id, &url) {
+            pins.push(pin);
+        }
+    }
+    Ok(pins)
+}
+
 pub fn run_scan(conn: &Connection, roots: &Roots, auth: &Authorization) -> AppResult<ScanSummary> {
     let started = now_utc();
+    // Roots built by the caller may already carry pins (tests); otherwise the catalog's own pins are used.
+    let mut roots = roots.clone();
+    if roots.pins.is_empty() {
+        roots.pins = load_pins(conn)?;
+    }
+    let roots = &roots;
     let observations = detect::detect_all(roots, auth);
     store::save_scan(conn, roots, auth, &observations, &started)
 }

@@ -26,12 +26,14 @@ fn migrate_5(tx: &Transaction) -> AppResult<()> {
 /// 3 = Phase 1B closure: project-scoped suggestion log, immutable classification of user-added entries.
 /// 4 = Phase 2A: local read-only discovery scans and observations (additive).
 /// 5 = Phase 2A closure: `record_version` column and in-place privacy scrub of legacy observation rows.
+/// 6 = Phase 2B: passive provenance ladder columns on discovery observations (additive).
 const MIGRATIONS: &[Migration] = &[
     Migration::Sql(include_str!("../migrations/0001_init.sql")),
     Migration::Rust(migrate_2),
     Migration::Sql(include_str!("../migrations/0003_scoped_suggestion_log.sql")),
     Migration::Sql(include_str!("../migrations/0004_discovery.sql")),
     Migration::Rust(migrate_5),
+    Migration::Sql(include_str!("../migrations/0006_passive_provenance.sql")),
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
@@ -103,8 +105,26 @@ pub fn open_file(path: &Path, backup_dir: Option<&Path>) -> AppResult<Connection
                 .map_err(|_| AppError::new("DB_BACKUP_FAILED", "Geçiş öncesi yedek alınamadı; geçiş yapılmadı."))?;
         }
     }
+    // Migration 5 rewrites rows that may hold old personal text. With `secure_delete` the replaced bytes are overwritten
+    // inside the database pages instead of lingering in free space, and a checkpoint + VACUUM afterwards rewrites the
+    // file. This is LOGICAL compaction of this application's own database file: it does not reach pre-migration
+    // backups, file-system snapshots, or the physical flash behind an SSD.
+    let privacy_migration = current > 0 && current < 5;
+    if privacy_migration {
+        let _ = conn.pragma_update(None, "secure_delete", true);
+    }
     migrate(&mut conn)?;
+    if privacy_migration {
+        compact(&conn);
+    }
     Ok(conn)
+}
+
+/// Best effort: a failure here never fails the start-up (the data is already correct; only free space is untidy).
+pub(crate) fn compact(conn: &Connection) {
+    let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+    let _ = conn.execute_batch("VACUUM");
+    let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 // In-memory stand-in for the Rust commands. It mirrors the wire shapes in src/types.ts so the UI can be
 // tested; the real behaviour of every command (validation, gates, migration, audit) is covered by the
 // Rust tests and by the --self-check contract test, not by this mock.
-import type { CatalogEntry, Evaluation, HealthReport, Inventory, PreferenceView, ProjectView, Recommendation, StoredObservation } from "../types";
+import type { CatalogEntry, CleanupPlan, Evaluation, HealthReport, Inventory, PreferenceView, ProjectView, Recommendation, StoredObservation } from "../types";
 
 export const SEED_IDS = [
   "ponytail", "codebase-memory-mcp", "graphify", "gitleaks", "markitdown", "caveman", "cloudflare-security-audit-skill", "superpowers", "betterleaks",
@@ -41,7 +41,9 @@ export const obs = (over: Partial<StoredObservation> = {}): StoredObservation =>
   limitations: ["Ad eşleşmesi: aynı adlı başka bir program olabilir."], identityVerified: false, functionalityTested: false,
   observedAt: new Date().toISOString(), stale: false, ageHours: 0, legacy: false, scanFinishedAt: new Date().toISOString(),
   scanAuthorizedPath: true, scanAuthorizedUserConfig: false, scanAuthorizedProject: false, provenance: "latest_scan", latestScanChecked: true,
-  current: true, notCurrentReason: null, ...over,
+  current: true, notCurrentReason: null,
+  ladder: { assessed: true, filenameDetected: true, installRecord: false, publisher: "none", identity: "unknown", version: "unknown", versionTrust: "none", signatureBlock: "not_assessed", notPerformed: ["active_version_probe", "installed_file_digest", "no_package_detector_for_tool"] },
+  ...over,
 });
 
 export const emptyInventory = (): Inventory => ({
@@ -60,6 +62,7 @@ export interface Backend {
   projects: ProjectView[];
   nextEvaluation: Evaluation;
   inventory: Inventory;
+  backupPlan: CleanupPlan;
   handle: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -88,6 +91,7 @@ export function createBackend(): Backend {
     ],
     nextEvaluation: { taskId: "t", phase: "start", recommendations: [], suppressed: [], disclaimer: "Hiçbir şey kurulmadı." },
     inventory: emptyInventory(),
+    backupPlan: { entries: [], preconditions: [], candidates: [], keep: [], deletionAvailable: false, executed: false, notes: ["Bu bir ÖNİZLEMEDİR: hiçbir yedek silinmedi, taşınmadı veya değiştirilmedi."] },
     async handle(cmd, args) {
       b.calls.push({ cmd, args });
       if (b.failures[cmd]) throw b.failures[cmd];
@@ -163,6 +167,7 @@ export function createBackend(): Backend {
           ];
         case "evaluate_task": return b.nextEvaluation;
         case "list_inventory": return JSON.parse(JSON.stringify(b.inventory));
+        case "preview_backup_cleanup": return JSON.parse(JSON.stringify(b.backupPlan));
         case "run_discovery_scan": {
           const r = args?.request as { pathExecutables: boolean; userConfig: boolean; project: unknown };
           if (!r.pathExecutables && !r.userConfig && !r.project) throw { code: "SCAN_NOT_AUTHORIZED", message: "Taramak için en az bir bölüme izin vermelisiniz; hiçbir şey okunmadı." };

@@ -146,3 +146,14 @@ export const observedLabel = (s: string) => OBSERVED[s] ?? s;
 
 export const subjectLabel = (subject: string, names: Record<string, string>) =>
   subject === "agent:claude-code" ? "Claude Code (ajan)" : subject === "agent:antigravity-ide" ? "Antigravity masaüstü IDE (ajan)" : names[subject] ?? subject;
+
+const NOT_PERFORMED: Record<string, string> = {
+  active_version_probe: "Sürüm sorgulanmadı: kimliği doğrulanmamış bir programı çalıştırmak güvenli sayılmadığı için hiçbir program çalıştırılmadı (etkin yoklama ayrı onay bekliyor).",
+  signature_chain_validation: "İmza zinciri, imzalayan, iptal durumu ve dosya özeti doğrulanmadı; imza bloğunun varlığı güven anlamına gelmez.",
+  signature_parsing_unsupported: "Bu işletim sisteminde dosya imzası okuyucusu yok; imza durumu değerlendirilmedi.",
+  installed_file_digest: "Kurulu dosyanın özeti (hash) katalogdaki sabitlenmiş bir değerle karşılaştırılmadı: katalogda kurulu dosya için sabitlenmiş özet yok.",
+  package_metadata_not_found: "Programın yanında beklenen paket kaydı bulunamadı.",
+  no_package_detector_for_tool: "Bu program için desteklenen bir paket yöneticisi kaydı okuyucusu yok (şu an yalnızca npm genel paketleri okunur).",
+  record_to_file_linkage: "Paket kaydının PATH'teki dosyayla aynı kurulumdan geldiği doğrulanmadı.",
+};
+export const notPerformedLabel = (s: string) => NOT_PERFORMED[s] ?? s;

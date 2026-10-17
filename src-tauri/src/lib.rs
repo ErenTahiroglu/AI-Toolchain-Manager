@@ -1,4 +1,5 @@
 mod audit;
+mod backups;
 mod catalog;
 #[cfg(test)]
 mod closure_tests;
@@ -207,6 +208,7 @@ pub fn run() {
             commands::evaluate_task,
             commands::run_discovery_scan,
             commands::list_inventory,
+            commands::preview_backup_cleanup,
             commands::list_prompt_sources,
             commands::run_health_checks,
             commands::list_audit_events,

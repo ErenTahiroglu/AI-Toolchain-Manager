@@ -24,6 +24,7 @@
     "allow-evaluate-task",
     "allow-run-discovery-scan",
     "allow-list-inventory",
+    "allow-preview-backup-cleanup",
     "allow-list-prompt-sources",
     "allow-run-health-checks",
     "allow-list-audit-events",

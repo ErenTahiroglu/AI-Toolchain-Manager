@@ -2,9 +2,9 @@ import { useMemo, useState } from "react";
 import { api, toAppError } from "../api";
 import { ErrorNotice, useLoad } from "../components/common";
 import {
-  configurationLabel, confidenceLabel, formatTime, methodLabel, obsScopeLabel, observedLabel, platformLabel, presenceLabel, subjectLabel, surfaceLabel,
+  configurationLabel, confidenceLabel, formatTime, methodLabel, notPerformedLabel, obsScopeLabel, observedLabel, platformLabel, presenceLabel, subjectLabel, surfaceLabel,
 } from "../labels";
-import type { AppError, ScanRef, StoredObservation } from "../types";
+import type { AppError, CleanupPlan, ScanRef, StoredObservation } from "../types";
 
 const permissionText = (p: { authorizedPath: boolean; authorizedUserConfig: boolean; authorizedProject: boolean }) => {
   const parts = [
@@ -28,6 +28,56 @@ function PresenceBadge({ presence }: { presence: string }) {
   return <span className={`badge ${presence === "unknown" || presence === "unsupported" ? "badge-skipped" : "badge-neutral"}`}>{presenceLabel(presence)}</span>;
 }
 
+
+type Step = { key: string; yes: boolean | null; text: string };
+
+/** Each conclusion is one line; none of them is green, and "functionality" is always untested. */
+function ladderSteps(o: StoredObservation): Step[] {
+  const l = o.ladder;
+  const versionText =
+    l.version === "known"
+      ? `Sürüm biliniyor (${l.versionTrust === "trusted" ? "kurulum kaydından" : "paketin kendi beyanından"})`
+      : l.version === "conflicted" ? "Sürüm çelişkili" : "Sürüm bilinmiyor";
+  return [
+    { key: "detected", yes: o.presence === "present", text: o.presence === "present" ? "Tespit edildi" : "Tespit edilmedi" },
+    { key: "configured", yes: o.configuration === "configured", text: o.configuration === "configured" ? "Yapılandırılmış" : "Yapılandırma kanıtı yok" },
+    {
+      key: "evidence",
+      yes: l.identity === "evidence_available" || l.identity === "validated",
+      text: l.identity === "evidence_available" || l.identity === "validated" ? "Kimlik kanıtı mevcut" : "Kimlik kanıtı yok",
+    },
+    { key: "validated", yes: l.identity === "validated", text: l.identity === "validated" ? "Kimlik doğrulandı (kayıt + sabitlenmiş kaynak)" : "Kimlik doğrulanmadı" },
+    { key: "version", yes: l.version === "known", text: versionText },
+    { key: "function", yes: false, text: "İşlev test edilmedi" },
+    ...(l.identity === "conflicted" || l.version === "conflicted" ? [{ key: "conflict", yes: null, text: "Çelişkili gözlemler var" } as Step] : []),
+    ...(o.stale || !o.current ? [{ key: "stale", yes: null, text: "Eski / güncel olmayan gözlem" } as Step] : []),
+  ];
+}
+
+function Ladder({ o }: { o: StoredObservation }) {
+  if (!o.ladder.assessed) {
+    return <p className="small muted">Kanıt basamakları bu kayıt için değerlendirilmedi (Phase 2B öncesi tarama).</p>;
+  }
+  return (
+    <>
+      <ul className="ladder small" aria-label="Kanıt basamakları">
+        {ladderSteps(o).map((st) => (
+          <li key={st.key}>
+            <span aria-hidden="true">{st.yes === true ? "●" : st.yes === false ? "○" : "◆"}</span> {st.text}{" "}
+            <a href={`#ev-${o.id}`} className="muted">(kanıt)</a>
+          </li>
+        ))}
+      </ul>
+      {o.ladder.notPerformed.length > 0 && (
+        <details>
+          <summary className="small">Yapılmayan kontroller ({o.ladder.notPerformed.length})</summary>
+          <ul className="small">{o.ladder.notPerformed.map((n) => <li key={n}>{notPerformedLabel(n)}</li>)}</ul>
+        </details>
+      )}
+    </>
+  );
+}
+
 function ObservationRow({ o }: { o: StoredObservation }) {
   return (
     <tr>
@@ -43,7 +93,7 @@ function ObservationRow({ o }: { o: StoredObservation }) {
         {o.functionalityTested ? <strong className="bad-text">UYARI: test edildi olarak işaretli</strong> : <>Hayır — işlev test edilmedi</>}
         <div className="muted">Kimlik doğrulandı: {o.identityVerified ? "evet" : "hayır"} · Güven: {confidenceLabel(o.confidence)}</div>
       </td>
-      <td className="small">
+      <td className="small" id={`ev-${o.id}`}>
         {o.evidence}
         {o.location && <div className="muted">Yer: {o.location}</div>}
         {o.limitations.length > 0 && (
@@ -53,6 +103,7 @@ function ObservationRow({ o }: { o: StoredObservation }) {
           </details>
         )}
       </td>
+      <td className="small"><Ladder o={o} /></td>
       <td className="small">
         {formatTime(o.observedAt)}
         <ScanProvenance scan={{ scanId: o.scanId, finishedAt: o.scanFinishedAt, authorizedPath: o.scanAuthorizedPath, authorizedUserConfig: o.scanAuthorizedUserConfig, authorizedProject: o.scanAuthorizedProject }} />
@@ -76,12 +127,70 @@ function ObservationTable({ subject, rows, names, earlier = false }: { subject: 
           <thead>
             <tr>
               <th scope="col">Kapsam / yöntem</th><th scope="col">Bulundu mu?</th><th scope="col">Yapılandırıldı mı?</th><th scope="col">Sürüm</th>
-              <th scope="col">İşlev doğrulandı mı?</th><th scope="col">Neden böyle düşünüldü</th><th scope="col">Gözlem zamanı ve kaynağı</th>
+              <th scope="col">İşlev doğrulandı mı?</th><th scope="col">Neden böyle düşünüldü</th><th scope="col">Kanıt basamakları</th><th scope="col">Gözlem zamanı ve kaynağı</th>
             </tr>
           </thead>
           <tbody>{rows.map((o) => <ObservationRow key={o.id} o={o} />)}</tbody>
         </table>
       </div>
+    </section>
+  );
+}
+
+
+function BackupPanel() {
+  const [plan, setPlan] = useState<CleanupPlan | null>(null);
+  const [error, setError] = useState<AppError | null>(null);
+  const [busy, setBusy] = useState(false);
+  const look = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setPlan(await api.previewBackupCleanup());
+    } catch (e) {
+      setError(toAppError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="panel" aria-labelledby="h-backups">
+      <h2 id="h-backups">Yedekler ve gizlilik</h2>
+      <p className="small">
+        Veritabanı güncellenmeden önce geri dönüş için bir yedek alınır. Yedek, o andaki verinin birebir kopyasıdır; eski sürümler tam klasör yollarını veya sunucu adlarını
+        saklamış olabilir ve bu kopyalar gizlilik düzeltmesinden sonra da <strong>olduğu gibi kalır</strong>. Aşağıdaki düğme yalnızca bakar: hiçbir şeyi silmez, taşımaz veya değiştirmez.
+      </p>
+      <p><button type="button" onClick={look} disabled={busy}>Yedekleri incele</button></p>
+      {error && <ErrorNotice error={error} />}
+      {plan && (
+        <div aria-live="polite">
+          {plan.entries.length === 0 ? <p>Kayıtlı yedek yok.</p> : (
+            <div className="table-wrap">
+              <table>
+                <caption className="sr-only">Veritabanı yedekleri</caption>
+                <thead><tr><th scope="col">Yedek</th><th scope="col">Şema</th><th scope="col">Boyut</th><th scope="col">Eski kişisel bilgi taşıyabilir mi?</th></tr></thead>
+                <tbody>
+                  {plan.entries.map((e) => (
+                    <tr key={e.fileName}>
+                      <th scope="row" className="small">{e.fileName}</th>
+                      <td className="small">v{e.schemaVersion ?? "?"}</td>
+                      <td className="small">{Math.max(1, Math.round(e.sizeBytes / 1024))} KB</td>
+                      <td className="small">
+                        {e.mayHoldOldPersonalData === "yes" ? `Evet (${e.rowsFailingPrivacyGate} kayıt)` : e.mayHoldOldPersonalData === "no" ? "Bulunmadı" : "Bilinmiyor (açılamadı)"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <ul className="small">
+            {plan.preconditions.map((c) => <li key={c.id}>{c.ok ? "Tamam" : "SORUN"}: {c.text}</li>)}
+          </ul>
+          <ul className="small">{plan.notes.map((n) => <li key={n}>{n}</li>)}</ul>
+          <p className="small"><strong>Silme bu sürümde yoktur.</strong> İleride yalnızca sizin açık onayınızla önerilecektir.</p>
+        </div>
+      )}
     </section>
   );
 }
@@ -235,6 +344,8 @@ export function InventoryPage() {
           </ul>
         </section>
       )}
+
+      <BackupPanel />
 
       <section aria-labelledby="h-nc">
         <h2 id="h-nc">Bakılmayanlar</h2>

@@ -194,7 +194,7 @@ fn check_discovery(conn: &Connection) -> CheckResult {
     let unsafe_rows = (|| -> rusqlite::Result<i64> {
         use crate::discovery::privacy;
         let mut stmt = conn.prepare(
-            "SELECT evidence, limitations_json, version, version_source, location, project_alias, functionality_tested FROM discovery_observations",
+            "SELECT evidence, limitations_json, version, version_source, location, project_alias, functionality_tested, provenance_json, identity_state, identity_verified FROM discovery_observations",
         )?;
         let mut bad = 0;
         for row in stmt.query_map([], |r| {
@@ -206,11 +206,19 @@ fn check_discovery(conn: &Connection) -> CheckResult {
                 r.get::<_, Option<String>>(4)?,
                 r.get::<_, Option<String>>(5)?,
                 r.get::<_, i64>(6)?,
+                r.get::<_, String>(7)?,
+                r.get::<_, String>(8)?,
+                r.get::<_, i64>(9)?,
             ))
         })? {
-            let (evidence, limitations, version, source, location, alias, tested) = row?;
+            let (evidence, limitations, version, source, location, alias, tested, ladder, identity_state, identity_verified) = row?;
+            // The evidence ladder must parse as closed vocabulary and agree with the columns and the verified flag.
+            let ladder_bad = (identity_verified == 1) != (identity_state == "validated")
+                || (ladder != "{}"
+                    && serde_json::from_str::<privacy::LadderCheck>(&ladder).map(|l| l.identity != identity_state).unwrap_or(true));
             let limitation_list: Vec<String> = serde_json::from_str(&limitations).unwrap_or_else(|_| vec!["\u{1}".to_string()]); // an unreadable list counts as unsafe
             if tested != 0
+                || ladder_bad
                 || !privacy::text_is_clean(&evidence)
                 || limitation_list.iter().any(|l| !privacy::text_is_clean(l))
                 || version.as_deref().map(|v| !privacy::is_documented_version(v)).unwrap_or(false)
@@ -277,6 +285,7 @@ pub const ALLOWED_PERMISSIONS: &[&str] = &[
     "allow-evaluate-task",
     "allow-run-discovery-scan",
     "allow-list-inventory",
+    "allow-preview-backup-cleanup",
     "allow-list-prompt-sources",
     "allow-run-health-checks",
     "allow-list-audit-events",

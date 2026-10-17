@@ -221,6 +221,13 @@ pub fn run_discovery_scan(state: State<'_, AppState>, request: ScanRequest) -> A
     })
 }
 
+/// Read-only preview of old pre-migration backups. It never deletes, moves or rewrites a backup.
+#[tauri::command]
+pub fn preview_backup_cleanup(state: State<'_, AppState>) -> AppResult<crate::backups::CleanupPlan> {
+    let dir = std::path::Path::new(&state.data_dir).join("backups");
+    state.with_db(|c| crate::backups::cleanup_plan(c, &dir))
+}
+
 #[tauri::command]
 pub fn list_inventory(state: State<'_, AppState>) -> AppResult<Inventory> {
     state.with_db(discovery::store::inventory)

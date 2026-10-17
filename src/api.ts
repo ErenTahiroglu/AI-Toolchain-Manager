@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppError, AppInfo, AuditEvent, CatalogEntry, ChainReport, Dashboard, DiagnosticRow, Evaluation, ExecutionBlock, HealthReport,
-  Inventory, PreferenceView, ProjectView, PromptSourceRow, ScanRequest, ScanSummary, Scenario, Settings, StartupState, TaskInput, UrlPreview,
+  CleanupPlan, Inventory, PreferenceView, ProjectView, PromptSourceRow, ScanRequest, ScanSummary, Scenario, Settings, StartupState, TaskInput, UrlPreview,
 } from "./types";
 
 /** Normalises whatever the IPC layer throws into the AppError shape the UI renders. */
@@ -59,6 +59,8 @@ export const api = {
   // Read-only discovery. Never installs, runs or verifies anything.
   runDiscoveryScan: (request: ScanRequest) => call<ScanSummary>("run_discovery_scan", { request }),
   listInventory: () => call<Inventory>("list_inventory"),
+  // Read-only preview of old database backups; it cannot delete anything.
+  previewBackupCleanup: () => call<CleanupPlan>("preview_backup_cleanup"),
 
   listPromptSources: () => call<PromptSourceRow[]>("list_prompt_sources"),
   runHealthChecks: () => call<HealthReport>("run_health_checks"),

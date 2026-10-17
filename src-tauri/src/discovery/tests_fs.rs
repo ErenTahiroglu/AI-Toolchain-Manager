@@ -266,3 +266,119 @@ fn an_unreadable_parent_folder_is_reported_not_crashed() {
         assert_eq!(result.unwrap_err().code, "PROJECT_DIR_UNREADABLE");
     }
 }
+
+// ------------------------------------------------------------------------------------------------
+// Issue #6 / RT-2A-R1: the file-system type of EVERY directory is judged, and "cannot tell" means "do not read".
+// The lookup is simulated through a test seam keyed by inode. These are NOT live network-mount tests: no network
+// volume was mounted or accessed.
+// ------------------------------------------------------------------------------------------------
+
+#[cfg(unix)]
+mod fstype_seam {
+    use super::*;
+    use std::os::unix::fs::MetadataExt;
+
+    fn ino(p: &Path) -> u64 {
+        fs::metadata(p).unwrap().ino()
+    }
+
+    fn stages_during(f: impl FnOnce()) -> Vec<String> {
+        let seen = Rc::new(RefCell::new(Vec::<String>::new()));
+        let s = seen.clone();
+        fsx::hook::set(move |stage| s.borrow_mut().push(stage.to_string()));
+        f();
+        let out = seen.borrow().clone();
+        out
+    }
+
+    #[test]
+    fn a_normal_local_folder_is_read_through_the_real_lookup() {
+        let env = Env::new();
+        let project = layout(&env);
+        fsx::hook::clear();
+        assert!(matches!(fsx::read_text(&project, &[".mcp.json"], 1000), ReadOutcome::Text(_)));
+        assert!(matches!(fsx::dir_exists(&project, &[".claude"]), Walk::Found { .. }));
+        assert!(validate_project_dir(&project.to_string_lossy()).is_ok(), "legitimate local installations keep working");
+    }
+
+    #[test]
+    fn a_failed_fstatfs_below_the_selected_root_refuses_the_folder_and_nothing_is_opened() {
+        let env = Env::new();
+        let project = layout(&env);
+        let claude = ino(&project.join(".claude"));
+        fsx::hook::set_fstype(move |i| (i == claude).then_some(Err(())));
+        let mut outcome = None;
+        let stages = stages_during(|| outcome = Some(fsx::read_text(&project, &[".claude", "settings.json"], 1000)));
+        fsx::hook::clear();
+        assert!(matches!(outcome, Some(ReadOutcome::Skipped(Skip::UnknownFilesystem))), "{outcome:?}");
+        assert!(!stages.iter().any(|s| s == "before-open"), "no file below the unverifiable folder was opened");
+    }
+
+    #[test]
+    fn a_failed_fstatfs_on_the_root_itself_refuses_everything_below_it() {
+        let env = Env::new();
+        let project = layout(&env);
+        let root = ino(&project);
+        fsx::hook::set_fstype(move |i| (i == root).then_some(Err(())));
+        let outcome = fsx::read_text(&project, &[".mcp.json"], 1000);
+        fsx::hook::clear();
+        assert!(matches!(outcome, ReadOutcome::Skipped(Skip::UnknownFilesystem)), "{outcome:?}");
+    }
+
+    #[test]
+    fn a_network_filesystem_mounted_below_the_root_is_refused_but_its_local_siblings_still_work() {
+        let env = Env::new();
+        let project = layout(&env);
+        let claude = ino(&project.join(".claude"));
+        fsx::hook::set_fstype(move |i| (i == claude).then_some(Ok("smbfs".to_string())));
+        let stages = stages_during(|| {
+            assert!(matches!(fsx::read_text(&project, &[".claude", "settings.json"], 1000), ReadOutcome::Skipped(Skip::Network)));
+            assert!(matches!(fsx::walk(&project, &[".claude"], FinalKind::Dir, false), Walk::Skipped(Skip::Network)));
+            assert!(matches!(fsx::dir_exists(&project, &[".claude"]), Walk::Skipped(Skip::Network)));
+        });
+        assert!(!stages.iter().any(|s| s == "before-open"), "nothing was read from the simulated network mount");
+        assert!(matches!(fsx::read_text(&project, &[".mcp.json"], 1000), ReadOutcome::Text(_)), "the local sibling is unaffected");
+        fsx::hook::clear();
+        // The detector reports it as unread, with the reason, instead of treating it as absent.
+        fsx::hook::set_fstype({
+            let claude = ino(&project.join(".claude"));
+            move |i| (i == claude).then_some(Ok("nfs".to_string()))
+        });
+        let obs = detect::detect_all(
+            &env.roots(),
+            &Authorization {
+                path_executables: false,
+                user_config: false,
+                project: Some(ProjectScan { alias: "proje".into(), dir: project.clone() }),
+            },
+        );
+        fsx::hook::clear();
+        let s = find(&obs, "agent:claude-code", Scope::Project, Method::ClaudeSettingsFile);
+        assert_eq!(s.configuration, Configuration::Unknown, "{}", s.evidence);
+        assert!(s.evidence.contains("ağ paylaşımı"), "{}", s.evidence);
+    }
+
+    #[test]
+    fn an_unrecognised_filesystem_type_is_refused() {
+        let env = Env::new();
+        let project = layout(&env);
+        let claude = ino(&project.join(".claude"));
+        fsx::hook::set_fstype(move |i| (i == claude).then_some(Ok("macfuse".to_string())));
+        let outcome = fsx::read_text(&project, &[".claude", "settings.json"], 1000);
+        fsx::hook::clear();
+        assert!(matches!(outcome, ReadOutcome::Skipped(Skip::UnknownFilesystem)), "{outcome:?}");
+    }
+
+    #[test]
+    fn a_network_filesystem_on_a_path_folder_or_the_home_folder_is_skipped_by_the_detector() {
+        let env = Env::new();
+        env.fake_exe("gitleaks");
+        env.home_write(".claude/settings.json", &settings(&[(FD_KEY, true)]));
+        let (bin, home) = (ino(&env.bin), ino(&env.home));
+        fsx::hook::set_fstype(move |i| (i == bin || i == home).then_some(Ok("webdav".to_string())));
+        let obs = detect::detect_all(&env.roots(), &all_auth(None));
+        fsx::hook::clear();
+        assert_eq!(find(&obs, "gitleaks", Scope::Global, Method::PathExecutable).presence, Presence::Unknown);
+        assert_eq!(find(&obs, "agent:claude-code", Scope::Global, Method::ClaudeSettingsFile).configuration, Configuration::Unknown);
+    }
+}

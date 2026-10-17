@@ -108,6 +108,7 @@ pub fn synthetic_probe(conn: &Connection, dir: &Path) -> AppResult<Value> {
         home: Some(home.clone()),
         path_entries: vec![bin.clone()],
         system_dirs: vec![],
+        pins: vec![],
     };
     let auth = Authorization {
         path_executables: true,

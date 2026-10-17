@@ -3,7 +3,7 @@
 //! (we know it is the catalogued tool) and *functionality* (it was tested — always `false` in Phase 2A).
 
 use crate::redact;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -126,6 +126,122 @@ impl Method {
     }
 }
 
+// ---- Phase 2B: passive provenance ladder --------------------------------------------------------------------------
+// Six separate facts, never collapsed into one "ok": (1) a file name was seen, (2) an installation record exists,
+// (3) publisher/source metadata exists, (4) identity evidence was validated against a trust anchor, (5) a version came
+// from trusted metadata, (6) functionality was tested. The sixth is `functionality_tested` and stays false.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityState {
+    /// No provenance check applies to this observation (or none ran).
+    #[default]
+    NotAssessed,
+    /// Checks ran and found nothing beyond a file name.
+    Unknown,
+    /// A record or declaration exists, but nothing that proves it belongs to the catalogued tool.
+    EvidenceAvailable,
+    /// An installation record from a trusted installer names the catalog-pinned source. Not a statement about safety or function.
+    Validated,
+    /// Sources disagree (different publisher, name, or duplicate copies with differing records).
+    Conflicted,
+}
+
+impl IdentityState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            IdentityState::NotAssessed => "not_assessed",
+            IdentityState::Unknown => "unknown",
+            IdentityState::EvidenceAvailable => "evidence_available",
+            IdentityState::Validated => "validated",
+            IdentityState::Conflicted => "conflicted",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VersionState {
+    #[default]
+    Unknown,
+    Known,
+    Conflicted,
+}
+
+impl VersionState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            VersionState::Unknown => "unknown",
+            VersionState::Known => "known",
+            VersionState::Conflicted => "conflicted",
+        }
+    }
+}
+
+/// How far a version can be believed. Never obtained by running anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VersionTrust {
+    #[default]
+    None,
+    /// Written by a package's own metadata (the package author controls it).
+    Declared,
+    /// Written by the agent's own installer record (Claude Code plugin registry).
+    Trusted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Publisher {
+    #[default]
+    None,
+    /// The package or record names its own source; the author controls that claim.
+    SelfDeclared,
+    /// The installer recorded the marketplace the plugin came from.
+    Marketplace,
+}
+
+/// An embedded Windows (Authenticode) signature block seen in the file header. Presence is NOT validity: the chain,
+/// the signer, revocation and the file hash are not checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SignatureBlock {
+    #[default]
+    NotAssessed,
+    Absent,
+    PresentUnvalidated,
+    /// Not a readable PE file.
+    Unreadable,
+}
+
+/// Closed list of checks that were NOT performed, each with a fixed explanation in the UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotPerformed {
+    ActiveVersionProbe,
+    SignatureChainValidation,
+    SignatureParsingUnsupported,
+    InstalledFileDigest,
+    PackageMetadataNotFound,
+    NoPackageDetectorForTool,
+    RecordToFileLinkage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Provenance {
+    /// False for rows written before Phase 2B: their ladder was never evaluated.
+    pub assessed: bool,
+    pub filename_detected: bool,
+    pub install_record: bool,
+    pub publisher: Publisher,
+    pub identity: IdentityState,
+    pub version: VersionState,
+    pub version_trust: VersionTrust,
+    pub signature_block: SignatureBlock,
+    pub not_performed: Vec<NotPerformed>,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Observation {
@@ -148,8 +264,9 @@ pub struct Observation {
     pub limitations: Vec<String>,
     /// We know it is the catalogued tool (exact identity match), not just a similar name.
     pub identity_verified: bool,
-    /// Always false in Phase 2A: nothing is executed, so nothing can have been functionally tested.
+    /// Always false: nothing is executed, so nothing can have been functionally tested.
     pub functionality_tested: bool,
+    pub provenance: Provenance,
 }
 
 impl Observation {
@@ -171,6 +288,7 @@ impl Observation {
             limitations: Vec::new(),
             identity_verified: false,
             functionality_tested: false,
+            provenance: Provenance::default(),
         }
     }
 
@@ -206,8 +324,31 @@ impl Observation {
         self.project_alias = alias.map(str::to_string);
         self
     }
-    pub fn identity(mut self, verified: bool) -> Self {
-        self.identity_verified = verified;
+    pub fn identity_state(mut self, s: IdentityState) -> Self {
+        self.provenance.identity = s;
+        self
+    }
+    pub fn install_record(mut self, found: bool) -> Self {
+        self.provenance.install_record = found;
+        self
+    }
+    pub fn publisher(mut self, p: Publisher) -> Self {
+        self.provenance.publisher = p;
+        self
+    }
+    pub fn version_state(mut self, v: VersionState, trust: VersionTrust) -> Self {
+        self.provenance.version = v;
+        self.provenance.version_trust = trust;
+        self
+    }
+    pub fn signature(mut self, b: SignatureBlock) -> Self {
+        self.provenance.signature_block = b;
+        self
+    }
+    pub fn not_performed(mut self, n: NotPerformed) -> Self {
+        if !self.provenance.not_performed.contains(&n) {
+            self.provenance.not_performed.push(n);
+        }
         self
     }
     pub fn version(mut self, v: Option<String>, source: &str) -> Self {
@@ -225,6 +366,54 @@ impl Observation {
         self.location = self.location.map(|l| l.chars().filter(|c| !c.is_control()).take(300).collect());
         super::privacy::scrub(&mut self);
         self.functionality_tested = false;
+        self.finalize_provenance();
         self
+    }
+}
+
+impl Observation {
+    /// The ladder's invariants, enforced whatever a detector asked for:
+    /// * "validated" needs an installation record AND a marketplace publisher recorded by the installer;
+    /// * a version that did not survive the privacy gate is "unknown", and a "known" version needs a trust level;
+    /// * a file name alone never raises identity above "unknown";
+    /// * `identity_verified` is derived, never set on its own.
+    fn finalize_provenance(&mut self) {
+        let p = &mut self.provenance;
+        p.assessed = true;
+        p.filename_detected = self.presence == Presence::Present
+            && matches!(self.method, Method::PathExecutable | Method::NativeInstallLocation | Method::LegacyLocalInstall);
+        if p.identity == IdentityState::Validated && !(p.install_record && p.publisher == Publisher::Marketplace) {
+            p.identity = if p.install_record { IdentityState::EvidenceAvailable } else { IdentityState::Unknown };
+        }
+        if p.identity == IdentityState::EvidenceAvailable && !p.install_record && p.publisher == Publisher::None {
+            p.identity = IdentityState::Unknown;
+        }
+        match (self.version.is_some(), p.version) {
+            (true, VersionState::Conflicted) => {
+                self.version = None;
+                self.version_source = None;
+            }
+            (true, _) => {
+                p.version = VersionState::Known;
+                if p.version_trust == VersionTrust::None {
+                    p.version_trust = VersionTrust::Declared;
+                }
+            }
+            (false, VersionState::Conflicted) => p.version_trust = VersionTrust::None,
+            (false, _) => {
+                p.version = VersionState::Unknown;
+                p.version_trust = VersionTrust::None;
+            }
+        }
+        if p.signature_block == SignatureBlock::PresentUnvalidated && !p.not_performed.contains(&NotPerformed::SignatureChainValidation) {
+            p.not_performed.push(NotPerformed::SignatureChainValidation);
+        }
+        if p.filename_detected && p.version == VersionState::Unknown && !p.not_performed.contains(&NotPerformed::ActiveVersionProbe) {
+            p.not_performed.push(NotPerformed::ActiveVersionProbe);
+        }
+        if p.filename_detected && !p.not_performed.contains(&NotPerformed::InstalledFileDigest) {
+            p.not_performed.push(NotPerformed::InstalledFileDigest);
+        }
+        self.identity_verified = p.identity == IdentityState::Validated;
     }
 }

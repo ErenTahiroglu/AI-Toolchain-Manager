@@ -291,6 +291,44 @@ export interface StoredObservation {
   /** From the latest scan, fresh, and for this computer's platform. Only a current observation describes today. */
   current: boolean;
   notCurrentReason: string | null;
+  ladder: Ladder;
+}
+
+export type IdentityState = "not_assessed" | "unknown" | "evidence_available" | "validated" | "conflicted";
+export type NotPerformed =
+  | "active_version_probe" | "signature_chain_validation" | "signature_parsing_unsupported" | "installed_file_digest"
+  | "package_metadata_not_found" | "no_package_detector_for_tool" | "record_to_file_linkage";
+
+/** The Phase 2B evidence ladder. `assessed` is false for rows written before it existed. */
+export interface Ladder {
+  assessed: boolean;
+  filenameDetected: boolean;
+  installRecord: boolean;
+  publisher: "none" | "self_declared" | "marketplace";
+  identity: IdentityState;
+  version: "unknown" | "known" | "conflicted";
+  versionTrust: "none" | "declared" | "trusted";
+  signatureBlock: "not_assessed" | "absent" | "present_unvalidated" | "unreadable";
+  notPerformed: NotPerformed[];
+}
+
+export interface BackupEntry {
+  fileName: string;
+  schemaVersion: number | null;
+  sizeBytes: number;
+  modified: string;
+  mayHoldOldPersonalData: "yes" | "no" | "unknown";
+  rowsFailingPrivacyGate: number;
+}
+
+export interface CleanupPlan {
+  entries: BackupEntry[];
+  preconditions: { id: string; ok: boolean; text: string }[];
+  candidates: string[];
+  keep: string[];
+  deletionAvailable: boolean;
+  executed: boolean;
+  notes: string[];
 }
 
 export interface ScanRef {

@@ -22,6 +22,8 @@ mod fs_security;
 mod history;
 #[path = "tests_privacy.rs"]
 mod privacy_gate;
+#[path = "tests_provenance.rs"]
+mod provenance;
 
 /// A dummy token used to prove nothing from configuration files leaks. It is not a real credential.
 const SENTINEL: &str = "ghp_SENTINELSENTINELSENTINELSENTINEL12";
@@ -62,7 +64,13 @@ impl Env {
     }
 
     fn roots(&self) -> Roots {
-        Roots { platform: platform().to_string(), home: Some(self.home.clone()), path_entries: vec![self.bin.clone()], system_dirs: vec![] }
+        Roots {
+            platform: platform().to_string(),
+            home: Some(self.home.clone()),
+            path_entries: vec![self.bin.clone()],
+            system_dirs: vec![],
+            pins: vec![],
+        }
     }
 
     fn write(&self, rel_from_root: &str, content: &str) -> PathBuf {

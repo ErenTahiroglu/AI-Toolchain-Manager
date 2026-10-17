@@ -163,6 +163,7 @@ fn so(subject: &str, alias: Option<&str>, surface: &str, platform: &str, presenc
         latest_scan_checked: current,
         current,
         not_current_reason: if current { None } else { Some("eski".into()) },
+        ladder: crate::discovery::types::Provenance::default(),
     }
 }
 

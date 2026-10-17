@@ -66,6 +66,45 @@ pub struct Roots {
     /// Folders owned by the operating system or a package manager. Used only to *classify* a PATH folder in a
     /// location label ("system or package manager folder"); the folder's own path is never shown.
     pub system_dirs: Vec<PathBuf>,
+    /// Catalog-pinned provenance: the source repository each catalog entry names. Loaded from the catalog by the
+    /// caller; the detectors never reach the database themselves.
+    pub pins: Vec<CatalogPin>,
+}
+
+/// What the catalog pins about an entry's origin: `owner/repo` of its repository, lower-case.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogPin {
+    pub entry_id: String,
+    pub repo_slug: String,
+}
+
+impl CatalogPin {
+    /// `https://github.com/Owner/Repo(.git)` -> `owner/repo`. Anything else yields None.
+    pub fn from_repo_url(entry_id: &str, url: &str) -> Option<CatalogPin> {
+        normalise_repo(url).map(|repo_slug| CatalogPin { entry_id: entry_id.to_string(), repo_slug })
+    }
+}
+
+/// Normalises the repository spellings found in package metadata and in the catalog to `owner/repo` (GitHub only).
+pub fn normalise_repo(raw: &str) -> Option<String> {
+    let mut t = raw.trim().trim_end_matches('/').to_ascii_lowercase();
+    for prefix in ["git+", "github:"] {
+        if let Some(r) = t.strip_prefix(prefix) {
+            t = r.to_string();
+        }
+    }
+    for prefix in
+        ["https://github.com/", "http://github.com/", "ssh://git@github.com/", "git://github.com/", "git@github.com:", "www.github.com/"]
+    {
+        if let Some(r) = t.strip_prefix(prefix) {
+            t = r.to_string();
+            break;
+        }
+    }
+    let t = t.strip_suffix(".git").unwrap_or(&t).trim_end_matches('/').to_string();
+    let (owner, repo) = t.split_once('/')?;
+    let ok = |x: &str| !x.is_empty() && x.len() <= 100 && x.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'));
+    (ok(owner) && ok(repo)).then(|| format!("{owner}/{repo}"))
 }
 
 impl Roots {
@@ -87,7 +126,7 @@ impl Roots {
         } else {
             ["/usr", "/bin", "/sbin", "/opt", "/System", "/Library", "/Applications"].iter().map(PathBuf::from).collect()
         };
-        Roots { platform: platform.to_string(), home, path_entries, system_dirs }
+        Roots { platform: platform.to_string(), home, path_entries, system_dirs, pins: Vec::new() }
     }
 
     /// A label for a PATH folder that carries no private folder name: its position in PATH and a coarse category.
@@ -218,6 +257,179 @@ fn scan_path(roots: &Roots, bases: &[&str]) -> PathScan {
     scan
 }
 
+// ---------------------------------------------------------------------------------------------
+// Phase 2B: passive provenance (nothing is executed; only metadata files are read)
+// ---------------------------------------------------------------------------------------------
+
+/// Catalog entries whose program is distributed as a global npm package: (entry id, npm package name). The package
+/// name is the one the project's own README documents (evidence R28); it is not proof of identity by itself.
+const NPM_PACKAGES: &[(&str, &str)] = &[("agent-browser", "agent-browser")];
+const VERSION_SOURCE_NPM: &str = "npm paket kaydı";
+
+#[derive(Debug, PartialEq, Eq)]
+enum RepoClaim {
+    Absent,
+    NoPin,
+    Matches,
+    Differs,
+}
+
+#[derive(Debug)]
+struct NpmRecord {
+    name_ok: bool,
+    version: Option<String>,
+    repo: RepoClaim,
+}
+
+enum NpmLookup {
+    Record(NpmRecord),
+    Missing,
+    Unreadable,
+}
+
+/// `package.json` of a global npm package next to a PATH hit: Windows keeps `node_modules` beside the shims, macOS
+/// keeps it in `<prefix>/lib/node_modules` with the shim in `<prefix>/bin`.
+fn npm_lookup(roots: &Roots, hit: &Hit, package: &str, pin: Option<&str>) -> NpmLookup {
+    let read = if roots.is_windows() {
+        fsx::read_text(&hit.dir, &["node_modules", package, "package.json"], MAX_SMALL_BYTES)
+    } else {
+        match hit.dir.parent() {
+            Some(prefix) => fsx::read_text(prefix, &["lib", "node_modules", package, "package.json"], MAX_SMALL_BYTES),
+            None => return NpmLookup::Missing,
+        }
+    };
+    let text = match read {
+        ReadOutcome::Text(t) => t,
+        ReadOutcome::NotFound => return NpmLookup::Missing,
+        ReadOutcome::Skipped(_) => return NpmLookup::Unreadable,
+    };
+    let Ok(Value::Object(doc)) = serde_json::from_str::<Value>(&text) else { return NpmLookup::Unreadable };
+    let name_ok = doc.get("name").and_then(Value::as_str) == Some(package);
+    let version = doc.get("version").and_then(Value::as_str).filter(|v| privacy::is_documented_version(v)).map(str::to_string);
+    let claimed = match doc.get("repository") {
+        Some(Value::String(u)) => normalise_repo(u),
+        Some(Value::Object(o)) => o.get("url").and_then(Value::as_str).and_then(normalise_repo),
+        _ => None,
+    };
+    let repo = match (claimed, pin) {
+        (None, _) => RepoClaim::Absent,
+        (Some(_), None) => RepoClaim::NoPin,
+        (Some(c), Some(p)) if c == p => RepoClaim::Matches,
+        (Some(_), Some(_)) => RepoClaim::Differs,
+    };
+    NpmLookup::Record(NpmRecord { name_ok, version, repo })
+}
+
+/// Reads the PE header and reports whether an embedded signature block is present. It does not validate it.
+pub fn pe_signature(header: &[u8]) -> SignatureBlock {
+    let u16_at = |o: usize| header.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]]));
+    let u32_at = |o: usize| header.get(o..o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+    if header.get(0..2) != Some(b"MZ") {
+        return SignatureBlock::Unreadable;
+    }
+    let Some(pe) = u32_at(0x3c).map(|v| v as usize) else { return SignatureBlock::Unreadable };
+    if header.get(pe..pe + 4) != Some(b"PE\0\0") {
+        return SignatureBlock::Unreadable;
+    }
+    let optional = pe + 24;
+    let directory = match u16_at(optional) {
+        Some(0x10b) => optional + 0x60,
+        Some(0x20b) => optional + 0x70,
+        _ => return SignatureBlock::Unreadable,
+    };
+    // Data directory 4 is the certificate table: (file offset, size).
+    match (u32_at(directory + 4 * 8), u32_at(directory + 4 * 8 + 4)) {
+        (Some(offset), Some(size)) if offset > 0 && size > 0 => SignatureBlock::PresentUnvalidated,
+        (Some(_), Some(_)) => SignatureBlock::Absent,
+        _ => SignatureBlock::Unreadable,
+    }
+}
+
+fn signature_of(roots: &Roots, root: &Path, rel: &[&str]) -> SignatureBlock {
+    if !roots.is_windows() || !rel.last().map(|f| f.ends_with(".exe")).unwrap_or(false) {
+        return SignatureBlock::NotAssessed;
+    }
+    match fsx::read_prefix(root, rel, 4096) {
+        Ok(bytes) => pe_signature(&bytes),
+        Err(_) => SignatureBlock::Unreadable,
+    }
+}
+
+fn with_signature(mut obs: Observation, roots: &Roots, sig: SignatureBlock) -> Observation {
+    obs = obs.signature(sig);
+    match sig {
+        SignatureBlock::PresentUnvalidated => {
+            obs = obs.limit("Dosyada gömülü bir imza bloğu var; imzanın geçerliliği, imzalayan ve dosya özeti doğrulanmadı.")
+        }
+        SignatureBlock::Absent => obs = obs.limit("Dosyada gömülü imza bloğu yok (imzasız)."),
+        SignatureBlock::Unreadable => obs = obs.limit("Dosya başlığı beklenen biçimde okunamadığı için imza durumu belirlenemedi."),
+        SignatureBlock::NotAssessed if !roots.is_windows() => obs = obs.not_performed(NotPerformed::SignatureParsingUnsupported),
+        SignatureBlock::NotAssessed => {}
+    }
+    obs
+}
+
+/// Builds the evidence ladder for a program found on PATH from the metadata that sits next to it. Several copies with
+/// differing records, a package whose own name or source disagrees with the catalog, or conflicting versions are
+/// reported as conflicts, not resolved.
+fn path_provenance(mut obs: Observation, subject: &str, roots: &Roots, hits: &[Hit]) -> Observation {
+    let first = &hits[0];
+    let sig = if first.link { SignatureBlock::NotAssessed } else { signature_of(roots, &first.dir, &[first.file.as_str()]) };
+    obs = with_signature(obs, roots, sig);
+    let Some(package) = NPM_PACKAGES.iter().find(|(e, _)| *e == subject).map(|(_, p)| *p) else {
+        return obs
+            .identity_state(IdentityState::Unknown)
+            .not_performed(NotPerformed::NoPackageDetectorForTool)
+            .limit("Bu program için desteklenen bir paket yöneticisi kaydı okuyucusu yok; yalnızca dosya adı eşleşti.");
+    };
+    let pin = roots.pins.iter().find(|p| p.entry_id == subject).map(|p| p.repo_slug.as_str());
+    let lookups: Vec<NpmLookup> = hits.iter().map(|h| npm_lookup(roots, h, package, pin)).collect();
+    let records: Vec<&NpmRecord> = lookups.iter().filter_map(|l| if let NpmLookup::Record(r) = l { Some(r) } else { None }).collect();
+    if lookups.iter().any(|l| matches!(l, NpmLookup::Unreadable)) {
+        obs = obs.limit("Bir npm paket kaydı okunamadı veya bozuk; bu kayıt kanıt sayılmadı.");
+    }
+    if records.is_empty() {
+        return obs
+            .identity_state(IdentityState::Unknown)
+            .not_performed(NotPerformed::PackageMetadataNotFound)
+            .limit("Yanındaki npm paket kaydı bulunamadı; kimlik yalnızca dosya adına dayanıyor.");
+    }
+    obs = obs.install_record(true).not_performed(NotPerformed::RecordToFileLinkage);
+    let name_conflict = records.iter().any(|r| !r.name_ok);
+    let source_conflict = records.iter().any(|r| r.repo == RepoClaim::Differs);
+    let mut versions: Vec<&str> = records.iter().filter_map(|r| r.version.as_deref()).collect();
+    versions.sort_unstable();
+    versions.dedup();
+    let mixed = hits.len() > 1 && records.len() != hits.len();
+    if records.iter().any(|r| r.repo == RepoClaim::Matches) && !source_conflict {
+        obs = obs.publisher(Publisher::SelfDeclared);
+    }
+    obs = if name_conflict || source_conflict {
+        obs.identity_state(IdentityState::Conflicted).limit(if name_conflict {
+            "Paket kaydındaki ad beklenen paket adıyla uyuşmuyor; kayıt güvenilmedi."
+        } else {
+            "Paket kaydının bildirdiği kaynak deposu katalogdaki depoyla uyuşmuyor."
+        })
+    } else if mixed {
+        obs.identity_state(IdentityState::Unknown)
+            .limit("PATH içindeki kopyaların yalnızca bir kısmının paket kaydı var; hangisinin kullanılacağı belirsiz.")
+    } else {
+        obs.identity_state(IdentityState::EvidenceAvailable)
+            .limit("Paket kaydı paketin kendi beyanıdır ve PATH dosyasına bağlandığı doğrulanmadı; kimlik doğrulanmış sayılmaz.")
+    };
+    if versions.len() > 1 {
+        return obs
+            .version_state(VersionState::Conflicted, VersionTrust::None)
+            .limit("Paket kayıtları birbiriyle çelişen sürümler bildiriyor.");
+    }
+    match versions.first() {
+        Some(v) if !mixed && !name_conflict && !source_conflict => {
+            obs.version(Some((*v).to_string()), VERSION_SOURCE_NPM).version_state(VersionState::Known, VersionTrust::Declared)
+        }
+        _ => obs.limit("Güvenilir bir sürüm bilgisi elde edilemedi."),
+    }
+}
+
 const NO_VERSION_NOTE: &str =
     "Sürüm öğrenilmedi: kimliği doğrulanmamış bir programı çalıştırmak güvenli sayılmadığı için hiçbir program çalıştırılmadı.";
 
@@ -235,6 +447,7 @@ fn path_observation(subject: &str, surface: &str, base: &str, roots: &Roots, sca
                     "PATH klasörlerinden birinde '{base}' adlı bir dosya bulundu. Bu yalnızca bir ad eşleşmesidir; dosyanın gerçekten bu araç olduğu doğrulanmadı."
                 ))
                 .limit("Ad eşleşmesi: aynı adlı başka bir program olabilir.");
+            obs = path_provenance(obs, subject, roots, hits);
             if first.link {
                 obs = obs.limit("Dosya bir sembolik bağlantı/yönlendirme; hedefi izlenmedi ve doğrulanmadı.");
             }
@@ -281,7 +494,11 @@ fn claude_install_observations(roots: &Roots, scan: &PathScan) -> Vec<Observatio
                 .location(Some(Roots::home_label(&[".local", "bin", exe])))
                 .evidence("Claude Code'un belgelenmiş yerel kurulum konumunda 'claude' dosyası bulundu. Program çalıştırılmadı.")
                 .limit(NO_VERSION_NOTE)
-                .limit("Dosyanın varlığı çalıştığını göstermez.");
+                .limit("Dosyanın varlığı çalıştığını göstermez.")
+                .identity_state(IdentityState::Unknown)
+                .not_performed(NotPerformed::NoPackageDetectorForTool);
+            let sig = if is_link { SignatureBlock::NotAssessed } else { signature_of(roots, home, &[".local", "bin", exe]) };
+            o = with_signature(o, roots, sig);
             if is_link {
                 o = o.limit("Bu dosya bir sembolik bağlantı (resmî kurulum aracı bunu böyle oluşturur); hedefi izlenmedi.");
             }
@@ -421,7 +638,10 @@ fn safe_component(s: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Fetch {
     /// A record exists and the version directory is on disk under `plugins/cache/`.
-    Fetched(Option<String>),
+    Fetched {
+        version: Option<String>,
+        conflict: bool,
+    },
     /// A record exists but its files were not found in the cache (a local-marketplace plugin may load in place).
     RecordOnly,
     NoRecord,
@@ -444,11 +664,16 @@ fn fetch_state(registry: &Registry, plugins_root: Option<&Path>, t: &Tracked, on
     if matching.is_empty() {
         return Fetch::NoRecord;
     }
+    // Records that name different documented versions contradict each other: report the conflict, not a guess.
+    let mut documented: Vec<&str> = matching.iter().filter_map(|r| r.version.as_deref()).collect();
+    documented.sort_unstable();
+    documented.dedup();
+    let conflict = documented.len() > 1;
     for r in &matching {
         if let (Some(root), Some(version)) = (plugins_root, r.cache_version.as_deref()) {
             if safe_component(&r.market) && safe_component(&r.name) {
                 if let Walk::Found { .. } = fsx::dir_exists(root, &["cache", &r.market, &r.name, version]) {
-                    return Fetch::Fetched(r.version.clone());
+                    return Fetch::Fetched { version: if conflict { None } else { r.version.clone() }, conflict };
                 }
             }
         }
@@ -478,7 +703,7 @@ fn plugin_observation(
     let fetch = fetch_state(registry, plugins_root, t, if scope == Scope::Global { Some(Scope::Global) } else { None });
 
     let presence = match &fetch {
-        Fetch::Fetched(_) => Presence::Present,
+        Fetch::Fetched { .. } => Presence::Present,
         Fetch::RecordOnly | Fetch::Unknown => Presence::Unknown,
         Fetch::NoRecord => match registry {
             Registry::NotLoaded => Presence::Unknown,
@@ -495,10 +720,25 @@ fn plugin_observation(
             Declared::NotListed => Configuration::NotConfigured,
         },
     };
-    let identity = t.marketplace.is_some() && (info.exact != Declared::NotListed || matches!(fetch, Fetch::Fetched(_) | Fetch::RecordOnly));
-    let version = match &fetch {
-        Fetch::Fetched(v) => v.clone(),
-        _ => None,
+    // Provenance: a settings declaration is configuration, not provenance. Identity is "validated" only when the
+    // installer's own record exists AND the marketplace is the one the catalog pins; sources that disagree are a conflict.
+    let has_record = matches!(fetch, Fetch::Fetched { .. } | Fetch::RecordOnly);
+    let pinned = t.marketplace.is_some();
+    let identity_state = if info.other_marketplace && (has_record || info.exact != Declared::NotListed) {
+        IdentityState::Conflicted
+    } else if pinned && has_record {
+        IdentityState::Validated
+    } else if has_record {
+        IdentityState::EvidenceAvailable
+    } else if matches!(registry, Registry::NotLoaded) {
+        IdentityState::NotAssessed
+    } else {
+        IdentityState::Unknown
+    };
+    let identity = identity_state == IdentityState::Validated;
+    let (version, version_conflict) = match &fetch {
+        Fetch::Fetched { version, conflict } => (version.clone(), *conflict),
+        _ => (None, false),
     };
     let confidence = match (presence, identity) {
         (Presence::Present, true) => Confidence::High,
@@ -534,12 +774,27 @@ fn plugin_observation(
         .scope(scope)
         .confidence(confidence)
         .project(project_alias)
-        .identity(identity)
+        .identity_state(identity_state)
+        .install_record(has_record)
+        .publisher(if has_record && pinned {
+            Publisher::Marketplace
+        } else if has_record {
+            Publisher::SelfDeclared
+        } else {
+            Publisher::None
+        })
         .version(version, "Claude Code kurulum kaydı")
+        .version_state(if version_conflict { VersionState::Conflicted } else { VersionState::Unknown }, VersionTrust::Trusted)
         .evidence(evidence)
         .limit("Çalışan bir Claude Code oturumunda yüklü olup olmadığı bilinmiyor; işlev test edilmedi.");
     if t.marketplace.is_none() {
         obs = obs.limit("Pazar yeri kimliği kataloğumuzda doğrulanmadı: yalnızca eklenti adı eşleşti.");
+    }
+    if version_conflict {
+        obs = obs.limit("Kurulum kayıtları birbiriyle çelişen sürümler bildiriyor; sürüm gösterilmedi.");
+    }
+    if identity_state == IdentityState::Conflicted {
+        obs = obs.limit("Aynı eklenti adı için birbiriyle uyuşmayan kaynaklar var; kimlik çelişkili sayıldı.");
     }
     if info.other_marketplace {
         obs = obs.limit("Aynı adlı eklenti başka bir pazar yerinden listelenmiş; bu, katalogdaki eklentiyle aynı sayılmadı.");
