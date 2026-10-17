@@ -71,7 +71,11 @@ pub enum FinalKind {
 
 #[derive(Debug)]
 pub enum Walk {
-    Found { path: PathBuf, is_link: bool },
+    Found {
+        #[cfg_attr(not(windows), allow(dead_code))] // read by the Windows implementation only
+        path: PathBuf,
+        is_link: bool,
+    },
     NotFound,
     Skipped(Skip),
 }
@@ -83,6 +87,7 @@ pub enum ReadOutcome {
     Skipped(Skip),
 }
 
+#[cfg(windows)]
 pub fn is_link_like(meta: &fs::Metadata) -> bool {
     if meta.file_type().is_symlink() {
         return true;
