@@ -1,0 +1,116 @@
+name: CI
+
+# Evidence policy: a green job here proves what its steps actually did on that runner and nothing more.
+# In particular, macOS compiling and running the headless --self-check is NOT a macOS GUI test.
+on:
+  push:
+    branches: [development, main]
+  pull_request:
+    branches: [development, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            exe: ai-toolchain-manager.exe
+          - name: macos-arm64
+            os: macos-14 # Apple Silicon (arm64) runner
+            target: aarch64-apple-darwin
+            exe: ai-toolchain-manager
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-test.txt
+
+      - name: Rust toolchain (stable, ${{ matrix.target }})
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy --target ${{ matrix.target }}
+          rustup default stable
+          rustc -vV
+          cargo -V
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: cargo-${{ matrix.name }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: cargo-${{ matrix.name }}-
+
+      - name: Confirm runner architecture
+        run: |
+          echo "runner: $RUNNER_OS / $RUNNER_ARCH"
+          if [ "${{ matrix.name }}" = "macos-arm64" ]; then test "$(uname -m)" = "arm64"; fi
+
+      - name: Phase 0 contract tests (Python)
+        run: |
+          python -m pip install -r requirements-test.txt
+          python -m unittest discover -s tests -v
+
+      - name: Frontend install, typecheck, test, build
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run build
+
+      - name: Rust format, lint and unit tests
+        working-directory: src-tauri
+        run: |
+          cargo fmt --check
+          cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings
+          cargo test --target ${{ matrix.target }}
+
+      - name: Build Tauri app (no bundle, no signing)
+        run: npx tauri build --no-bundle --target ${{ matrix.target }}
+
+      - name: Verify the built binary's architecture
+        run: |
+          BIN="src-tauri/target/${{ matrix.target }}/release/${{ matrix.exe }}"
+          ls -l "$BIN"
+          if [ "${{ matrix.name }}" = "macos-arm64" ]; then file "$BIN" | tee /dev/stderr | grep -q arm64; fi
+
+      - name: Headless self-check of the built binary + cross-language audit contract
+        env:
+          ATM_DATA_DIR: ${{ runner.temp }}/atm-selfcheck-data
+        run: |
+          BIN="src-tauri/target/${{ matrix.target }}/release/${{ matrix.exe }}"
+          OUT="${{ runner.temp }}/selfcheck-${{ matrix.name }}.json"
+          "$BIN" --self-check "$OUT"
+          cat "$OUT" | head -c 1500; echo
+          ATM_SELFCHECK_JSON="$OUT" python -m unittest discover -s tests -v
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: selfcheck-${{ matrix.name }}
+          path: ${{ runner.temp }}/selfcheck-${{ matrix.name }}.json
+          if-no-files-found: warn

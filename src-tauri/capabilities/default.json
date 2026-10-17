@@ -1,0 +1,22 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Minimal main-window capability: only the typed application commands. No shell, filesystem, SQL, HTTP, opener or plugin permissions are granted to the WebView.",
+  "windows": ["main"],
+  "permissions": [
+    "allow-get-app-info",
+    "allow-get-dashboard",
+    "allow-list-tools",
+    "allow-list-projects",
+    "allow-list-prompt-sources",
+    "allow-run-health-checks",
+    "allow-list-audit-events",
+    "allow-verify-audit-chain",
+    "allow-list-diagnostics",
+    "allow-get-settings",
+    "allow-set-setting",
+    "allow-get-startup-state",
+    "allow-set-startup-enabled",
+    "allow-report-ui-error"
+  ]
+}

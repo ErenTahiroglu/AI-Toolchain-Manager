@@ -4,6 +4,10 @@
 **Durum:** Phase 0 R1 duzeltmeleri hazir; bagimsiz Red Team yeniden degerlendirmesi bekleniyor. Uygulama kodu ve arac kurulumu yok.  
 **Dal:** `phase0/architecture` (yalnizca yerel; commit veya push yapilmadi).
 
+## Phase 1A Durumu (guncel)
+
+`development` dalinda Phase 1A masaustu temeli bulunur (Tauri 2 + React/TypeScript + SQLite): pano, ornek projeler, dokuz aracin katalogu, uc kaynakli istem kutuphanesi (salt okunur, planli), ayarlar, sistem tepsisi, tek ornek, kullanici kontrollu baslangic ve kendi kendini denetleme. Hicbir arac kurulmaz, hicbir ajan ayari degistirilmez, ag istegi yapilmaz. Ayrintilar ve kanitlar: [docs/PHASE-1A.md](docs/PHASE-1A.md). Bagimsiz Red Team incelemesi beklenir; `main` degistirilmedi.
+
 ## Yonetici Ozeti
 
 ### Neler dogrulandi
