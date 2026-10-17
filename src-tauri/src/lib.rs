@@ -5,10 +5,15 @@ mod crash;
 mod db;
 mod diagnostics;
 mod error;
+mod gate;
+mod github_url;
 mod health;
+mod projects;
+mod recommend;
 mod redact;
 mod selfcheck;
 mod settings;
+mod skills;
 mod state;
 
 use audit::NewEvent;
@@ -46,17 +51,7 @@ fn resolve_data_dir(app: &AppHandle) -> Result<PathBuf, BoxError> {
 }
 
 fn audit_event(conn: &rusqlite::Connection, outcome: &'static str, check_id: &'static str, code: Option<&'static str>) {
-    let _ = audit::append(
-        conn,
-        &NewEvent {
-            event_type: "health_check",
-            outcome,
-            check_id,
-            error_code: code,
-            verdict_source: "operational-health",
-            actor_type: "system",
-        },
-    );
+    let _ = audit::append(conn, &NewEvent::plain("health_check", outcome, check_id, code, "operational-health", "system"));
 }
 
 fn build_tray(app: &tauri::App) -> Result<(), BoxError> {
@@ -189,8 +184,20 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_app_info,
             commands::get_dashboard,
-            commands::list_tools,
+            commands::list_catalog,
+            commands::preview_github_url,
+            commands::add_catalog_entry,
+            commands::set_catalog_entry_enabled,
+            commands::remove_catalog_entry,
+            commands::restore_catalog_entry,
+            commands::explain_execution_block,
             commands::list_projects,
+            commands::add_project_reference,
+            commands::remove_project_reference,
+            commands::set_project_preference,
+            commands::reset_project_preference,
+            commands::list_scenarios,
+            commands::evaluate_task,
             commands::list_prompt_sources,
             commands::run_health_checks,
             commands::list_audit_events,

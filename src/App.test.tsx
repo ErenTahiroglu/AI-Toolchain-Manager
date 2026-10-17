@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { ErrorBoundary } from "./components/common";
-import { createBackend, report, type Backend } from "./test/backend";
+import { createBackend, makeEntry, pref, rec, report, type Backend } from "./test/backend";
 
 let backend: Backend;
 vi.mock("@tauri-apps/api/core", () => ({
@@ -14,16 +14,17 @@ const go = async (name: string) => {
   await userEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name }));
   return screen.findByRole("heading", { level: 1, name });
 };
+const calls = (cmd: string) => backend.calls.filter((c) => c.cmd === cmd);
 
 beforeEach(() => {
   backend = createBackend();
 });
 
 describe("navigation", () => {
-  it("shows the six approved sections and marks the current one", async () => {
+  it("shows the seven sections and marks the current one", async () => {
     render(<App />);
     const nav = screen.getByRole("navigation", { name: "Ana gezinme" });
-    for (const name of ["Ana Sayfa", "Projeler", "Araç Kütüphanesi", "İstem Kütüphanesi", "Etkinlik ve Denetim", "Ayarlar"]) {
+    for (const name of ["Ana Sayfa", "Projeler", "Araç Kütüphanesi", "Öneriler", "İstem Kütüphanesi", "Etkinlik ve Denetim", "Ayarlar"]) {
       expect(within(nav).getByRole("button", { name })).toBeInTheDocument();
     }
     expect(within(nav).getByRole("button", { name: "Ana Sayfa" })).toHaveAttribute("aria-current", "page");
@@ -33,11 +34,14 @@ describe("navigation", () => {
 });
 
 describe("dashboard honesty", () => {
-  it("does not claim health before any check ran", async () => {
+  it("does not claim health before any check ran and shows the new counts", async () => {
     render(<App />);
     expect(await screen.findByText(/Henüz sağlık kontrolü çalıştırılmadı/)).toBeInTheDocument();
     expect(screen.queryByText("Tüm kontroller başarılı")).not.toBeInTheDocument();
     expect(screen.getByText(/hiçbir aracın gerçekten çalıştığı doğrulanmış değildir/)).toBeInTheDocument();
+    expect(screen.getByText("Katalogdaki kayıt").nextSibling).toHaveTextContent("13");
+    expect(screen.getByText("Kurulu / yönetilen araç").nextSibling).toHaveTextContent("0");
+    expect(screen.getByText(/Kayıtlı kararlar yalnızca isteğinizdir/)).toBeInTheDocument();
   });
 
   it("an 'unknown' overall result is never shown as success", async () => {
@@ -56,28 +60,334 @@ describe("dashboard honesty", () => {
   });
 });
 
-describe("synthetic and unavailable content", () => {
-  it("labels projects as sample data and disables the add button", async () => {
+describe("tool library", () => {
+  it("lists all thirteen entries with kinds, none installed, every run button disabled with the backend's reason", async () => {
+    render(<App />);
+    await go("Araç Kütüphanesi");
+    expect(await screen.findAllByRole("region")).toHaveLength(13);
+    expect(screen.getAllByText("Kurulu değil / yönetilmiyor")).toHaveLength(13);
+    const kindOf = (id: string) => within(screen.getByRole("heading", { name: id }).closest("section")!);
+    expect(kindOf("anthropic-frontend-design").getByText("Ajan eklentisi")).toBeInTheDocument();
+    expect(kindOf("strix").getByText("Çalıştırılabilir araç")).toBeInTheDocument();
+    expect(kindOf("agent-browser").getByText("Çalıştırılabilir araç")).toBeInTheDocument();
+    expect(kindOf("agentic-awesome-skills").getByText("Yetenek koleksiyonu")).toBeInTheDocument();
+    const buttons = await screen.findAllByRole("button", { name: "Kur / çalıştır" });
+    expect(buttons).toHaveLength(13);
+    buttons.forEach((b) => expect(b).toBeDisabled());
+    expect(calls("explain_execution_block")).toHaveLength(13);
+    await waitFor(() => expect(screen.getAllByText(/Faz 1B'de hiçbir araç kurulamaz/).length).toBeGreaterThan(0));
+    expect(screen.getByText(/Aktif güvenlik testi için kapsamlı yetki gerekir/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Doğrulandı$/)).not.toBeInTheDocument();
+  });
+
+  it("shows Strix as quarantined with its execution policy", async () => {
+    render(<App />);
+    await go("Araç Kütüphanesi");
+    const strix = (await screen.findByRole("heading", { name: "strix" })).closest("section")!;
+    expect(within(strix).getByText("Karantinada")).toBeInTheDocument();
+    expect(within(strix).getByText(/Kapsamlı yazılı yetki olmadan çalıştırma yasak/)).toBeInTheDocument();
+  });
+
+  it("enabling or disabling an entry calls the typed command", async () => {
+    render(<App />);
+    await go("Araç Kütüphanesi");
+    const card = (await screen.findByRole("heading", { name: "agent-browser" })).closest("section")!;
+    await userEvent.click(within(card).getByRole("checkbox", { name: /Katalogda etkin/ }));
+    expect(calls("set_catalog_entry_enabled")).toContainEqual({ cmd: "set_catalog_entry_enabled", args: { entryId: "agent-browser", enabled: false } });
+    await waitFor(() => expect(within(card).getByRole("checkbox", { name: /Katalogda etkin/ })).not.toBeChecked());
+  });
+
+  it("removing needs a second confirmation, says nothing is uninstalled, and the entry can be restored", async () => {
+    render(<App />);
+    await go("Araç Kütüphanesi");
+    const card = () => screen.getByRole("heading", { name: "graphify" }).closest("section")!;
+    await screen.findByRole("heading", { name: "graphify" });
+    await userEvent.click(within(card()).getByRole("button", { name: "Katalogdan kaldır" }));
+    expect(calls("remove_catalog_entry")).toHaveLength(0);
+    expect(within(card()).getByText(/hiçbir şey kaldırılmaz/)).toBeInTheDocument();
+    await userEvent.click(within(card()).getByRole("button", { name: "Vazgeç" }));
+    expect(calls("remove_catalog_entry")).toHaveLength(0);
+    await userEvent.click(within(card()).getByRole("button", { name: "Katalogdan kaldır" }));
+    await userEvent.click(within(card()).getByRole("button", { name: "Evet, kaydı kaldır" }));
+    expect(calls("remove_catalog_entry")).toEqual([{ cmd: "remove_catalog_entry", args: { entryId: "graphify" } }]);
+    expect(await screen.findByRole("heading", { name: /Katalogdan kaldırılanlar \(1\)/ })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Geri ekle (kapalı olarak)" }));
+    expect(calls("restore_catalog_entry")).toHaveLength(1);
+    await waitFor(() => expect(screen.queryByRole("heading", { name: /Katalogdan kaldırılanlar/ })).not.toBeInTheDocument());
+  });
+
+  it("adding a repository: invalid link is explained, nothing can be added before a valid preview and a chosen kind", async () => {
+    render(<App />);
+    await go("Araç Kütüphanesi");
+    const url = await screen.findByLabelText("GitHub bağlantısı");
+    const add = screen.getByRole("button", { name: "Aday olarak ekle" });
+    expect(add).toBeDisabled();
+    await userEvent.type(url, "https://evil.example/a/b");
+    await userEvent.click(screen.getByRole("button", { name: "Bağlantıyı denetle" }));
+    expect(await screen.findByText(/Yalnızca github.com adresi kabul edilir/)).toBeInTheDocument();
+    expect(add).toBeDisabled();
+    expect(calls("add_catalog_entry")).toHaveLength(0);
+  });
+
+  it("adding a repository: duplicates are flagged and not addable", async () => {
+    render(<App />);
+    await go("Araç Kütüphanesi");
+    await userEvent.type(await screen.findByLabelText("GitHub bağlantısı"), "https://github.com/x/gitleaks");
+    await userEvent.selectOptions(screen.getByLabelText("Bu bir… (tür)"), "executable_tool");
+    await userEvent.click(screen.getByRole("button", { name: "Bağlantıyı denetle" }));
+    expect(await screen.findByText(/Bu depo zaten katalogda/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Aday olarak ekle" })).toBeDisabled();
+  });
+
+  it("adding a repository: a valid link plus a kind adds an offline, unreviewed, disabled candidate and says nothing was downloaded", async () => {
+    render(<App />);
+    await go("Araç Kütüphanesi");
+    const url = await screen.findByLabelText("GitHub bağlantısı");
+    await userEvent.type(url, "https://github.com/acme/widget");
+    await userEvent.click(screen.getByRole("button", { name: "Bağlantıyı denetle" }));
+    expect(await screen.findByText(/Bağlantı geçerli/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Aday olarak ekle" })).toBeDisabled(); // kind not chosen yet
+    await userEvent.selectOptions(screen.getByLabelText("Bu bir… (tür)"), "agent_plugin");
+    await userEvent.type(screen.getByLabelText(/Ne işe yarıyor/), "Deneme eklentisi");
+    await userEvent.click(screen.getByRole("button", { name: "Aday olarak ekle" }));
+    expect(calls("add_catalog_entry")).toEqual([{ cmd: "add_catalog_entry", args: { url: "https://github.com/acme/widget", kind: "agent_plugin", purpose: "Deneme eklentisi" } }]);
+    expect(await screen.findByText(/hiçbir şey indirilmedi veya çalıştırılmadı/i)).toBeInTheDocument();
+    const card = (await screen.findByRole("heading", { name: "acme/widget" })).closest("section")!;
+    expect(within(card).getByText("Sizin eklediğiniz aday")).toBeInTheDocument();
+    expect(within(card).getByText(/Uzak veri çekilmedi/)).toBeInTheDocument();
+    expect(within(card).getByRole("checkbox", { name: /Katalogda etkin/ })).not.toBeChecked();
+    expect(within(card).getByRole("button", { name: "Kur / çalıştır" })).toBeDisabled();
+  });
+
+  it("hostile text from a repository purpose is rendered as plain text, not markup", async () => {
+    backend.entries.push(makeEntry("evil", { origin: "user", purpose: "<img src=x onerror=alert(1)> <b>kalın</b>", displayName: "evil/evil", sourceKey: "evil/evil" }));
+    render(<App />);
+    await go("Araç Kütüphanesi");
+    expect(await screen.findByText(/<img src=x onerror=alert\(1\)>/)).toBeInTheDocument();
+    expect(document.querySelector("img")).toBeNull();
+    expect(document.querySelector("section b")).toBeNull();
+  });
+
+  it("filters by kind", async () => {
+    render(<App />);
+    await go("Araç Kütüphanesi");
+    await screen.findByRole("heading", { name: "strix" });
+    await userEvent.selectOptions(screen.getByLabelText("Göster"), "skill_collection");
+    expect(screen.queryByRole("heading", { name: "strix" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "agentic-awesome-skills" })).toBeInTheDocument();
+  });
+});
+
+describe("projects and preferences", () => {
+  it("labels sample projects, separates desired choice from actual state, and never shows an installed state", async () => {
     render(<App />);
     await go("Projeler");
     expect(await screen.findByText("ÖRNEK VERİ")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Proje ekle" })).toBeDisabled();
-    expect(screen.getByText("Bilinmiyor (hiçbir şey denetlenmedi)")).toBeInTheDocument();
+    const card = (await screen.findByRole("heading", { name: /Örnek: Web sitesi/ })).closest("section")!;
+    expect(within(card).getByText("örnek")).toBeInTheDocument();
+    expect(within(card).getByText("Etkinleştirmek istiyorum")).toBeInTheDocument();
+    const actual = within(card).getByText(/Kurulu değil \/ yönetilmiyor/);
+    expect(actual).toHaveTextContent(/Doğrulanmadı/);
+    expect(actual).toHaveTextContent(/Kapsam bilinmiyor/);
+    expect(within(card).queryByText(/Doğrulandı|Kuruldu|Kurulu(?! değil)/)).not.toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: /Proje kaydını kaldır/ })).not.toBeInTheDocument();
   });
 
-  it("lists nine tools, none installed, and every Install button is disabled with a reason", async () => {
+  it("registers a real project only as a reference and says the folder is never touched", async () => {
     render(<App />);
-    await go("Araç Kütüphanesi");
-    const sections = await screen.findAllByRole("region");
-    expect(sections).toHaveLength(9);
-    const buttons = screen.getAllByRole("button", { name: "Kur" });
-    expect(buttons).toHaveLength(9);
-    buttons.forEach((b) => expect(b).toBeDisabled());
-    expect(screen.getAllByText("Kurulu değil / yönetilmiyor")).toHaveLength(9);
-    expect(screen.queryByText(/Doğrulandı$/)).not.toBeInTheDocument();
+    await go("Projeler");
+    expect(await screen.findByText(/klasörünüzü açmaz, taramaz/)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText(/Takma ad/), "benim-sitem");
+    await userEvent.type(screen.getByLabelText("Görünen ad"), "Benim sitem");
+    await userEvent.type(screen.getByLabelText(/Özel not/), "D:\\sitem");
+    await userEvent.click(screen.getByRole("button", { name: "Proje kaydını ekle" }));
+    expect(calls("add_project_reference")).toEqual([{ cmd: "add_project_reference", args: { alias: "benim-sitem", displayName: "Benim sitem", note: "D:\\sitem" } }]);
+    const card = (await screen.findByRole("heading", { name: /Benim sitem/ })).closest("section")!;
+    expect(within(card).getByText("gerçek proje kaydı")).toBeInTheDocument();
+    expect(within(card).getByText(/uygulama bu klasöre hiç dokunmaz/)).toBeInTheDocument();
   });
 
-  it("lists three read-only planned prompt sources and no usable search/download", async () => {
+  it("an invalid alias from the backend is shown, not swallowed", async () => {
+    backend.failures.add_project_reference = { code: "PROJECT_ALIAS_INVALID", message: "Takma ad geçersiz." };
+    render(<App />);
+    await go("Projeler");
+    await userEvent.type(await screen.findByLabelText(/Takma ad/), "C:\\x");
+    await userEvent.type(screen.getByLabelText("Görünen ad"), "x");
+    await userEvent.click(screen.getByRole("button", { name: "Proje kaydını ekle" }));
+    expect(await screen.findByText(/PROJECT_ALIAS_INVALID/)).toBeInTheDocument();
+  });
+
+  it("removing a reference is two-step and only affects the app's record", async () => {
+    backend.projects.push({ projectId: "p2", alias: "benim-sitem", displayName: "Benim sitem", kind: "reference", localNote: "", createdAt: "2026-10-17T00:00:00Z", preferences: [] });
+    render(<App />);
+    await go("Projeler");
+    const card = () => screen.getByRole("heading", { name: /Benim sitem/ }).closest("section")!;
+    await screen.findByRole("heading", { name: /Benim sitem/ });
+    await userEvent.click(within(card()).getByRole("button", { name: "Proje kaydını kaldır" }));
+    expect(within(card()).getByText(/klasörünüze hiçbir şey olmaz/)).toBeInTheDocument();
+    expect(calls("remove_project_reference")).toHaveLength(0);
+    await userEvent.click(within(card()).getByRole("button", { name: "Evet, kaldır" }));
+    expect(calls("remove_project_reference")).toEqual([{ cmd: "remove_project_reference", args: { alias: "benim-sitem" } }]);
+  });
+
+  it("saves a decision with the full key and shows backend refusals", async () => {
+    render(<App />);
+    await go("Projeler");
+    const card = (await screen.findByRole("heading", { name: /Örnek: Web sitesi/ })).closest("section")!;
+    await userEvent.selectOptions(within(card).getByLabelText("Kayıt"), "agent-browser");
+    await userEvent.selectOptions(within(card).getByLabelText("Karar"), "rejected");
+    await userEvent.click(within(card).getByRole("button", { name: "Kararı kaydet" }));
+    expect(calls("set_project_preference")).toContainEqual({
+      cmd: "set_project_preference",
+      args: { alias: "ornek-web-sitesi", entryId: "agent-browser", agentSurface: "claude-code-terminal", platformTarget: "windows-x64", decision: "rejected", remindDays: null },
+    });
+    backend.failures.set_project_preference = { code: "PREFERENCE_NOT_ACTIVATABLE", message: "Uyumluluk bilinmiyor." };
+    await userEvent.selectOptions(within(card).getByLabelText("Karar"), "accepted");
+    await userEvent.click(within(card).getByRole("button", { name: "Kararı kaydet" }));
+    expect(await within(card).findByText(/PREFERENCE_NOT_ACTIVATABLE/)).toBeInTheDocument();
+  });
+
+  it("offers postponing with a bounded number of days and an explicit reset", async () => {
+    render(<App />);
+    await go("Projeler");
+    const card = () => screen.getByRole("heading", { name: /Örnek: Web sitesi/ }).closest("section")!;
+    await screen.findByRole("heading", { name: /Örnek: Web sitesi/ });
+    await userEvent.selectOptions(within(card()).getByLabelText("Kayıt"), "caveman");
+    await userEvent.selectOptions(within(card()).getByLabelText("Karar"), "postponed");
+    const days = within(card()).getByLabelText("Kaç gün sonra hatırlat");
+    expect(days).toHaveAttribute("min", "1");
+    expect(days).toHaveAttribute("max", "365");
+    await userEvent.click(within(card()).getByRole("button", { name: "Kararı sıfırla" }));
+    expect(calls("reset_project_preference")).toEqual([
+      { cmd: "reset_project_preference", args: { alias: "ornek-web-sitesi", entryId: "gitleaks", agentSurface: "local-cli", platformTarget: "windows-x64" } },
+    ]);
+  });
+
+  it("flags a material change but treats a plain version bump as informational only", async () => {
+    backend.projects[0].preferences = [
+      pref({ entryId: "a", entryName: "Alfa", decision: "rejected", materialChange: true }),
+      pref({ entryId: "b", entryName: "Beta", decision: "rejected", revisionChanged: true }),
+    ];
+    render(<App />);
+    await go("Projeler");
+    expect(await screen.findByText(/önemli ölçüde değişti/)).toBeInTheDocument();
+    expect(screen.getByText(/bu tek başına yeniden sormaz/)).toBeInTheDocument();
+  });
+});
+
+describe("recommendation preview", () => {
+  it("is clearly a synthetic preview and fills the form from a labelled example", async () => {
+    render(<App />);
+    await go("Öneriler");
+    expect(await screen.findByText(/öneri önizlemesidir/)).toBeInTheDocument();
+    await screen.findByRole("option", { name: "React bileşeni tasarlamak" });
+    await userEvent.selectOptions(screen.getByLabelText(/Örnek görev/), "react-component");
+    expect(screen.getByLabelText("Görev metni")).toHaveValue("React bileşeni tasarla");
+    expect(screen.getByLabelText(/İlgili dosya adları/)).toHaveValue("PricingTable.tsx");
+  });
+
+  it("sends the task, files, surface, platform and a hypothetical availability — never a path", async () => {
+    render(<App />);
+    await go("Öneriler");
+    await screen.findByRole("option", { name: "Örnek: Web sitesi (örnek)" });
+    await userEvent.selectOptions(screen.getByLabelText(/Örnek görev/), "backend-with-css-in-repo");
+    await userEvent.selectOptions(screen.getByLabelText(/Frontend Design eklentisi zaten/), "global");
+    await userEvent.click(screen.getByRole("button", { name: "Değerlendir" }));
+    const sent = calls("evaluate_task")[0].args!.input as Record<string, unknown>;
+    expect(sent).toMatchObject({
+      projectAlias: "ornek-web-sitesi", taskText: "SQL migration düzelt", evidenceFiles: ["styles.css"], agentSurface: "claude-code-terminal",
+      platformTarget: "windows-x64", phase: "start", availability: [{ entryId: "anthropic-frontend-design", scope: "global", enabled: true }],
+    });
+    expect(String(sent.taskId)).toMatch(/^gorev-/);
+  });
+
+  it("says plainly when nothing is suggested and lists why other tools were not shown", async () => {
+    backend.nextEvaluation = {
+      taskId: "t", phase: "start", recommendations: [], disclaimer: "Hiçbir şey kurulmadı.",
+      suppressed: [{ entryId: "anthropic-frontend-design", reasonCode: "no-ui-intent", reason: "Arayüz dosyaları var, ancak görevin kendisi arayüz işi gibi görünmüyor." }],
+    };
+    render(<App />);
+    await go("Öneriler");
+    await screen.findByRole("option", { name: "Örnek: Web sitesi (örnek)" });
+    await userEvent.type(screen.getByLabelText("Görev metni"), "SQL düzelt");
+    await userEvent.click(screen.getByRole("button", { name: "Değerlendir" }));
+    expect(await screen.findByText(/Bu görev için öneri yok/)).toBeInTheDocument();
+    expect(screen.getByText(/Gösterilmeyenler ve nedenleri \(1\)/)).toBeInTheDocument();
+    expect(screen.getByText("no-ui-intent")).toBeInTheDocument();
+  });
+
+  it("a suggestion can be enabled for the project, postponed or rejected; each records only a desired choice", async () => {
+    backend.nextEvaluation = { taskId: "t", phase: "start", recommendations: [rec()], suppressed: [], disclaimer: "Hiçbir şey kurulmadı." };
+    render(<App />);
+    await go("Öneriler");
+    await screen.findByRole("option", { name: "Örnek: Web sitesi (örnek)" });
+    await userEvent.type(screen.getByLabelText("Görev metni"), "React bileşeni tasarla");
+    await userEvent.click(screen.getByRole("button", { name: "Değerlendir" }));
+    expect(await screen.findByText("Öneri", { selector: ".badge" })).toBeInTheDocument();
+    expect(screen.getByText(/Ne olur\?/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Bu proje için etkinleştir?" }));
+    expect(calls("set_project_preference").at(-1)!.args).toMatchObject({ entryId: "anthropic-frontend-design", decision: "accepted", agentSurface: "claude-code-terminal" });
+    expect(await screen.findByText(/Hiçbir şey kurulmadı\./, { selector: "p.ok-text" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Bu proje için etkinleştir?" })).not.toBeInTheDocument();
+  });
+
+  it("informational suggestions (unknown compatibility, Strix) have no enable button", async () => {
+    backend.nextEvaluation = {
+      taskId: "t", phase: "start", disclaimer: "x", suppressed: [],
+      recommendations: [
+        rec({ entryId: "strix", displayName: "Strix", level: "informational", canEnable: false, notes: ["Kapsamlı yazılı yetki olmadan çalıştırılamaz."] }),
+        rec({ entryId: "agent-browser", displayName: "agent-browser", level: "informational", canEnable: false }),
+      ],
+    };
+    render(<App />);
+    await go("Öneriler");
+    await screen.findByRole("option", { name: "Örnek: Web sitesi (örnek)" });
+    await userEvent.type(screen.getByLabelText("Görev metni"), "pentest planla");
+    await userEvent.click(screen.getByRole("button", { name: "Değerlendir" }));
+    expect(await screen.findAllByText("Yalnızca bilgi")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Bu proje için etkinleştir?" })).not.toBeInTheDocument();
+    expect(screen.getByText(/kapsamlı yazılı yetki olmadan çalıştırılamaz/)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Reddet / bir daha sorma" })).toHaveLength(2);
+  });
+
+  it("shows at most the candidates it is given, with license and overlap warnings", async () => {
+    backend.nextEvaluation = {
+      taskId: "t", phase: "start", disclaimer: "x", suppressed: [],
+      recommendations: [
+        rec({
+          entryId: "agentic-awesome-skills", displayName: "agentic-awesome-skills",
+          skillCandidates: [
+            { skillId: "pdf-a", name: "PDF A", description: "pdf", sourceSha: "a".repeat(40), licenseSpdx: null, licenseWarning: true, conflictsWith: ["Superpowers"] },
+          ],
+        }),
+      ],
+    };
+    render(<App />);
+    await go("Öneriler");
+    await screen.findByRole("option", { name: "Örnek: Web sitesi (örnek)" });
+    await userEvent.type(screen.getByLabelText("Görev metni"), "skill bul");
+    await userEvent.click(screen.getByRole("button", { name: "Değerlendir" }));
+    expect(await screen.findByText(/lisans bilinmiyor/, { selector: "span.bad-text" })).toBeInTheDocument();
+    expect(screen.getByText(/şunlarla çakışabilir: Superpowers/)).toBeInTheDocument();
+    expect(screen.getByText(/hiçbiri kurulmaz/)).toBeInTheDocument();
+  });
+
+  it("a backend refusal is shown, and a new task gets a new id", async () => {
+    backend.failures.evaluate_task = { code: "PROJECT_NOT_FOUND", message: "Böyle bir proje kaydı yok." };
+    render(<App />);
+    await go("Öneriler");
+    await screen.findByRole("option", { name: "Örnek: Web sitesi (örnek)" });
+    await userEvent.type(screen.getByLabelText("Görev metni"), "x");
+    await userEvent.click(screen.getByRole("button", { name: "Değerlendir" }));
+    expect(await screen.findByText(/PROJECT_NOT_FOUND/)).toBeInTheDocument();
+    const first = screen.getByText(/Görev kimliği:/).textContent;
+    await userEvent.click(screen.getByRole("button", { name: "Yeni görev başlat" }));
+    expect(screen.getByText(/Görev kimliği:/).textContent).not.toBe(first);
+  });
+});
+
+describe("prompt library", () => {
+  it("lists three read-only planned sources and no usable search/download", async () => {
     render(<App />);
     await go("İstem Kütüphanesi");
     expect(await screen.findAllByText("Salt okunur")).toHaveLength(3);
@@ -98,7 +408,7 @@ describe("activity and self-audit", () => {
     expect(within(list).getByText("Bilinmiyor")).toBeInTheDocument();
     expect(within(list).getByText("Atlandı")).toBeInTheDocument();
     expect(within(list).getByText("DB_INTEGRITY_FAILED")).toBeInTheDocument();
-    expect(backend.calls.some((c) => c.cmd === "run_health_checks")).toBe(true);
+    expect(calls("run_health_checks")).toHaveLength(1);
   });
 
   it("reports a failed action instead of swallowing it", async () => {
@@ -123,7 +433,7 @@ describe("settings", () => {
     await go("Ayarlar");
     await userEvent.click(await screen.findByRole("radio", { name: "Koyu" }));
     await waitFor(() => expect(document.documentElement).toHaveAttribute("data-theme", "dark"));
-    expect(backend.calls).toContainEqual({ cmd: "set_setting", args: { key: "theme", value: "dark" } });
+    expect(calls("set_setting")).toContainEqual({ cmd: "set_setting", args: { key: "theme", value: "dark" } });
     await userEvent.click(screen.getByRole("radio", { name: "Sistem ayarını kullan" }));
     await waitFor(() => expect(document.documentElement).not.toHaveAttribute("data-theme"));
   });
@@ -134,10 +444,10 @@ describe("settings", () => {
     const toggle = await screen.findByRole("checkbox", { name: /otomatik başlat/ });
     await waitFor(() => expect(toggle).toBeEnabled());
     expect(toggle).not.toBeChecked();
-    expect(backend.calls.some((c) => c.cmd === "set_startup_enabled")).toBe(false);
+    expect(calls("set_startup_enabled")).toHaveLength(0);
     await userEvent.click(toggle);
     await waitFor(() => expect(toggle).toBeChecked());
-    expect(backend.calls).toContainEqual({ cmd: "set_startup_enabled", args: { enabled: true } });
+    expect(calls("set_startup_enabled")).toContainEqual({ cmd: "set_startup_enabled", args: { enabled: true } });
   });
 
   it("shows the real OS state when enabling startup fails", async () => {
@@ -167,8 +477,6 @@ describe("error boundary", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     render(<ErrorBoundary><Bomb /></ErrorBoundary>);
     expect(await screen.findByRole("alert")).toHaveTextContent("beklenmeyen bir hata");
-    await waitFor(() =>
-      expect(backend.calls.some((c) => c.cmd === "report_ui_error" && String(c.args?.message).includes("kaboom"))).toBe(true),
-    );
+    await waitFor(() => expect(calls("report_ui_error").some((c) => String(c.args?.message).includes("kaboom"))).toBe(true));
   });
 });

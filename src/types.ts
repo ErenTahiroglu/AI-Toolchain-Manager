@@ -40,11 +40,14 @@ export interface ChainReport {
 }
 
 export interface Dashboard {
-  toolCount: number;
+  catalogCount: number;
+  catalogEnabledCount: number;
   unreviewedCount: number;
   installedCount: number;
   validatedCount: number;
   sampleProjectCount: number;
+  referenceProjectCount: number;
+  preferenceCount: number;
   promptSourceCount: number;
   auditEventCount: number;
   auditChain: ChainReport;
@@ -59,8 +62,9 @@ export interface TargetEvidence {
 }
 
 export interface ToolRecord {
+  userAdded?: boolean;
   sourceSnapshot?: { observedRef?: string; immutableCommit?: string | null; releaseVersion?: string | null; revisionState?: string };
-  license?: { state: string; spdxId?: string };
+  license?: { state: string; spdxId?: string | null };
   targetEvidence?: TargetEvidence[];
   installMethods?: { methodId: string; publisherPin: string | null }[];
   privacy?: { telemetry?: string; mayTransmitProjectContent?: boolean | null; notes?: string[] };
@@ -68,32 +72,130 @@ export interface ToolRecord {
   dependencies?: string[];
 }
 
-export interface ToolRow {
-  toolId: string;
+export type EntryKind = "executable_tool" | "agent_plugin" | "skill_collection" | "prompt_source";
+
+export interface CatalogEntry {
+  entryId: string;
+  kind: EntryKind;
+  origin: "seed" | "user";
   displayName: string;
-  category: string;
+  purpose: string;
+  sourceKey: string;
   repoUrl: string;
+  sourcePath: string | null;
+  pluginIdentity: string | null;
   reviewState: string;
+  metadataState: "documented-snapshot" | "not-fetched";
+  executionPolicy: "manual-only" | "blocked-until-scoped-authorization";
+  licenseState: string;
+  licenseSpdx: string | null;
+  enabled: boolean;
   installState: string;
-  validationState: string;
+  verificationState: string;
+  revision: string;
+  capabilityFingerprint: string;
+  addedAt: string;
+  removedAt: string | null;
+  skillCount: number;
   record: ToolRecord;
+  limitations: string[];
 }
 
-export interface DecisionRow {
-  toolId: string;
-  toolName: string;
+export interface UrlPreview {
+  ok: boolean;
+  parsed: { owner: string; repo: string; canonicalUrl: string; sourceKey: string } | null;
+  error: AppError | null;
+  duplicateOf: { entryId: string; displayName: string; removed: boolean } | null;
+  notes: string[];
+}
+
+export interface ExecutionBlock {
+  code: string;
+  message: string;
+}
+
+export type Decision = "accepted" | "rejected" | "postponed" | "disabled";
+
+export interface PreferenceView {
+  entryId: string;
+  entryName: string;
+  entryRemoved: boolean;
   agentSurface: string;
   platformTarget: string;
-  decision: string;
-  actualState: string;
+  decision: Decision;
+  decidedAt: string;
+  catalogRevision: string;
+  revisionChanged: boolean;
+  materialChange: boolean;
+  remindAt: string | null;
+  actualInstallState: string;
+  actualVerificationState: string;
+  observedScope: string;
+  compatibility: string;
 }
 
-export interface ProjectRow {
+export interface ProjectView {
+  projectId: string;
   alias: string;
   displayName: string;
+  kind: "synthetic" | "reference";
+  localNote: string;
+  createdAt: string;
+  preferences: PreferenceView[];
+}
+
+export interface Scenario {
+  id: string;
+  title: string;
+  taskText: string;
+  evidenceFiles: string[];
+}
+
+export interface SkillCandidate {
+  skillId: string;
+  name: string;
   description: string;
-  isSynthetic: boolean;
-  decisions: DecisionRow[];
+  sourceSha: string;
+  licenseSpdx: string | null;
+  licenseWarning: boolean;
+  conflictsWith: string[];
+}
+
+export interface Recommendation {
+  entryId: string;
+  displayName: string;
+  level: "suggest" | "informational";
+  canEnable: boolean;
+  rationale: string;
+  impact: string;
+  signals: string[];
+  notes: string[];
+  skillCandidates: SkillCandidate[];
+}
+
+export interface Suppressed {
+  entryId: string;
+  reasonCode: string;
+  reason: string;
+}
+
+export interface Evaluation {
+  taskId: string;
+  phase: string;
+  recommendations: Recommendation[];
+  suppressed: Suppressed[];
+  disclaimer: string;
+}
+
+export interface TaskInput {
+  projectAlias: string;
+  taskId: string;
+  taskText: string;
+  evidenceFiles: string[];
+  agentSurface: string;
+  platformTarget: string;
+  phase?: "start" | "late";
+  availability: { entryId: string; scope: "global" | "project"; enabled: boolean }[];
 }
 
 export interface PromptSourceRow {

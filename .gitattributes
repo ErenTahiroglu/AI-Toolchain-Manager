@@ -2,3 +2,5 @@
 *.ico binary
 *.png binary
 *.icns binary
+*.fixture binary
+*.sqlite binary

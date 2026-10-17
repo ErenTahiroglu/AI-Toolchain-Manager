@@ -31,16 +31,19 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: string) => vo
       <section aria-labelledby="h-numbers">
         <h2 id="h-numbers">Özet</h2>
         <dl className="cards">
-          <div className="card"><dt>Katalogdaki araç</dt><dd>{data.toolCount}</dd></div>
-          <div className="card"><dt>İncelenmemiş araç</dt><dd>{data.unreviewedCount}</dd></div>
+          <div className="card"><dt>Katalogdaki kayıt</dt><dd>{data.catalogCount}</dd></div>
+          <div className="card"><dt>Katalogda etkin</dt><dd>{data.catalogEnabledCount}</dd></div>
+          <div className="card"><dt>İncelenmemiş kayıt</dt><dd>{data.unreviewedCount}</dd></div>
           <div className="card"><dt>Kurulu / yönetilen araç</dt><dd>{data.installedCount}</dd></div>
           <div className="card"><dt>Doğrulanmış araç</dt><dd>{data.validatedCount}</dd></div>
           <div className="card"><dt>Örnek proje</dt><dd>{data.sampleProjectCount}</dd></div>
+          <div className="card"><dt>Gerçek proje kaydı</dt><dd>{data.referenceProjectCount}</dd></div>
+          <div className="card"><dt>Kayıtlı proje kararı</dt><dd>{data.preferenceCount}</dd></div>
           <div className="card"><dt>İstem kaynağı (planlı)</dt><dd>{data.promptSourceCount}</dd></div>
         </dl>
         <p className="muted small">
-          Bu sürüm (Faz 1A) hiçbir aracı kurmaz, hiçbir ajan ayarını değiştirmez ve internete istek göndermez.
-          Projeler ekranındaki projeler <strong>örnek veridir</strong>.
+          Bu sürüm (Faz 1B) hiçbir aracı kurmaz veya çalıştırmaz, hiçbir ajan ayarını değiştirmez ve internete istek göndermez.
+          "Örnek" etiketli projeler <strong>örnek veridir</strong>. Kayıtlı kararlar yalnızca isteğinizdir; gerçek kurulum durumu değildir.
         </p>
       </section>
 

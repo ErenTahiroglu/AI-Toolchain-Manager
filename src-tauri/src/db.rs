@@ -1,11 +1,24 @@
 //! SQLite ownership. The WebView never sees SQL; only typed commands reach this module.
 
 use crate::error::{AppError, AppResult};
-use rusqlite::Connection;
+use rusqlite::{Connection, Transaction};
 use std::path::Path;
 
+/// One schema step. Each step runs in its own transaction together with the `user_version` bump,
+/// so a failure rolls back completely and leaves the previous version intact.
+pub enum Migration {
+    Sql(&'static str),
+    Rust(fn(&Transaction) -> AppResult<()>),
+}
+
+fn migrate_2(tx: &Transaction) -> AppResult<()> {
+    tx.execute_batch(include_str!("../migrations/0002_catalog_registry.sql"))?;
+    crate::catalog::migrate_phase1a_data(tx)
+}
+
 /// Ordered, append-only list of migrations. Index + 1 == `PRAGMA user_version` after applying it.
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/0001_init.sql")];
+/// 1 = Phase 1A foundation. 2 = Phase 1B registry (additive; copies Phase 1A data, then freezes the legacy tables).
+const MIGRATIONS: &[Migration] = &[Migration::Sql(include_str!("../migrations/0001_init.sql")), Migration::Rust(migrate_2)];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -24,20 +37,27 @@ pub fn user_version(conn: &Connection) -> AppResult<i64> {
 /// Apply pending migrations, each in its own transaction. Repeatable: re-running is a no-op.
 /// A database from a NEWER app version is refused and left untouched (fail closed).
 pub fn migrate(conn: &mut Connection) -> AppResult<()> {
+    migrate_with(conn, MIGRATIONS)
+}
+
+pub fn migrate_with(conn: &mut Connection, migrations: &[Migration]) -> AppResult<()> {
     let current = user_version(conn)?;
-    if current > LATEST_VERSION {
+    if current > migrations.len() as i64 {
         return Err(AppError::new(
             "DB_SCHEMA_TOO_NEW",
             "Veritabanı bu uygulamadan daha yeni bir sürümle oluşturulmuş; hiçbir şey değiştirilmedi.",
         ));
     }
-    for (index, sql) in MIGRATIONS.iter().enumerate() {
+    for (index, migration) in migrations.iter().enumerate() {
         let version = index as i64 + 1;
         if version <= current {
             continue;
         }
         let tx = conn.transaction()?;
-        tx.execute_batch(sql)?;
+        match migration {
+            Migration::Sql(sql) => tx.execute_batch(sql)?,
+            Migration::Rust(step) => step(&tx)?,
+        }
         tx.pragma_update(None, "user_version", version)?;
         tx.commit()?;
     }
@@ -140,3 +160,6 @@ mod tests {
         assert_eq!(n, 0);
     }
 }
+
+#[cfg(test)]
+mod migration_tests;

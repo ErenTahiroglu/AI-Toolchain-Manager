@@ -101,28 +101,51 @@ fn check_database(conn: &Connection) -> CheckResult {
 }
 
 fn check_invariants(conn: &Connection) -> CheckResult {
-    let tools = scalar(conn, "SELECT count(*) FROM tools");
-    let unreviewed = scalar(conn, "SELECT count(*) FROM tools WHERE review_state = 'unreviewed'");
-    let managed = scalar(conn, "SELECT count(*) FROM tools WHERE install_state <> 'not_managed' OR validation_state <> 'unknown'");
-    let real_projects = scalar(conn, "SELECT count(*) FROM projects WHERE is_synthetic <> 1");
+    const ID: &str = "catalog-invariants";
+    const TITLE: &str = "Katalog ve tercih güvenlik kuralları";
+    let seeded = scalar(conn, "SELECT count(*) FROM catalog_entries WHERE origin = 'seed'");
+    let claims =
+        scalar(conn, "SELECT count(*) FROM catalog_entries WHERE install_state <> 'not_managed' OR verification_state <> 'unknown'");
+    let bad_prefs = scalar(
+        conn,
+        "SELECT count(*) FROM project_preferences WHERE actual_install_state <> 'not_managed' OR actual_verification_state <> 'unknown' OR observed_scope <> 'unknown'",
+    );
+    let bad_kind = scalar(
+        conn,
+        "SELECT count(*) FROM catalog_entries WHERE kind NOT IN ('executable_tool','agent_plugin','skill_collection','prompt_source')",
+    );
+    let unreviewed_claims =
+        scalar(conn, "SELECT count(*) FROM catalog_entries WHERE origin = 'seed' AND review_state IN ('metadata-reviewed') ");
+    // Strix must stay quarantined and execution-blocked; no entry may be auto-runnable.
+    let strix_ok = scalar(
+        conn,
+        "SELECT count(*) FROM catalog_entries WHERE entry_id = 'strix' AND review_state = 'quarantined' AND execution_policy = 'blocked-until-scoped-authorization'",
+    );
+    let free_run = scalar(
+        conn,
+        "SELECT count(*) FROM catalog_entries WHERE execution_policy NOT IN ('manual-only','blocked-until-scoped-authorization')",
+    );
+    let samples = scalar(conn, "SELECT count(*) FROM project_registry WHERE kind = 'synthetic'");
     let sources = scalar(conn, "SELECT count(*) FROM prompt_sources WHERE status = 'planned' AND read_only = 1");
-    let expected = crate::catalog::EXPECTED_TOOL_COUNT as i64;
-    let ok =
-        tools == Some(expected) && unreviewed == Some(expected) && managed == Some(0) && real_projects == Some(0) && sources == Some(3);
+    let frozen = scalar(conn, "SELECT count(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE '%_frozen_%'");
+    let ok = seeded == Some(crate::catalog::SEED_ENTRY_COUNT as i64)
+        && claims == Some(0)
+        && bad_prefs == Some(0)
+        && bad_kind == Some(0)
+        && unreviewed_claims == Some(0)
+        && strix_ok == Some(1)
+        && free_run == Some(0)
+        && samples == Some(3)
+        && sources == Some(3)
+        && frozen == Some(9);
     if ok {
         check(
-            "phase-1a-invariants", "Phase 1A güvenlik kuralları", "passed",
-            "9 araç kayıtlı ve hepsi 'incelenmemiş'; hiçbir araç kurulu veya doğrulanmış görünmüyor; yalnızca örnek projeler var; 3 istem kaynağı salt okunur.",
+            ID, TITLE, "passed",
+            "13 kaynak kayıtlı; hiçbir araç kurulu veya doğrulanmış görünmüyor; kayıtlı kararlar yalnızca istek durumudur; Strix karantinada ve çalıştırma kapalı; eski Faz 1A tabloları donduruldu.",
             None,
         )
     } else {
-        check(
-            "phase-1a-invariants",
-            "Phase 1A güvenlik kuralları",
-            "failed",
-            "Katalog veya durum kuralları beklenen değerlerde değil.",
-            Some("INVARIANT_VIOLATION"),
-        )
+        check(ID, TITLE, "failed", "Katalog, tercih veya durum kuralları beklenen değerlerde değil.", Some("INVARIANT_VIOLATION"))
     }
 }
 
@@ -154,8 +177,20 @@ const CAPABILITIES_JSON: &str = include_str!("../capabilities/default.json");
 pub const ALLOWED_PERMISSIONS: &[&str] = &[
     "allow-get-app-info",
     "allow-get-dashboard",
-    "allow-list-tools",
+    "allow-list-catalog",
+    "allow-preview-github-url",
+    "allow-add-catalog-entry",
+    "allow-set-catalog-entry-enabled",
+    "allow-remove-catalog-entry",
+    "allow-restore-catalog-entry",
+    "allow-explain-execution-block",
     "allow-list-projects",
+    "allow-add-project-reference",
+    "allow-remove-project-reference",
+    "allow-set-project-preference",
+    "allow-reset-project-preference",
+    "allow-list-scenarios",
+    "allow-evaluate-task",
     "allow-list-prompt-sources",
     "allow-run-health-checks",
     "allow-list-audit-events",
@@ -326,17 +361,7 @@ pub fn run(conn: &Connection, ctx: &HealthContext) -> HealthReport {
 pub fn run_and_record(conn: &Connection, ctx: &HealthContext) -> AppResult<HealthReport> {
     let report = run(conn, ctx);
     for c in &report.checks {
-        audit::append(
-            conn,
-            &NewEvent {
-                event_type: "health_check",
-                outcome: c.status,
-                check_id: c.id,
-                error_code: c.error_code,
-                verdict_source: "operational-health",
-                actor_type: "manager",
-            },
-        )?;
+        audit::append(conn, &NewEvent::plain("health_check", c.status, c.id, c.error_code, "operational-health", "manager"))?;
     }
     Ok(report)
 }
@@ -367,21 +392,10 @@ mod tests {
     #[test]
     fn healthy_seeded_database_never_reports_failed_but_is_not_fully_verified() {
         let conn = seeded();
-        audit::append(
-            &conn,
-            &NewEvent {
-                event_type: "health_check",
-                outcome: "passed",
-                check_id: "x",
-                error_code: None,
-                verdict_source: "operational-health",
-                actor_type: "manager",
-            },
-        )
-        .unwrap();
+        audit::append(&conn, &NewEvent::plain("health_check", "passed", "x", None, "operational-health", "manager")).unwrap();
         let report = run(&conn, &ctx());
         assert_eq!(status(&report, "database"), "passed");
-        assert_eq!(status(&report, "phase-1a-invariants"), "passed");
+        assert_eq!(status(&report, "catalog-invariants"), "passed");
         assert_eq!(status(&report, "audit-chain"), "passed");
         assert_eq!(status(&report, "capabilities"), "passed");
         // Single-instance cannot be observed in-process, so the run can never claim a full pass.
@@ -393,7 +407,7 @@ mod tests {
     fn missing_seed_is_a_failure_not_a_success() {
         let conn = db::open_memory().unwrap();
         let report = run(&conn, &ctx());
-        assert_eq!(status(&report, "phase-1a-invariants"), "failed");
+        assert_eq!(status(&report, "catalog-invariants"), "failed");
         assert_eq!(report.overall, "failed");
     }
 
@@ -401,18 +415,7 @@ mod tests {
     fn broken_audit_chain_fails_overall() {
         let conn = seeded();
         for _ in 0..3 {
-            audit::append(
-                &conn,
-                &NewEvent {
-                    event_type: "health_check",
-                    outcome: "passed",
-                    check_id: "x",
-                    error_code: None,
-                    verdict_source: "operational-health",
-                    actor_type: "manager",
-                },
-            )
-            .unwrap();
+            audit::append(&conn, &NewEvent::plain("health_check", "passed", "x", None, "operational-health", "manager")).unwrap();
         }
         conn.execute_batch("DROP TRIGGER audit_events_no_delete; DELETE FROM audit_events WHERE sequence = 2;").unwrap();
         let report = run(&conn, &ctx());
@@ -481,10 +484,10 @@ mod tests {
             // look-alikes that the old prefix/substring rule could have admitted
             "allow-unknown-command",
             "allow-get-app-info-extra",
-            "allow-list-tool",
-            "ALLOW-LIST-TOOLS",
-            " allow-list-tools",
-            "allow-list-tools ",
+            "allow-list-catalo",
+            "ALLOW-LIST-CATALOG",
+            " allow-list-catalog",
+            "allow-list-catalog ",
             "allow-",
             "allow-*",
             "*",
@@ -497,16 +500,16 @@ mod tests {
 
     #[test]
     fn non_string_scoped_and_duplicate_permissions_are_rejected() {
-        let scoped = json!([{"identifier": "allow-list-tools", "allow": [{"path": "**"}]}]);
+        let scoped = json!([{"identifier": "allow-list-catalog", "allow": [{"path": "**"}]}]);
         assert!(!capability_violations(&manifest_with(scoped)).is_empty());
-        assert!(!capability_violations(&manifest_with(json!([null, 7, ["allow-list-tools"]]))).is_empty());
-        assert!(!capability_violations(&manifest_with(json!(["allow-list-tools", "allow-list-tools"]))).is_empty());
-        assert!(capability_violations(&manifest_with(json!(["allow-list-tools"]))).is_empty());
+        assert!(!capability_violations(&manifest_with(json!([null, 7, ["allow-list-catalog"]]))).is_empty());
+        assert!(!capability_violations(&manifest_with(json!(["allow-list-catalog", "allow-list-catalog"]))).is_empty());
+        assert!(capability_violations(&manifest_with(json!(["allow-list-catalog"]))).is_empty());
     }
 
     #[test]
     fn manifest_scope_and_extra_keys_are_rejected() {
-        let ok = json!({"identifier": "default", "windows": ["main"], "permissions": ["allow-list-tools"]});
+        let ok = json!({"identifier": "default", "windows": ["main"], "permissions": ["allow-list-catalog"]});
         assert!(capability_violations(&ok).is_empty());
         for (key, value) in [
             ("webviews", json!(["*"])),
@@ -524,7 +527,7 @@ mod tests {
             assert!(!capability_violations(&m).is_empty());
         }
         assert!(!capability_violations(&json!({"windows": ["main"]})).is_empty(), "missing permissions");
-        assert!(!capability_violations(&json!(["allow-list-tools"])).is_empty(), "non-object manifest");
+        assert!(!capability_violations(&json!(["allow-list-catalog"])).is_empty(), "non-object manifest");
     }
 
     #[test]

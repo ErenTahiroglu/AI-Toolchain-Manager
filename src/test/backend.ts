@@ -1,22 +1,28 @@
-// In-memory stand-in for the Rust commands. It mirrors the wire shapes in src/types.ts; the real
-// behaviour of each command is covered by the Rust tests and the --self-check contract test.
-import type { HealthReport, ToolRow } from "../types";
+// In-memory stand-in for the Rust commands. It mirrors the wire shapes in src/types.ts so the UI can be
+// tested; the real behaviour of every command (validation, gates, migration, audit) is covered by the
+// Rust tests and by the --self-check contract test, not by this mock.
+import type { CatalogEntry, Evaluation, HealthReport, PreferenceView, ProjectView, Recommendation } from "../types";
 
-export const TOOL_IDS = [
-  "ponytail", "codebase-memory-mcp", "graphify", "gitleaks", "markitdown",
-  "caveman", "cloudflare-security-audit-skill", "superpowers", "betterleaks",
+export const SEED_IDS = [
+  "ponytail", "codebase-memory-mcp", "graphify", "gitleaks", "markitdown", "caveman", "cloudflare-security-audit-skill", "superpowers", "betterleaks",
+  "anthropic-frontend-design", "strix", "agent-browser", "agentic-awesome-skills",
 ];
+const KIND: Record<string, CatalogEntry["kind"]> = {
+  ponytail: "agent_plugin", caveman: "agent_plugin", superpowers: "agent_plugin", "anthropic-frontend-design": "agent_plugin",
+  "cloudflare-security-audit-skill": "skill_collection", "agentic-awesome-skills": "skill_collection",
+};
 
-export const makeTools = (): ToolRow[] =>
-  TOOL_IDS.map((id) => ({
-    toolId: id, displayName: id, category: "native-cli", repoUrl: `https://github.com/example/${id}`,
-    reviewState: "unreviewed", installState: "not_managed", validationState: "unknown",
-    record: {
-      license: { state: "known", spdxId: "MIT" },
-      targetEvidence: [{ platformTarget: "windows-x64", agentSurface: "local-cli", compatibilityState: "vendor-declared", limitation: "not tested" }],
-      privacy: { telemetry: "unknown", mayTransmitProjectContent: null },
-    },
-  }));
+export const makeEntry = (id: string, over: Partial<CatalogEntry> = {}): CatalogEntry => ({
+  entryId: id, kind: KIND[id] ?? "executable_tool", origin: "seed", displayName: id, purpose: `Amaç: ${id}`, sourceKey: `x/${id}`,
+  repoUrl: `https://github.com/example/${id}`, sourcePath: null, pluginIdentity: id === "anthropic-frontend-design" ? "frontend-design@claude-plugins-official" : null,
+  reviewState: id === "strix" ? "quarantined" : "unreviewed", metadataState: "documented-snapshot",
+  executionPolicy: id === "strix" ? "blocked-until-scoped-authorization" : "manual-only", licenseState: "known", licenseSpdx: "MIT", enabled: true,
+  installState: "not_managed", verificationState: "unknown", revision: "v1@abcdef", capabilityFingerprint: "f".repeat(64), addedAt: "2026-10-17T00:00:00Z",
+  removedAt: null, skillCount: 0,
+  record: { targetEvidence: [{ platformTarget: "windows-x64", agentSurface: "local-cli", compatibilityState: "vendor-declared", limitation: "denenmedi" }] },
+  limitations: ["İncelenmedi.", "Kurulum ve işlev doğrulaması yok; bu uygulama hiçbir şey kurmaz veya çalıştırmaz."],
+  ...over,
+});
 
 export const report = (overall: HealthReport["overall"]): HealthReport => ({
   ranAt: "2026-10-17T12:00:00Z",
@@ -35,8 +41,22 @@ export interface Backend {
   nextReport: HealthReport;
   lastReport: HealthReport | null;
   failures: Record<string, { code: string; message: string }>;
+  entries: CatalogEntry[];
+  projects: ProjectView[];
+  nextEvaluation: Evaluation;
   handle: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 }
+
+export const pref = (over: Partial<PreferenceView> = {}): PreferenceView => ({
+  entryId: "gitleaks", entryName: "gitleaks", entryRemoved: false, agentSurface: "local-cli", platformTarget: "windows-x64", decision: "accepted",
+  decidedAt: "2026-10-17T12:00:00Z", catalogRevision: "v1@abcdef", revisionChanged: false, materialChange: false, remindAt: null,
+  actualInstallState: "not_managed", actualVerificationState: "unknown", observedScope: "unknown", compatibility: "vendor-declared", ...over,
+});
+
+export const rec = (over: Partial<Recommendation> = {}): Recommendation => ({
+  entryId: "anthropic-frontend-design", displayName: "Anthropic Frontend Design", level: "suggest", canEnable: true, rationale: "Görev bir arayüz işi.",
+  impact: "Hiçbir şey kurulmaz.", signals: ["görev ifadesi: react"], notes: [], skillCandidates: [], ...over,
+});
 
 export function createBackend(): Backend {
   const b: Backend = {
@@ -46,27 +66,81 @@ export function createBackend(): Backend {
     nextReport: report("unknown"),
     lastReport: null,
     failures: {},
+    entries: SEED_IDS.map((id) => makeEntry(id)),
+    projects: [
+      { projectId: "p1", alias: "ornek-web-sitesi", displayName: "Örnek: Web sitesi", kind: "synthetic", localNote: "", createdAt: "2026-10-17T00:00:00Z", preferences: [pref()] },
+    ],
+    nextEvaluation: { taskId: "t", phase: "start", recommendations: [], suppressed: [], disclaimer: "Hiçbir şey kurulmadı." },
     async handle(cmd, args) {
       b.calls.push({ cmd, args });
       if (b.failures[cmd]) throw b.failures[cmd];
+      const find = (id: unknown) => b.entries.find((e) => e.entryId === id)!;
       switch (cmd) {
         case "get_app_info":
-          return { version: "0.1.0", phase: "1A", platform: "windows", arch: "x86_64", dbVersion: 1, dataDir: "C:\\data", degraded: false, startupError: null };
+          return { version: "0.2.0", phase: "1B", platform: "windows", arch: "x86_64", dbVersion: 2, dataDir: "C:\\data", degraded: false, startupError: null };
         case "get_dashboard":
           return {
-            toolCount: 9, unreviewedCount: 9, installedCount: 0, validatedCount: 0, sampleProjectCount: 3, promptSourceCount: 3,
-            auditEventCount: 4, auditChain: { ok: true, count: 4, head: "a".repeat(64), problem: null }, lastReport: b.lastReport,
+            catalogCount: 13, catalogEnabledCount: 13, unreviewedCount: 12, installedCount: 0, validatedCount: 0, sampleProjectCount: 3, referenceProjectCount: 0,
+            preferenceCount: 6, promptSourceCount: 3, auditEventCount: 4, auditChain: { ok: true, count: 4, head: "a".repeat(64), problem: null }, lastReport: b.lastReport,
           };
-        case "list_tools": return makeTools();
-        case "list_projects":
-          return [{
-            alias: "ornek-web-sitesi", displayName: "Örnek: Web sitesi", description: "Uydurma", isSynthetic: true,
-            decisions: [{ toolId: "gitleaks", toolName: "Gitleaks", agentSurface: "local-cli", platformTarget: "windows-x64", decision: "accepted", actualState: "unknown" }],
-          }];
+        case "list_catalog": return b.entries.map((e) => ({ ...e }));
+        case "preview_github_url": {
+          const url = String(args?.url);
+          if (!/^https:\/\/github\.com\/[\w-]+\/[\w.-]+\/?$/i.test(url.trim())) {
+            return { ok: false, parsed: null, error: { code: "URL_HOST_NOT_GITHUB", message: "Yalnızca github.com adresi kabul edilir." }, duplicateOf: null, notes: ["Çevrimdışı ön izleme."] };
+          }
+          const [, owner, repo] = url.trim().match(/github\.com\/([\w-]+)\/([\w.-]+)/i)!;
+          const key = `${owner}/${repo}`.toLowerCase();
+          const dup = b.entries.find((e) => e.sourceKey === key && e.removedAt === null);
+          return {
+            ok: !dup, parsed: { owner, repo, canonicalUrl: `https://github.com/${owner}/${repo}`, sourceKey: key }, error: null,
+            duplicateOf: dup ? { entryId: dup.entryId, displayName: dup.displayName, removed: false } : null, notes: ["Çevrimdışı ön izleme."],
+          };
+        }
+        case "add_catalog_entry": {
+          const m = String(args?.url).match(/github\.com\/([\w-]+)\/([\w.-]+)/i)!;
+          const e = makeEntry(`${m[1]}-${m[2]}`.toLowerCase(), {
+            origin: "user", kind: args?.kind as CatalogEntry["kind"], purpose: String(args?.purpose || "Amacı henüz yazılmadı."), displayName: `${m[1]}/${m[2]}`,
+            sourceKey: `${m[1]}/${m[2]}`.toLowerCase(), enabled: false, metadataState: "not-fetched", licenseState: "unknown", licenseSpdx: null, record: { userAdded: true },
+            limitations: ["Çevrimdışı kayıt: yalnızca bağlantıdan türetilen bilgiler var; lisans, sürüm ve uyumluluk bilinmiyor."],
+          });
+          b.entries.push(e);
+          return e;
+        }
+        case "set_catalog_entry_enabled": find(args?.entryId).enabled = Boolean(args?.enabled); return { ...find(args?.entryId) };
+        case "remove_catalog_entry": find(args?.entryId).removedAt = "2026-10-17T13:00:00Z"; find(args?.entryId).enabled = false; return { ...find(args?.entryId) };
+        case "restore_catalog_entry": find(args?.entryId).removedAt = null; return { ...find(args?.entryId) };
+        case "explain_execution_block":
+          return find(args?.entryId).executionPolicy === "blocked-until-scoped-authorization"
+            ? { code: "SCOPED_AUTHORIZATION_REQUIRED", message: "Aktif güvenlik testi için kapsamlı yetki gerekir." }
+            : { code: "EXECUTION_NOT_AVAILABLE_PHASE_1B", message: "Faz 1B'de hiçbir araç kurulamaz, çalıştırılamaz veya doğrulanamaz." };
+        case "list_projects": return JSON.parse(JSON.stringify(b.projects));
+        case "add_project_reference": {
+          const p: ProjectView = { projectId: `p-${String(args?.alias)}`, alias: String(args?.alias), displayName: String(args?.displayName), kind: "reference", localNote: String(args?.note), createdAt: "2026-10-17T14:00:00Z", preferences: [] };
+          b.projects.push(p);
+          return p;
+        }
+        case "remove_project_reference": b.projects = b.projects.filter((p) => p.alias !== args?.alias); return undefined;
+        case "set_project_preference": {
+          const p = pref({ entryId: String(args?.entryId), entryName: String(args?.entryId), agentSurface: String(args?.agentSurface), platformTarget: String(args?.platformTarget), decision: args?.decision as PreferenceView["decision"] });
+          const project = b.projects.find((x) => x.alias === args?.alias)!;
+          project.preferences = project.preferences.filter((x) => !(x.entryId === p.entryId && x.agentSurface === p.agentSurface && x.platformTarget === p.platformTarget)).concat(p);
+          return p;
+        }
+        case "reset_project_preference": {
+          const project = b.projects.find((x) => x.alias === args?.alias)!;
+          project.preferences = project.preferences.filter((x) => !(x.entryId === args?.entryId && x.agentSurface === args?.agentSurface && x.platformTarget === args?.platformTarget));
+          return undefined;
+        }
+        case "list_scenarios":
+          return [
+            { id: "react-component", title: "React bileşeni tasarlamak", taskText: "React bileşeni tasarla", evidenceFiles: ["PricingTable.tsx"] },
+            { id: "backend-with-css-in-repo", title: "Yalnızca arka uç işi", taskText: "SQL migration düzelt", evidenceFiles: ["styles.css"] },
+          ];
+        case "evaluate_task": return b.nextEvaluation;
         case "list_prompt_sources":
           return ["prompts.chat", "the-prompt-library", "Fabric"].map((n) => ({
-            sourceId: n, displayName: n, repoUrl: `https://github.com/x/${n}`, licenseNote: "MIT", plannedFormat: "csv", notes: "-",
-            trustStatus: "untrusted-reference", status: "planned", readOnly: true,
+            sourceId: n, displayName: n, repoUrl: `https://github.com/x/${n}`, licenseNote: "MIT", plannedFormat: "csv", notes: "-", trustStatus: "untrusted-reference", status: "planned", readOnly: true,
           }));
         case "run_health_checks": b.lastReport = b.nextReport; return b.nextReport;
         case "list_audit_events": return [{ sequence: 1, timestamp: "2026-10-17T12:00:00Z", eventType: "health_check", outcome: "passed", checkId: "app-start", recordDigest: "b".repeat(64) }];

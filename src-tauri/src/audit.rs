@@ -19,6 +19,25 @@ pub struct NewEvent {
     pub error_code: Option<&'static str>,
     pub verdict_source: &'static str,
     pub actor_type: &'static str,
+    /// Optional context required by some event types in the Phase 0 schema (e.g. `reset_rejection`).
+    /// Callers must pass only validated slugs, never paths or free text.
+    pub tool_id: Option<String>,
+    pub project_alias: Option<String>,
+    pub target_id: Option<&'static str>,
+}
+
+impl NewEvent {
+    /// A system/manager event with no tool or project context.
+    pub fn plain(
+        event_type: &'static str,
+        outcome: &'static str,
+        check_id: &'static str,
+        error_code: Option<&'static str>,
+        verdict_source: &'static str,
+        actor_type: &'static str,
+    ) -> Self {
+        Self { event_type, outcome, check_id, error_code, verdict_source, actor_type, tool_id: None, project_alias: None, target_id: None }
+    }
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -46,7 +65,7 @@ pub fn canonical_json(value: &Value) -> String {
     }
 }
 
-fn sha256_hex(text: &str) -> String {
+pub fn sha256_hex(text: &str) -> String {
     let digest = Sha256::digest(text.as_bytes());
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -67,8 +86,23 @@ pub fn now_utc() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
+/// Appends one event. Uses a SAVEPOINT so it works both on its own and inside a caller's transaction
+/// (the caller's commit/rollback then decides whether the event survives).
 pub fn append(conn: &Connection, event: &NewEvent) -> AppResult<Value> {
-    let tx = conn.unchecked_transaction()?;
+    conn.execute_batch("SAVEPOINT audit_append")?;
+    match append_inner(conn, event) {
+        Ok(value) => {
+            conn.execute_batch("RELEASE audit_append")?;
+            Ok(value)
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK TO audit_append; RELEASE audit_append");
+            Err(e)
+        }
+    }
+}
+
+fn append_inner(tx: &Connection, event: &NewEvent) -> AppResult<Value> {
     let last: Option<(i64, String, String)> = tx
         .query_row("SELECT sequence, record_digest, record_json FROM audit_events ORDER BY id DESC LIMIT 1", [], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
@@ -98,7 +132,13 @@ pub fn append(conn: &Connection, event: &NewEvent) -> AppResult<Value> {
     record.insert("traceId".into(), json!(uuid::Uuid::new_v4().to_string()));
     record.insert("eventType".into(), json!(event.event_type));
     record.insert("outcome".into(), json!(event.outcome));
-    record.insert("targetId".into(), json!("unknown"));
+    record.insert("targetId".into(), json!(event.target_id.unwrap_or("unknown")));
+    if let Some(tool) = &event.tool_id {
+        record.insert("toolId".into(), json!(tool));
+    }
+    if let Some(alias) = &event.project_alias {
+        record.insert("projectAlias".into(), json!(alias));
+    }
     record.insert("checkId".into(), json!(event.check_id));
     record.insert("checkVersion".into(), json!("1"));
     record.insert("verdictSource".into(), json!(event.verdict_source));
@@ -124,7 +164,6 @@ pub fn append(conn: &Connection, event: &NewEvent) -> AppResult<Value> {
         "INSERT INTO audit_events (sequence, record_digest, record_json) VALUES (?1, ?2, ?3)",
         rusqlite::params![sequence, digest, canonical_json(&value)],
     )?;
-    tx.commit()?;
     Ok(value)
 }
 
@@ -199,14 +238,7 @@ mod tests {
     use super::*;
 
     fn event(check: &'static str) -> NewEvent {
-        NewEvent {
-            event_type: "health_check",
-            outcome: "passed",
-            check_id: check,
-            error_code: None,
-            verdict_source: "operational-health",
-            actor_type: "manager",
-        }
+        NewEvent::plain("health_check", "passed", check, None, "operational-health", "manager")
     }
 
     fn db_with_events(n: usize) -> Connection {

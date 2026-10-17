@@ -16,7 +16,7 @@ export const OVERALL: Record<Exclude<CheckStatus, "skipped">, string> = {
   failed: "Dikkat gerekiyor: en az bir kontrol başarısız",
 };
 
-const REVIEW: Record<string, string> = { unreviewed: "İncelenmemiş" };
+const REVIEW: Record<string, string> = { unreviewed: "İncelenmemiş", quarantined: "Karantinada", "metadata-reviewed": "Künye incelendi", blocked: "Engelli" };
 export const reviewLabel = (s: string) => REVIEW[s] ?? s;
 
 const INSTALL: Record<string, string> = { not_managed: "Kurulu değil / yönetilmiyor" };
@@ -33,10 +33,11 @@ const COMPAT: Record<string, string> = {
 export const compatLabel = (s: string) => COMPAT[s] ?? s;
 
 const DECISION: Record<string, string> = {
-  accepted: "Kabul edildi",
+  accepted: "Etkinleştirmek istiyorum",
   rejected: "Reddedildi",
-  later: "Sonra",
-  disabled: "Devre dışı",
+  postponed: "Ertelendi",
+  later: "Ertelendi",
+  disabled: "Kapatıldı",
 };
 export const decisionLabel = (s: string) => DECISION[s] ?? s;
 
@@ -64,3 +65,36 @@ export const formatTime = (iso: string) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString("tr-TR");
 };
+
+const KIND: Record<string, string> = {
+  executable_tool: "Çalıştırılabilir araç",
+  agent_plugin: "Ajan eklentisi",
+  skill_collection: "Yetenek koleksiyonu",
+  prompt_source: "İstem kaynağı",
+};
+export const kindLabel = (s: string) => KIND[s] ?? s;
+
+export const KIND_HELP: Record<string, string> = {
+  executable_tool: "Bilgisayarınızda çalışan bir program veya komut satırı aracı.",
+  agent_plugin: "Claude Code gibi bir yapay zekâ ajanına eklenen eklenti.",
+  skill_collection: "Ajanların kullanabileceği yetenek (SKILL.md) dosyalarından oluşan kaynak.",
+  prompt_source: "Hazır istem (prompt) metinleri içeren, yalnızca okunur kaynak.",
+};
+
+const POLICY: Record<string, string> = {
+  "manual-only": "Yalnızca elle (bu sürümde hiçbir çalıştırma yok)",
+  "blocked-until-scoped-authorization": "Kapsamlı yazılı yetki olmadan çalıştırma yasak",
+};
+export const policyLabel = (s: string) => POLICY[s] ?? s;
+
+const METADATA: Record<string, string> = {
+  "documented-snapshot": "Herkese açık belgelerden anlık görüntü (çevrimdışı)",
+  "not-fetched": "Uzak veri çekilmedi — yalnızca bağlantıdan türetildi",
+};
+export const metadataLabel = (s: string) => METADATA[s] ?? s;
+
+const LICENSE: Record<string, string> = { known: "Lisans bilinen", unknown: "Lisans bilinmiyor", "review-required": "Lisans ayrıca incelenmeli" };
+export const licenseLabel = (s: string) => LICENSE[s] ?? s;
+
+const SCOPE: Record<string, string> = { unknown: "Kapsam bilinmiyor (kurulum denetlenmedi)" };
+export const scopeLabel = (s: string) => SCOPE[s] ?? s;

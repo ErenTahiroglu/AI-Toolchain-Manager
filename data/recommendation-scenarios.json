@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "synthetic": true,
+  "note": "Synthetic tasks for the deterministic recommendation prototype. They are not real tasks, not real projects and not real Claude Code sessions. `expect` is checked by the Rust test suite.",
+  "scenarios": [
+    {
+      "id": "react-component",
+      "title": "React bileşeni tasarlamak",
+      "taskText": "Fiyat tablosu için yeniden kullanılabilir, güzel bir React bileşeni tasarla.",
+      "evidenceFiles": ["PricingTable.tsx"],
+      "expect": { "entries": { "anthropic-frontend-design": "suggest" } }
+    },
+    {
+      "id": "html-css-layout",
+      "title": "HTML/CSS düzenini iyileştirmek",
+      "taskText": "Ana sayfanın HTML ve CSS düzenini mobilde düzgün görünecek şekilde iyileştir.",
+      "evidenceFiles": ["index.html", "styles.css"],
+      "expect": { "entries": { "anthropic-frontend-design": "suggest" } }
+    },
+    {
+      "id": "browser-test",
+      "title": "Web uygulamasını tarayıcıda test etmek",
+      "taskText": "Web uygulamasının giriş akışını tarayıcıda uçtan uca test et ve ekran görüntüsü al.",
+      "evidenceFiles": ["login.tsx"],
+      "expect": { "entries": { "agent-browser": "informational" } }
+    },
+    {
+      "id": "find-a-skill",
+      "title": "İş için yeniden kullanılabilir yetenek aramak",
+      "taskText": "PDF raporlarını işlemek için hazır, yeniden kullanılabilir bir skill bul.",
+      "evidenceFiles": [],
+      "expect": { "entries": { "agentic-awesome-skills": "suggest" } }
+    },
+    {
+      "id": "authorized-pentest",
+      "title": "Yetkili güvenlik değerlendirmesi planlamak",
+      "taskText": "Kendi staging sistemimiz için yetkili bir sızma testi (pentest) planla.",
+      "evidenceFiles": [],
+      "expect": { "entries": { "strix": "informational" } }
+    },
+    {
+      "id": "backend-with-css-in-repo",
+      "title": "Yalnızca arka uç işi (depoda CSS var)",
+      "taskText": "SQL migration betiğini düzelt ve veritabanı sorgusunu hızlandır.",
+      "evidenceFiles": ["migration.sql", "styles.css", "theme.css"],
+      "expect": { "entries": {}, "suppressed": { "anthropic-frontend-design": "no-ui-intent" } }
+    },
+    {
+      "id": "api-endpoint-with-ui-files",
+      "title": "API uç noktası (arayüz dosyaları açık)",
+      "taskText": "Refactor the API endpoint and add pagination to the server handler.",
+      "evidenceFiles": ["server.ts", "App.tsx", "app.css"],
+      "expect": { "entries": {}, "suppressed": { "anthropic-frontend-design": "no-ui-intent" } }
+    },
+    {
+      "id": "mixed-backend-and-ui",
+      "title": "Hem arka uç hem arayüz",
+      "taskText": "Add an API endpoint and fix the button styling in the settings page.",
+      "evidenceFiles": ["Settings.tsx"],
+      "expect": { "entries": { "anthropic-frontend-design": "suggest" } }
+    },
+    {
+      "id": "security-keyword-only",
+      "title": "Yalnızca güvenlik sözcüğü (aktif test yok)",
+      "taskText": "Fix the XSS bug in the login handler and review security headers.",
+      "evidenceFiles": ["login.ts"],
+      "expect": { "entries": {}, "suppressed": { "strix": "security-keyword-only" } }
+    },
+    {
+      "id": "unit-test-no-browser",
+      "title": "Birim testi (tarayıcı yok)",
+      "taskText": "Write unit tests for the date parser and verify the edge cases.",
+      "evidenceFiles": ["parser.ts"],
+      "expect": { "entries": {} }
+    },
+    {
+      "id": "generic-bug",
+      "title": "Genel hata düzeltme",
+      "taskText": "Fix the bug where the total is calculated wrongly.",
+      "evidenceFiles": ["App.tsx", "styles.css"],
+      "expect": { "entries": {}, "suppressed": { "anthropic-frontend-design": "no-ui-intent" } }
+    }
+  ]
+}

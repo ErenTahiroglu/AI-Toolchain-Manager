@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "snapshotDate": "2026-10-17",
+  "note": "Phase 1B candidates. Each `record` conforms to schemas/catalog-entry.schema.json v2 (metadata only, never executable authority). `entryKind`, `pluginIdentity`, `sourcePath`, `purpose` and `executionPolicy` are application-level wrapper fields.",
+  "records": [
+    {
+      "entryKind": "agent_plugin",
+      "pluginIdentity": "frontend-design@claude-plugins-official",
+      "sourcePath": "plugins/frontend-design",
+      "purpose": "Claude Code için resmî eklenti: web/arayüz tasarımı işlerinde daha özgün, üretim kalitesinde ön yüz kodu yazmaya yönelik bir beceri.",
+      "executionPolicy": "manual-only",
+      "record": {
+        "schemaVersion": 2,
+        "toolId": "anthropic-frontend-design",
+        "displayName": "Anthropic Frontend Design",
+        "repository": { "url": "https://github.com/anthropics/claude-plugins-official", "owner": "anthropics", "name": "claude-plugins-official" },
+        "sourceSnapshot": { "observedRef": "main", "immutableCommit": "ea10b213686c90bb1984b2016937310e05336cf3", "releaseVersion": null, "revisionState": "immutable-commit", "observedAt": "2026-10-17T00:00:00Z", "evidenceIds": ["R23"] },
+        "category": "agent-plugin",
+        "reviewState": "unreviewed",
+        "license": { "state": "known", "spdxId": "Apache-2.0", "evidenceId": "R23" },
+        "targetEvidence": [
+          { "platformTarget": "macos-arm64", "agentSurface": "claude-code-terminal", "compatibilityState": "vendor-declared", "evidenceId": "R23", "limitation": "Official marketplace plugin documented; no functional test on this machine." },
+          { "platformTarget": "windows-x64", "agentSurface": "claude-code-terminal", "compatibilityState": "vendor-declared", "evidenceId": "R23", "limitation": "Official marketplace plugin documented; Windows functional behaviour not tested." },
+          { "platformTarget": "macos-arm64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R23", "limitation": "Claude Code plugin; no Antigravity IDE evidence." },
+          { "platformTarget": "windows-x64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R23", "limitation": "Claude Code plugin; no Antigravity IDE evidence." }
+        ],
+        "installMethods": [{ "methodId": "native-plugin-manager", "evidenceId": "R23", "publisherPin": "frontend-design@claude-plugins-official" }],
+        "dependencies": [],
+        "privilegeClaims": ["Current user account; Claude Code plugin scope (user or project) is chosen at install time"],
+        "networkClaims": ["Host plugin marketplace during install; model provider during agent use"],
+        "artifactEvidence": null,
+        "verificationClaims": [{ "kind": "function", "state": "publisher-describes", "evidenceId": "R23" }],
+        "privacy": { "telemetry": "unknown", "mayTransmitProjectContent": null, "evidenceId": "R23", "notes": ["Instruction-only skill; agent conversations use the configured model provider.", "A globally installed plugin may load in every project; project-level isolation is not assumed."] },
+        "updatedAt": "2026-10-17T00:00:00Z"
+      }
+    },
+    {
+      "entryKind": "executable_tool",
+      "pluginIdentity": null,
+      "sourcePath": null,
+      "purpose": "Aktif sızma testi (pentest) yapan yapay zekâ aracı. Hedef sistemlere gerçekten saldırı denemesi yapar; yalnızca sahibi olduğunuz veya yazılı izniniz olan hedeflerde kullanılabilir.",
+      "executionPolicy": "blocked-until-scoped-authorization",
+      "record": {
+        "schemaVersion": 2,
+        "toolId": "strix",
+        "displayName": "Strix",
+        "repository": { "url": "https://github.com/usestrix/strix", "owner": "usestrix", "name": "strix" },
+        "sourceSnapshot": { "observedRef": "main", "immutableCommit": "972f5097c2bfaf8f1dd8b55744ab8861f0d6b6e5", "releaseVersion": "v1.7.0", "revisionState": "immutable-commit", "observedAt": "2026-10-17T00:00:00Z", "evidenceIds": ["R24"] },
+        "category": "python-cli",
+        "reviewState": "quarantined",
+        "license": { "state": "known", "spdxId": "Apache-2.0", "evidenceId": "R24" },
+        "targetEvidence": [
+          { "platformTarget": "macos-arm64", "agentSurface": "local-cli", "compatibilityState": "unknown", "evidenceId": "R24", "limitation": "Requires Docker and an LLM provider key; OS/architecture support not reviewed." },
+          { "platformTarget": "windows-x64", "agentSurface": "local-cli", "compatibilityState": "unknown", "evidenceId": "R24", "limitation": "Requires Docker and an LLM provider key; OS/architecture support not reviewed." },
+          { "platformTarget": "macos-arm64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R24", "limitation": "Publisher describes agent skills; surface-specific behaviour not reviewed." },
+          { "platformTarget": "windows-x64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R24", "limitation": "Publisher describes agent skills; surface-specific behaviour not reviewed." }
+        ],
+        "installMethods": [{ "methodId": "pipx", "evidenceId": "R24", "publisherPin": null }, { "methodId": "unknown", "evidenceId": "R24", "publisherPin": "Publisher's primary installer is a piped remote shell script; never an approved recipe." }],
+        "dependencies": ["Docker (running)", "LLM provider API key or the vendor cloud"],
+        "privilegeClaims": ["Container runtime access; actively tests the targets it is pointed at"],
+        "networkClaims": ["Sends test traffic to the chosen target; sends context to the configured LLM provider; optional vendor cloud"],
+        "artifactEvidence": null,
+        "verificationClaims": [{ "kind": "function", "state": "publisher-describes", "evidenceId": "R24" }],
+        "privacy": { "telemetry": "unknown", "mayTransmitProjectContent": true, "evidenceId": "R24", "notes": ["Active scanning: unauthorized testing is illegal in most jurisdictions (publisher notice).", "Findings and traffic are sensitive; keep local.", "Auto-fix and any run require separate explicit scoped authorization."] },
+        "updatedAt": "2026-10-17T00:00:00Z"
+      }
+    },
+    {
+      "entryKind": "executable_tool",
+      "pluginIdentity": null,
+      "sourcePath": null,
+      "purpose": "Yapay zekâ ajanları için tarayıcı otomasyonu aracı: bir web uygulamasını gerçek tarayıcıda deneme, ekran görüntüsü alma ve görsel/uçtan uca test.",
+      "executionPolicy": "manual-only",
+      "record": {
+        "schemaVersion": 2,
+        "toolId": "agent-browser",
+        "displayName": "agent-browser",
+        "repository": { "url": "https://github.com/vercel-labs/agent-browser", "owner": "vercel-labs", "name": "agent-browser" },
+        "sourceSnapshot": { "observedRef": "main", "immutableCommit": "dac13bb87468fe9d74a040d862720f6cc17a9565", "releaseVersion": "v0.39.1", "revisionState": "immutable-commit", "observedAt": "2026-10-17T00:00:00Z", "evidenceIds": ["R25"] },
+        "category": "native-cli",
+        "reviewState": "unreviewed",
+        "license": { "state": "known", "spdxId": "Apache-2.0", "evidenceId": "R25" },
+        "targetEvidence": [
+          { "platformTarget": "macos-arm64", "agentSurface": "local-cli", "compatibilityState": "vendor-declared", "evidenceId": "R25", "limitation": "README platform table lists a native macOS ARM64 binary; not executed here." },
+          { "platformTarget": "windows-x64", "agentSurface": "local-cli", "compatibilityState": "vendor-declared", "evidenceId": "R25", "limitation": "README platform table lists a native Windows x64 binary; not executed here." },
+          { "platformTarget": "macos-arm64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R25", "limitation": "Agent usage is described generically; surface-specific install path not reviewed." },
+          { "platformTarget": "windows-x64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R25", "limitation": "Agent usage is described generically; surface-specific install path not reviewed." }
+        ],
+        "installMethods": [{ "methodId": "homebrew", "evidenceId": "R25", "publisherPin": null }, { "methodId": "unknown", "evidenceId": "R25", "publisherPin": "npm/Cargo packages are described by the publisher; not an approved method." }],
+        "dependencies": ["Chrome for Testing (downloaded by the tool's own install step)"],
+        "privilegeClaims": ["Current user account; launches and controls a browser; optional profile/session reuse"],
+        "networkClaims": ["Loads whatever sites it is pointed at; downloads a browser runtime on first install"],
+        "artifactEvidence": null,
+        "verificationClaims": [{ "kind": "function", "state": "publisher-describes", "evidenceId": "R25" }],
+        "privacy": { "telemetry": "unknown", "mayTransmitProjectContent": null, "evidenceId": "R25", "notes": ["Page content, names and results are untrusted data (publisher states this).", "Use isolated profiles and a domain allowlist; screenshots and cookies can leak private sessions."] },
+        "updatedAt": "2026-10-17T00:00:00Z"
+      }
+    },
+    {
+      "entryKind": "skill_collection",
+      "pluginIdentity": null,
+      "sourcePath": null,
+      "purpose": "2.700'den fazla SKILL.md yeteneğinden oluşan büyük kaynak kataloğu. Hepsi kurulmaz; yalnızca incelenen birkaç yetenek seçilerek etkinleştirilir.",
+      "executionPolicy": "manual-only",
+      "record": {
+        "schemaVersion": 2,
+        "toolId": "agentic-awesome-skills",
+        "displayName": "agentic-awesome-skills",
+        "repository": { "url": "https://github.com/sickn33/agentic-awesome-skills", "owner": "sickn33", "name": "agentic-awesome-skills" },
+        "sourceSnapshot": { "observedRef": "main", "immutableCommit": "c564f9f4aee8a143c48218805b65f0f6956c6264", "releaseVersion": "v19.8.0", "revisionState": "immutable-commit", "observedAt": "2026-10-17T00:00:00Z", "evidenceIds": ["R26"] },
+        "category": "agent-skill",
+        "reviewState": "unreviewed",
+        "license": { "state": "review-required", "spdxId": null, "evidenceId": null },
+        "targetEvidence": [
+          { "platformTarget": "macos-arm64", "agentSurface": "claude-code-terminal", "compatibilityState": "vendor-declared", "evidenceId": "R26", "limitation": "Publisher documents Claude Code setup; selective activation only; no functional test." },
+          { "platformTarget": "windows-x64", "agentSurface": "claude-code-terminal", "compatibilityState": "vendor-declared", "evidenceId": "R26", "limitation": "Publisher documents Claude Code setup and a Windows truncation-recovery guide; not tested here." },
+          { "platformTarget": "macos-arm64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R26", "limitation": "Publisher warns Antigravity's watched skill directory can overload context; IDE path not verified." },
+          { "platformTarget": "windows-x64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R26", "limitation": "Publisher warns Antigravity's watched skill directory can overload context; IDE path not verified." }
+        ],
+        "installMethods": [{ "methodId": "skills-cli", "evidenceId": "R26", "publisherPin": null }],
+        "dependencies": [],
+        "privilegeClaims": ["Agent privileges; each skill is untrusted instructions that may ask for more"],
+        "networkClaims": ["Installer/registry access during install; individual skills have their own data flows"],
+        "artifactEvidence": null,
+        "verificationClaims": [{ "kind": "function", "state": "publisher-describes", "evidenceId": "R26" }],
+        "privacy": { "telemetry": "unknown", "mayTransmitProjectContent": null, "evidenceId": "R26", "notes": ["Repository is MIT; third-party skills listed in it have their own licenses (some GPL) and must be checked per skill.", "The publisher states AAS Core does not rank or recommend skills; this app must do its own bounded selection.", "Never install the whole catalogue."] },
+        "updatedAt": "2026-10-17T00:00:00Z"
+      }
+    }
+  ]
+}

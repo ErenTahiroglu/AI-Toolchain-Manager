@@ -66,7 +66,10 @@ class RustAuditContract(unittest.TestCase):
         for event in self.events:
             self.assertNotEqual(event["eventType"], "verify")
             self.assertNotEqual(event["verdictSource"], "independent-harness")
-            self.assertEqual(event["verdictSource"], "operational-health")
+            # System checks are operational health; user actions (reject/defer/reset/catalog_remove) carry no verdict.
+            self.assertIn(event["verdictSource"], {"operational-health", "not-applicable"})
+            if event["verdictSource"] == "not-applicable":
+                self.assertEqual(event["actorType"], "user")
 
     def test_headless_run_cannot_report_a_clean_pass(self):
         # single-instance behaviour is unobservable in-process, so a full "passed" would be a false green.
@@ -74,6 +77,33 @@ class RustAuditContract(unittest.TestCase):
         statuses = {c["id"]: c["status"] for c in self.data["report"]["checks"]}
         self.assertEqual(statuses["single-instance"], "unknown")
         self.assertEqual(statuses["adapters"], "skipped")
+
+    def test_preference_and_catalog_events_are_produced_and_schema_valid(self):
+        types = [e["eventType"] for e in self.events]
+        for expected in ("reject", "defer", "reset_rejection", "catalog_remove"):
+            self.assertIn(expected, types)
+        for e in self.events:
+            if e["eventType"] in {"reject", "defer", "reset_rejection"}:
+                self.assertEqual(e["actorType"], "user")
+                self.assertRegex(e["projectAlias"], r"^[a-z0-9][a-z0-9-]{1,41}$", "alias is a slug, never a path")
+                self.assertRegex(e["toolId"], r"^[a-z0-9][a-z0-9._-]{1,63}$")
+
+    def test_app_never_records_install_update_approve_or_verify_events(self):
+        forbidden = {"install", "update", "approve", "verify", "rollback", "uninstall"}
+        self.assertFalse(forbidden & {e["eventType"] for e in self.events})
+
+    def test_refused_actions_in_the_probe_are_refused_for_the_right_reasons(self):
+        self.assertEqual(self.data["preferenceProbe"]["refused"], ["ACTIVATION_BLOCKED", "PREFERENCE_NOT_ACTIVATABLE", "DECISION_INVALID"])
+
+    def test_built_binary_reproduces_every_synthetic_scenario_expectation(self):
+        scenarios = json.loads((ROOT / "data" / "recommendation-scenarios.json").read_text(encoding="utf-8"))["scenarios"]
+        results = {r["id"]: r for r in self.data["scenarioResults"]}
+        self.assertEqual(set(results), {s["id"] for s in scenarios})
+        for s in scenarios:
+            got = results[s["id"]]
+            self.assertEqual(got["recommendations"], s["expect"]["entries"], s["id"])
+            for entry, code in s["expect"].get("suppressed", {}).items():
+                self.assertEqual(got["suppressed"].get(entry), code, s["id"])
 
     def test_no_local_paths_or_secret_shaped_values_in_serialized_events(self):
         text = json.dumps(self.events)

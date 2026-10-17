@@ -95,3 +95,19 @@ fieldset { border: 1px solid var(--border); border-radius: 10px; }
 
 @media (max-width: 760px) { .shell { grid-template-columns: 1fr; } .sidebar { flex-direction: row; flex-wrap: wrap; } .sidebar ul { grid-auto-flow: column; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+
+/* Phase 1B: forms and small helpers */
+.field { display: grid; gap: .25rem; margin: 0 0 .75rem; }
+.field label { font-weight: 600; font-size: .9rem; }
+input[type="text"], input[type="number"], select, textarea { font: inherit; padding: .4rem .55rem; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); width: 100%; max-width: 46rem; }
+textarea { resize: vertical; }
+.row { display: flex; flex-wrap: wrap; gap: 1rem; }
+.row .field { min-width: 12rem; flex: 1; }
+.actions { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; }
+button.secondary { background: var(--surface); color: var(--text); border-color: var(--border); }
+.removed { opacity: .8; border-style: dashed; }
+.bad-text { color: var(--bad-fg); }
+.ok-text { color: var(--ok-fg); }
+.preview { border-top: 1px solid var(--border); margin-top: .5rem; padding-top: .5rem; }
+.inline-form { border-top: 1px solid var(--border); margin-top: .75rem; padding-top: .5rem; }
+.inline-form h3, .panel h3 { font-size: 1rem; margin: .25rem 0 .5rem; }

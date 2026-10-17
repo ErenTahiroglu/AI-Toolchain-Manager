@@ -3,10 +3,12 @@
 
 use crate::{
     audit::{self, ChainReport, NewEvent},
-    catalog::{self, ProjectRow, PromptSourceRow, ToolRow},
+    catalog::{self, CatalogEntry, PromptSourceRow, UrlPreview},
     db, diagnostics,
     error::{AppError, AppResult},
     health::{self, AutostartState, HealthContext, HealthReport},
+    projects::{self, PreferenceView, ProjectView},
+    recommend::{self, Evaluation, Scenario, TaskInput},
     redact, settings,
     state::AppState,
 };
@@ -48,7 +50,7 @@ pub fn get_app_info(state: State<'_, AppState>) -> AppResult<AppInfo> {
     let db_version = state.with_db(db::user_version).ok();
     Ok(AppInfo {
         version: env!("CARGO_PKG_VERSION"),
-        phase: "1A",
+        phase: "1B",
         platform: std::env::consts::OS,
         arch: std::env::consts::ARCH,
         db_version,
@@ -61,11 +63,14 @@ pub fn get_app_info(state: State<'_, AppState>) -> AppResult<AppInfo> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Dashboard {
-    tool_count: i64,
+    catalog_count: i64,
+    catalog_enabled_count: i64,
     unreviewed_count: i64,
     installed_count: i64,
     validated_count: i64,
     sample_project_count: i64,
+    reference_project_count: i64,
+    preference_count: i64,
     prompt_source_count: i64,
     audit_event_count: i64,
     audit_chain: ChainReport,
@@ -79,11 +84,14 @@ pub fn get_dashboard(state: State<'_, AppState>) -> AppResult<Dashboard> {
         let n = |sql: &str| -> AppResult<i64> { Ok(c.query_row(sql, [], |r| r.get(0))?) };
         let chain = audit::verify(c)?;
         Ok(Dashboard {
-            tool_count: n("SELECT count(*) FROM tools")?,
-            unreviewed_count: n("SELECT count(*) FROM tools WHERE review_state = 'unreviewed'")?,
-            installed_count: n("SELECT count(*) FROM tools WHERE install_state <> 'not_managed'")?,
-            validated_count: n("SELECT count(*) FROM tools WHERE validation_state = 'passed'")?,
-            sample_project_count: n("SELECT count(*) FROM projects WHERE is_synthetic = 1")?,
+            catalog_count: n("SELECT count(*) FROM catalog_entries WHERE removed_at IS NULL")?,
+            catalog_enabled_count: n("SELECT count(*) FROM catalog_entries WHERE removed_at IS NULL AND enabled = 1")?,
+            unreviewed_count: n("SELECT count(*) FROM catalog_entries WHERE removed_at IS NULL AND review_state = 'unreviewed'")?,
+            installed_count: n("SELECT count(*) FROM catalog_entries WHERE install_state <> 'not_managed'")?,
+            validated_count: n("SELECT count(*) FROM catalog_entries WHERE verification_state = 'passed'")?,
+            sample_project_count: n("SELECT count(*) FROM project_registry WHERE removed_at IS NULL AND kind = 'synthetic'")?,
+            reference_project_count: n("SELECT count(*) FROM project_registry WHERE removed_at IS NULL AND kind = 'reference'")?,
+            preference_count: n("SELECT count(*) FROM project_preferences")?,
             prompt_source_count: n("SELECT count(*) FROM prompt_sources")?,
             audit_event_count: chain.count,
             audit_chain: chain,
@@ -93,13 +101,108 @@ pub fn get_dashboard(state: State<'_, AppState>) -> AppResult<Dashboard> {
 }
 
 #[tauri::command]
-pub fn list_tools(state: State<'_, AppState>) -> AppResult<Vec<ToolRow>> {
-    state.with_db(catalog::list_tools)
+pub fn list_catalog(state: State<'_, AppState>) -> AppResult<Vec<CatalogEntry>> {
+    state.with_db(catalog::list_catalog)
+}
+
+/// Offline and side-effect free: validates a GitHub link and reports duplicates. Fetches nothing.
+#[tauri::command]
+pub fn preview_github_url(state: State<'_, AppState>, url: String) -> AppResult<UrlPreview> {
+    state.with_db(|c| catalog::preview_url(c, &url))
 }
 
 #[tauri::command]
-pub fn list_projects(state: State<'_, AppState>) -> AppResult<Vec<ProjectRow>> {
-    state.with_db(catalog::list_projects)
+pub fn add_catalog_entry(state: State<'_, AppState>, url: String, kind: String, purpose: String) -> AppResult<CatalogEntry> {
+    state.with_db(|c| catalog::add_entry(c, &url, &kind, &purpose))
+}
+
+#[tauri::command]
+pub fn set_catalog_entry_enabled(state: State<'_, AppState>, entry_id: String, enabled: bool) -> AppResult<CatalogEntry> {
+    state.with_db(|c| catalog::set_enabled(c, &entry_id, enabled))
+}
+
+/// Removes the catalog mapping only. Nothing is uninstalled; nothing was ever installed.
+#[tauri::command]
+pub fn remove_catalog_entry(state: State<'_, AppState>, entry_id: String) -> AppResult<CatalogEntry> {
+    state.with_db(|c| catalog::remove_entry(c, &entry_id))
+}
+
+#[tauri::command]
+pub fn restore_catalog_entry(state: State<'_, AppState>, entry_id: String) -> AppResult<CatalogEntry> {
+    state.with_db(|c| catalog::restore_entry(c, &entry_id))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionBlock {
+    code: &'static str,
+    message: String,
+}
+
+/// Tells the UI why "install" / "run" is unavailable, from the single place that decides it. Always blocked in Phase 1B.
+#[tauri::command]
+pub fn explain_execution_block(state: State<'_, AppState>, entry_id: String) -> AppResult<ExecutionBlock> {
+    state.with_db(|c| {
+        let entry = catalog::get_entry(c, &entry_id)?;
+        match crate::gate::check_execution(&entry, "run", None) {
+            Err(e) => Ok(ExecutionBlock { code: e.code, message: e.message }),
+            // Unreachable by construction; fail closed if it ever happens.
+            Ok(()) => Ok(ExecutionBlock { code: "EXECUTION_NOT_AVAILABLE_PHASE_1B", message: "Çalıştırma kullanılamaz.".to_string() }),
+        }
+    })
+}
+
+#[tauri::command]
+pub fn list_projects(state: State<'_, AppState>) -> AppResult<Vec<ProjectView>> {
+    state.with_db(projects::list_projects)
+}
+
+/// Registers a project as a reference (alias + private note). The folder is never opened or scanned.
+#[tauri::command]
+pub fn add_project_reference(state: State<'_, AppState>, alias: String, display_name: String, note: String) -> AppResult<ProjectView> {
+    state.with_db(|c| projects::add_reference(c, &alias, &display_name, &note))
+}
+
+#[tauri::command]
+pub fn remove_project_reference(state: State<'_, AppState>, alias: String) -> AppResult<()> {
+    state.with_db(|c| projects::remove_reference(c, &alias))
+}
+
+/// Records the user's *desired* choice. It never installs, enables in a host, or verifies anything.
+#[tauri::command]
+pub fn set_project_preference(
+    state: State<'_, AppState>,
+    alias: String,
+    entry_id: String,
+    agent_surface: String,
+    platform_target: String,
+    decision: String,
+    remind_days: Option<i64>,
+) -> AppResult<PreferenceView> {
+    state.with_db(|c| projects::set_preference(c, &alias, &entry_id, &agent_surface, &platform_target, &decision, remind_days))
+}
+
+#[tauri::command]
+pub fn reset_project_preference(
+    state: State<'_, AppState>,
+    alias: String,
+    entry_id: String,
+    agent_surface: String,
+    platform_target: String,
+) -> AppResult<()> {
+    state.with_db(|c| projects::reset_preference(c, &alias, &entry_id, &agent_surface, &platform_target))
+}
+
+#[tauri::command]
+pub fn list_scenarios() -> AppResult<Vec<Scenario>> {
+    recommend::scenarios()
+}
+
+/// Deterministic, local, zero model calls. Returns suggestions with reasons; changes nothing but the
+/// "already shown for this task" log.
+#[tauri::command]
+pub fn evaluate_task(state: State<'_, AppState>, input: TaskInput) -> AppResult<Evaluation> {
+    state.with_db(|c| recommend::evaluate(c, &input))
 }
 
 #[tauri::command]
@@ -204,14 +307,7 @@ pub fn report_ui_error(state: State<'_, AppState>, message: String) -> AppResult
         diagnostics::log(c, "error", "ui", "UI_UNHANDLED_ERROR", &redact::sanitize(&bounded, 300))?;
         audit::append(
             c,
-            &NewEvent {
-                event_type: "health_check",
-                outcome: "failed",
-                check_id: "ui-error",
-                error_code: Some("UI_UNHANDLED_ERROR"),
-                verdict_source: "operational-health",
-                actor_type: "system",
-            },
+            &NewEvent::plain("health_check", "failed", "ui-error", Some("UI_UNHANDLED_ERROR"), "operational-health", "system"),
         )?;
         Ok(())
     })

@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  AppError, AppInfo, AuditEvent, ChainReport, Dashboard, DiagnosticRow, HealthReport,
-  ProjectRow, PromptSourceRow, Settings, StartupState, ToolRow,
+  AppError, AppInfo, AuditEvent, CatalogEntry, ChainReport, Dashboard, DiagnosticRow, Evaluation, ExecutionBlock, HealthReport,
+  PreferenceView, ProjectView, PromptSourceRow, Scenario, Settings, StartupState, TaskInput, UrlPreview,
 } from "./types";
 
 /** Normalises whatever the IPC layer throws into the AppError shape the UI renders. */
@@ -21,11 +21,41 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
   }
 }
 
+export interface PreferenceKey {
+  alias: string;
+  entryId: string;
+  agentSurface: string;
+  platformTarget: string;
+}
+
 export const api = {
   getAppInfo: () => call<AppInfo>("get_app_info"),
   getDashboard: () => call<Dashboard>("get_dashboard"),
-  listTools: () => call<ToolRow[]>("list_tools"),
-  listProjects: () => call<ProjectRow[]>("list_projects"),
+
+  // Catalog registry. None of these downloads, installs, runs or verifies anything.
+  listCatalog: () => call<CatalogEntry[]>("list_catalog"),
+  previewGithubUrl: (url: string) => call<UrlPreview>("preview_github_url", { url }),
+  addCatalogEntry: (url: string, kind: string, purpose: string) => call<CatalogEntry>("add_catalog_entry", { url, kind, purpose }),
+  setCatalogEntryEnabled: (entryId: string, enabled: boolean) => call<CatalogEntry>("set_catalog_entry_enabled", { entryId, enabled }),
+  removeCatalogEntry: (entryId: string) => call<CatalogEntry>("remove_catalog_entry", { entryId }),
+  restoreCatalogEntry: (entryId: string) => call<CatalogEntry>("restore_catalog_entry", { entryId }),
+  explainExecutionBlock: (entryId: string) => call<ExecutionBlock>("explain_execution_block", { entryId }),
+
+  // Projects and desired (never actual) per-project choices.
+  listProjects: () => call<ProjectView[]>("list_projects"),
+  addProjectReference: (alias: string, displayName: string, note: string) => call<ProjectView>("add_project_reference", { alias, displayName, note }),
+  removeProjectReference: (alias: string) => call<void>("remove_project_reference", { alias }),
+  setProjectPreference: (k: PreferenceKey, decision: string, remindDays?: number) =>
+    call<PreferenceView>("set_project_preference", {
+      alias: k.alias, entryId: k.entryId, agentSurface: k.agentSurface, platformTarget: k.platformTarget, decision, remindDays: remindDays ?? null,
+    }),
+  resetProjectPreference: (k: PreferenceKey) =>
+    call<void>("reset_project_preference", { alias: k.alias, entryId: k.entryId, agentSurface: k.agentSurface, platformTarget: k.platformTarget }),
+
+  // Deterministic, local, zero model calls.
+  listScenarios: () => call<Scenario[]>("list_scenarios"),
+  evaluateTask: (input: TaskInput) => call<Evaluation>("evaluate_task", { input }),
+
   listPromptSources: () => call<PromptSourceRow[]>("list_prompt_sources"),
   runHealthChecks: () => call<HealthReport>("run_health_checks"),
   listAuditEvents: (limit = 50) => call<AuditEvent[]>("list_audit_events", { limit }),
