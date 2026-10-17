@@ -25,7 +25,7 @@ Optionally help a coding agent improve a user-authored task prompt with relevant
 Each imported source must be version-pinned and recorded with repository, path, commit SHA, source license, content digest, timestamp and explicit trust status.
 
 ## Safe workflow
-1. Identify whether the active task needs prompt assistance. Until user preference is resolved, default OFF for automatic every-task invocation.
+1. At the start of a **new substantial agent assignment** (for example an implementation phase, design, security audit or complex research task), run at most one local, token-free preflight if the user enables it. Never trigger on every chat message, tool call or agent substep. An explicit manual trigger must also exist. Activation preference is pending user confirmation.
 2. Retrieve up to a small configurable number of relevant *read-only* candidates using local deterministic search, without calling a hosted LLM by default.
 3. Apply non-negotiable gates: user objective and constraints preserved, no untrusted executable instructions, no new privilege, no secret exfiltration, legally reusable content, compatible output shape.
 4. Compare original vs candidate **as a design heuristic**, not as a factual quality measurement. Suggested weights: constraint preservation 25, task relevance 25, verifiability 20, security/reliability 15, token/time economy 10, clarity 5. The rubric is subject to empirical recalibration; irrelevant candidates are rejected regardless of total.
@@ -49,7 +49,7 @@ Each imported source must be version-pinned and recorded with repository, path, 
 - **Final Red Team gate:** Injection and data-exfiltration simulations, unrelated/low-quality prompt regression, source update and license changes, reproducibility, offline behavior, output-quality tests, latency/token accounting.
 
 ## Explicitly unresolved
-1. Activation: only explicit prompt/plan-drafting tasks (recommended), or every agent task?
+1. Activation: automatic once at the beginning of each substantial agent assignment (recommended), manual only, or every new user task? Never on each tool call.
 2. Whether the user prefers to review every enhancement or receive automatic minimal augmentation after deterministic gates.
 3. Whether optional LLM-based A/B evaluation is ever allowed, and with what budget.
 
