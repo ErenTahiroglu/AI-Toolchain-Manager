@@ -169,12 +169,15 @@ pub struct LadderCheck {
     /// Is the stored digest (if any) a plain lower-case hex SHA-256?
     pub digest_ok: bool,
     pub sha256: Option<String>,
+    /// The file format verified from the hashed file's bytes (needed to re-derive the type binding).
+    pub format: super::reference::ArtifactFormat,
 }
 
 impl From<super::types::Provenance> for LadderCheck {
     fn from(p: super::types::Provenance) -> Self {
         let sha = p.artifact.sha256.clone();
         LadderCheck {
+            format: p.artifact.verified_format.unwrap_or_default(),
             identity: p.identity.as_str().to_string(),
             digest_ok: sha.as_deref().map(super::reference::is_hex_digest).unwrap_or(true),
             sha256: sha,

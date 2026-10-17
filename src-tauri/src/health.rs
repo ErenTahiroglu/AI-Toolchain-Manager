@@ -238,7 +238,13 @@ fn check_discovery(conn: &Connection) -> CheckResult {
                                 || l.sha256
                                     .as_deref()
                                     .map(|d| {
-                                        crate::discovery::reference::evaluate(&subject, &platform, d, &references).result
+                                        let observed = crate::discovery::reference::ObservedArtifact {
+                                            entry_id: &subject,
+                                            platform_target: &platform,
+                                            format: l.format,
+                                            sha256: d,
+                                        };
+                                        crate::discovery::reference::evaluate(&observed, &references).result
                                             == crate::discovery::reference::MatchResult::MatchesAuthenticated
                                     })
                                     .unwrap_or(false);

@@ -97,8 +97,13 @@ pub fn synthetic_probe(conn: &Connection, dir: &Path) -> AppResult<Value> {
         &json!({ "oauthAccount": { "accessToken": DUMMY_SECRET }, "mcpServers": { "codebase-memory": { "command": "codebase-memory-mcp", "args": [DUMMY_SECRET_2], "env": { "K": DUMMY_SECRET } } } }).to_string(),
     )?;
     write(&home.join(format!(".local/bin/{}", exe("claude"))), "stub")?;
-    write(&bin.join(exe("gitleaks")), "stub")?;
-    write(&bin.join(exe("graphify")), "different bytes under a catalogued name")?;
+    // Synthetic files that really start like a native executable of this platform (a header and a payload; never run), so
+    // that the type binding of the policy can be exercised: gitleaks equals its reference, graphify differs from it.
+    let platform = if cfg!(windows) { PLATFORM_WINDOWS } else { PLATFORM_MACOS };
+    let native = discovery::reference::native_executable_format(platform);
+    let synthetic = |payload: &[u8]| discovery::reference::synthetic_file(native, payload);
+    fs::write(bin.join(exe("gitleaks")), synthetic(b"stub")).map_err(io)?;
+    fs::write(bin.join(exe("graphify")), synthetic(b"different bytes under a catalogued name")).map_err(io)?;
     write(&project.join(".mcp.json"), &json!({ "mcpServers": { "codebase-memory": { "command": "codebase-memory-mcp", "headers": { "Authorization": format!("Bearer {DUMMY_SECRET}") } } } }).to_string())?;
     write(&project.join(".claude/settings.json"), &json!({ "enabledPlugins": { key: false } }).to_string())?;
     write(&project.join("unrelated-source.txt"), DUMMY_SECRET_2)?;
@@ -119,10 +124,16 @@ pub fn synthetic_probe(conn: &Connection, dir: &Path) -> AppResult<Value> {
                 .map(|id| discovery::reference::ReferenceDigest {
                     entry_id: (*id).to_string(),
                     kind: discovery::reference::ArtifactKind::Executable,
-                    format: if cfg!(windows) { "pe-exe" } else { "mach-o" }.to_string(),
+                    format: native.as_str().to_string(),
                     platform_target: if cfg!(windows) { PLATFORM_WINDOWS } else { PLATFORM_MACOS }.to_string(),
                     version: "0.0.1".to_string(),
-                    sha256: crate::audit::sha256_hex(if *id == "gitleaks" { "stub" } else { "the genuine bytes" }),
+                    sha256: {
+                        use sha2::{Digest, Sha256};
+                        Sha256::digest(synthetic(if *id == "gitleaks" { b"stub" } else { b"the genuine bytes" }))
+                            .iter()
+                            .map(|b| format!("{b:02x}"))
+                            .collect()
+                    },
                     source: "synthetic probe fixture".to_string(),
                 })
                 .collect(),

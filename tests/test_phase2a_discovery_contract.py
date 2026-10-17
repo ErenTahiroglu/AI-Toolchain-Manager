@@ -10,6 +10,8 @@ import json
 import os
 import pathlib
 import re
+import struct
+import sys
 import unittest
 
 import jsonschema
@@ -145,6 +147,19 @@ class DiscoveryContract(unittest.TestCase):
     }
     SCHEMA = json.loads((pathlib.Path(__file__).resolve().parents[1] / "schemas" / "artifact-provenance.schema.json").read_text(encoding="utf-8"))
     # Only the synthetic probe has authenticated references (compiled-in production list is empty). Tool -> bytes it was given.
+    @staticmethod
+    def synthetic_executable(payload):
+        """Independent re-implementation of the probe's synthetic native header (PE on Windows, Mach-O arm64 elsewhere)."""
+        if sys.platform.startswith("win"):
+            head = bytearray(0x80 + 24)
+            head[0:2] = b"MZ"
+            head[0x3C:0x40] = struct.pack("<I", 0x80)
+            head[0x80:0x84] = b"PE\0\0"
+            head[0x84:0x86] = struct.pack("<H", 0x8664)
+            return bytes(head) + payload
+        return b"\xcf\xfa\xed\xfe" + struct.pack("<I", 0x0100000C) + bytes(24) + payload
+
+    EXPECTED_FORMAT = "pe-x64" if sys.platform.startswith("win") else "macho-arm64"
     SYNTHETIC_MATCH = {"gitleaks": b"stub"}
     SYNTHETIC_MISMATCH = {"graphify": b"different bytes under a catalogued name"}
 
@@ -219,11 +234,20 @@ class DiscoveryContract(unittest.TestCase):
         self.assertTrue(broken(lambda o: o.update(functionalityTested=True)))
         # a computed fingerprint with no digest
         self.assertTrue(broken(lambda o: o["ladder"]["artifact"].update(sha256=None)))
+        # validated but the verified format is not an exact-file executable/script format (or is missing / unrecognised)
+        for fmt in ("zip", "gzip", "unrecognised", None):
+            self.assertTrue(broken(lambda o, fmt=fmt: o["ladder"]["artifact"].update(verifiedFormat=fmt)), fmt)
+        # validated against a plugin-file reference: no hashed file is a plugin file in this policy
+        self.assertTrue(broken(lambda o: o["ladder"]["artifact"].update(referenceKind="plugin_file")))
+        # a free-text format is not a closed-vocabulary word
+        self.assertTrue(broken(lambda o: o["ladder"]["artifact"].update(verifiedFormat="pe-exe")))
 
     def test_the_fingerprints_are_independently_recomputable_and_only_the_synthetic_exact_reference_verifies(self):
-        for tool, content in {**self.SYNTHETIC_MATCH, **self.SYNTHETIC_MISMATCH}.items():
+        for tool, payload in {**self.SYNTHETIC_MATCH, **self.SYNTHETIC_MISMATCH}.items():
+            content = self.synthetic_executable(payload)
             o = self.one(tool, "path-executable", "global")
             a = o["ladder"]["artifact"]
+            self.assertEqual(a["verifiedFormat"], self.EXPECTED_FORMAT, f"{tool}: the format is established from the bytes")
             self.assertEqual(a["fingerprint"], "computed")
             self.assertEqual(a["sha256"], hashlib.sha256(content).hexdigest(), f"{tool}: the digest must equal an independent SHA-256 of the bytes")
             self.assertEqual(a["bytes"], len(content))

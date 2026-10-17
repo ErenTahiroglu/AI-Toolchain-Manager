@@ -42,7 +42,7 @@ export const obs = (over: Partial<StoredObservation> = {}): StoredObservation =>
   observedAt: new Date().toISOString(), stale: false, ageHours: 0, legacy: false, scanFinishedAt: new Date().toISOString(),
   scanAuthorizedPath: true, scanAuthorizedUserConfig: false, scanAuthorizedProject: false, scanAuthorizedFingerprint: false, provenance: "latest_scan", latestScanChecked: true,
   current: true, notCurrentReason: null,
-  ladder: { assessed: true, filenameDetected: true, installRecord: false, publisher: "none", identity: "unknown", version: "unknown", versionTrust: "none", signatureBlock: "not_assessed", installedFilesSeen: false, artifactAuth: "none", reclassified: false, artifact: { policyVersion: 1, fingerprint: "not_requested", unknownReason: null, sha256: null, bytes: null, recordLink: "none", reference: "none", referenceKind: null, matchResult: "not_applicable", referenceEpoch: null, invalidated: false }, notPerformed: ["active_version_probe", "installed_file_digest", "no_package_detector_for_tool"] },
+  ladder: { assessed: true, filenameDetected: true, installRecord: false, publisher: "none", identity: "unknown", version: "unknown", versionTrust: "none", signatureBlock: "not_assessed", installedFilesSeen: false, artifactAuth: "none", reclassified: false, artifact: { policyVersion: 2, fingerprint: "not_requested", unknownReason: null, sha256: null, bytes: null, verifiedFormat: null, recordLink: "none", reference: "none", referenceKind: null, matchResult: "not_applicable", referenceEpoch: null, invalidated: false }, notPerformed: ["active_version_probe", "installed_file_digest", "no_package_detector_for_tool"] },
   ...over,
 });
 

@@ -294,6 +294,9 @@ pub struct ArtifactEvidence {
     /// Lower-case hex SHA-256 of the local file, nothing else. A fingerprint, not proof of origin.
     pub sha256: Option<String>,
     pub bytes: Option<u64>,
+    /// The file format established from the first bytes of the hashed handle (closed vocabulary; never from the file
+    /// name). `None` until a fingerprint was computed.
+    pub verified_format: Option<super::reference::ArtifactFormat>,
     pub record_link: RecordLink,
     pub reference: ReferenceState,
     pub reference_kind: Option<ArtifactKind>,
@@ -491,6 +494,9 @@ impl Observation {
             && a.match_result == MatchResult::MatchesAuthenticated
             && a.reference == ReferenceState::Authenticated
             && a.reference_kind.map(ArtifactKind::is_exact_file).unwrap_or(false)
+            // the format verified from the opened file's own bytes must give exactly the role the reference authenticated
+            && a.verified_format.and_then(|f| f.role()).is_some()
+            && a.verified_format.and_then(|f| f.role()) == a.reference_kind
             && a.sha256.is_some()
             && !a.invalidated;
         p.artifact_auth = if authenticated { ArtifactAuth::DigestMatch } else { ArtifactAuth::None };

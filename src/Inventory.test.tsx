@@ -224,7 +224,7 @@ describe("computer inventory (read-only discovery)", () => {
   });
 
   const art = (over: Partial<ArtifactEvidence> = {}): ArtifactEvidence => ({
-    policyVersion: 1, fingerprint: "not_requested", unknownReason: null, sha256: null, bytes: null, recordLink: "none", reference: "none", referenceKind: null,
+    policyVersion: 2, fingerprint: "not_requested", unknownReason: null, sha256: null, bytes: null, verifiedFormat: null, recordLink: "none", reference: "none", referenceKind: null,
     matchResult: "not_applicable", referenceEpoch: null, invalidated: false, ...over,
   });
   const ladder = (over: Partial<Ladder>): Ladder => ({
@@ -302,7 +302,7 @@ describe("computer inventory (read-only discovery)", () => {
   it("previews old backups with honest coverage: nothing is called clean, safe or deletable", async () => {
     const entry = (over: Partial<BackupEntry>): BackupEntry => ({
       fileName: "atm-v4-20261016T100000Z.sqlite", schemaVersion: 4, sizeBytes: 204800, modified: "2026-10-16T10:00:00Z", privacyStatus: "violations_observed" as const,
-      reason: "findings_in_examined_content", coverage: "complete", layers: [{ layer: "raw_main", outcome: "completed", reason: "all_bytes_inspected" }], observationRowsFailingGate: 4, otherTextFindings: 2, tablesWithFindings: ["diagnostics"], rawPathLikeMatches: 6, hasWalSidecar: false, ...over,
+      reason: "findings_in_examined_content", coverage: "complete", layers: [{ layer: "raw_main", outcome: "completed", reason: "all_bytes_inspected" }], observationRowsFailingGate: 4, otherTextFindings: 2, tablesWithFindings: ["diagnostics"], rawPathLikeMatches: 6, rawSensitiveShapeLayers: 0, hasWalSidecar: false, ...over,
     });
     backend.backupPlan = {
       entries: [
@@ -312,7 +312,7 @@ describe("computer inventory (read-only discovery)", () => {
         entry({ fileName: "atm-v5-20261005T000000Z.sqlite", schemaVersion: 5, privacyStatus: "not_assessable", coverage: "incomplete", layers: [{ layer: "raw_wal", outcome: "unreadable", reason: "redirected" }], observationRowsFailingGate: null, otherTextFindings: 0, tablesWithFindings: [], rawPathLikeMatches: 0 }),
         entry({
           fileName: "atm-v5-20261008T000000Z.sqlite", schemaVersion: 5, privacyStatus: "partially_scanned_no_findings", coverage: "partial",
-          layers: [{ layer: "all_text", outcome: "partial", reason: "cell_limit" }], observationRowsFailingGate: 0, otherTextFindings: 0, tablesWithFindings: [], rawPathLikeMatches: 0,
+          layers: [{ layer: "all_text", outcome: "partial", reason: "cell_limit" }, { layer: "wal_logical_sql", outcome: "partial", reason: "wal_not_replayed" }], observationRowsFailingGate: 0, otherTextFindings: 0, tablesWithFindings: [], rawPathLikeMatches: 0,
         }),
       ],
       preconditions: [{ id: "integrity", ok: true, text: "SQLite bütünlük denetimi (integrity_check) başarılı." }],
@@ -340,12 +340,14 @@ describe("computer inventory (read-only discovery)", () => {
     expect(rows["atm-v2-20261001T000000Z.sqlite"]).toMatch(/Gözlem tablosu: incelenemedi/);
     expect(rows["atm-v5-20261007T000000Z.sqlite"]).toMatch(/İncelenen içerikte ihlal bulunmadı \(kişisel veri içermediği anlamına GELMEZ\)/);
     expect(rows["atm-v5-20261005T000000Z.sqlite"]).toMatch(/BİLİNMİYOR/);
-    expect(rows["atm-v5-20261005T000000Z.sqlite"]).toMatch(/-wal dosyası: OKUNAMADI \(bağlantı\/yönlendirme reddedildi\)/);
+    expect(rows["atm-v5-20261005T000000Z.sqlite"]).toMatch(/-wal dosyası \(ham baytlar\): OKUNAMADI \(bağlantı\/yönlendirme reddedildi\)/);
     // a partial scan never reads as complete
     expect(rows["atm-v5-20261008T000000Z.sqlite"]).toMatch(/KISMEN tarandı, taranan bölümde bir şey bulunmadı \(tamamı incelenmedi\)/);
     expect(rows["atm-v5-20261008T000000Z.sqlite"]).toMatch(/KISMİ tarama/);
     expect(rows["atm-v5-20261008T000000Z.sqlite"]).toMatch(/tüm metin değerleri: KISMİ \(hücre sınırı\)/);
     expect(rows["atm-v5-20261008T000000Z.sqlite"]).not.toMatch(/Tüm katmanlar tamamlandı/);
+    // transactions that live only in the -wal file are not claimed as inspected rows
+    expect(rows["atm-v5-20261008T000000Z.sqlite"]).toMatch(/-wal içindeki işlemler \(SQL satırı olarak\): KISMİ \(işlenmemiş işlemler olabilir; SQL olarak İNCELENMEDİ\)/);
     expect(screen.getByText(/en çok 500\.000 metin hücresi/)).toBeInTheDocument();
     expect(screen.getByText(/Sınır aşılırsa sonuç “kısmi” olur/)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/güvenle silinebilir|temiz yedek|kişisel veri içermiyor|\bsafe\b/i);
@@ -427,7 +429,7 @@ describe("computer inventory (read-only discovery)", () => {
     expect((await get("gitleaks")).getByText(/Çelişkili gözlemler var/)).toBeInTheDocument();
     expect((await get("strix")).getByText(/Parmak izi hesaplanamadı \(bağlantı\/yönlendirme olduğu için okunmadı\); sonuç bilinmiyor/)).toBeInTheDocument();
     expect((await get("graphify")).getByText(/Önceki doğrulama geçersiz: ilke veya referans kümesi değişti/)).toBeInTheDocument();
-    expect((await get("markitdown")).getByText(/arşiv\/yükleyici\/paket özeti; çıkarılmış dosyayla karşılaştırılamaz/)).toBeInTheDocument();
+    expect((await get("markitdown")).getByText(/Referans, açılan dosyanın türüne\/biçimine bağlanamıyor .*karşılaştırılamaz/)).toBeInTheDocument();
     expect((await get("agent-browser")).getByText(/Kayıt ile dosya arasındaki bağ doğrulanamadı/)).toBeInTheDocument();
     expect((await get("superpowers")).getByText(/klasör adıyla eşleşiyor \(dosya içeriğiyle değil\)/)).toBeInTheDocument();
     for (const n of ["gitleaks", "strix", "graphify", "markitdown", "agent-browser", "superpowers"]) {

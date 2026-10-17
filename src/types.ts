@@ -312,6 +312,8 @@ export interface ArtifactEvidence {
   unknownReason: string | null;
   sha256: string | null;
   bytes: number | null;
+  /** The file format established from the first bytes of the hashed file (never from its name). */
+  verifiedFormat: "pe-x64" | "pe-arm64" | "pe-x86" | "macho-arm64" | "macho-x64" | "macho-universal" | "elf-x64" | "elf-arm64" | "script-shebang" | "zip" | "gzip" | "unrecognised" | null;
   recordLink: "none" | "unverifiable" | "folder_by_name";
   reference: "none" | "unauthenticated" | "authenticated";
   referenceKind: "archive" | "installer" | "executable" | "script" | "plugin_file" | "package" | null;
@@ -341,7 +343,7 @@ export interface Ladder {
 export type BackupPrivacyStatus = "violations_observed" | "potentially_sensitive" | "none_detected_in_examined_content" | "partially_scanned_no_findings" | "not_assessable";
 
 export interface BackupLayer {
-  layer: "observation_rows" | "all_text" | "raw_main" | "raw_wal";
+  layer: "observation_rows" | "all_text" | "raw_main" | "raw_wal" | "wal_logical_sql";
   outcome: "completed" | "partial" | "unreadable" | "unsupported" | "not_present";
   reason: string;
 }
@@ -361,6 +363,8 @@ export interface BackupEntry {
   otherTextFindings: number;
   tablesWithFindings: string[];
   rawPathLikeMatches: number;
+  /** Raw layers (main file / -wal) in which a credential, e-mail or private-path shape was seen (a count, never content). */
+  rawSensitiveShapeLayers: number;
   hasWalSidecar: boolean;
 }
 

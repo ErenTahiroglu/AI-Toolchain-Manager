@@ -16,14 +16,20 @@ fn sha(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn reference_for(entry: &str, kind: ArtifactKind, version: &str, bytes: &[u8]) -> ReferenceDigest {
+/// The bytes of a synthetic native executable for this platform (a real header + `payload`). Never executed.
+fn exe_bytes(payload: &[u8]) -> Vec<u8> {
+    reference::synthetic_file(reference::native_executable_format(platform()), payload)
+}
+
+/// A synthetic reference describing `exe_bytes(payload)`: the right platform, the native executable format, `kind`.
+fn reference_for(entry: &str, kind: ArtifactKind, version: &str, payload: &[u8]) -> ReferenceDigest {
     ReferenceDigest {
         entry_id: entry.to_string(),
         kind,
-        format: if cfg!(windows) { "pe-exe" } else { "mach-o" }.to_string(),
+        format: reference::native_executable_format(platform()).as_str().to_string(),
         platform_target: platform().to_string(),
         version: version.to_string(),
-        sha256: sha(bytes),
+        sha256: sha(&exe_bytes(payload)),
         source: "synthetic test fixture".to_string(),
     }
 }
@@ -36,8 +42,9 @@ fn path_obs<'a>(obs: &'a [Observation], subject: &str) -> &'a Observation {
     find(obs, subject, Scope::Global, Method::PathExecutable)
 }
 
-fn write_tool(env: &Env, base: &str, bytes: &[u8]) {
-    fs::write(env.bin.join(exe(base)), bytes).unwrap();
+/// Writes a catalogued program file whose content is a synthetic native executable header followed by `payload`.
+fn write_tool(env: &Env, base: &str, payload: &[u8]) {
+    fs::write(env.bin.join(exe(base)), exe_bytes(payload)).unwrap();
 }
 
 fn no_cancel() -> AtomicBool {
@@ -56,19 +63,27 @@ fn the_digest_matches_published_test_vectors_and_an_independent_computation_over
     let small_chunks = HashLimits { chunk: 4096, ..HashLimits::default() };
     assert_eq!(
         fsx::hash_file(&env.root, &["abc"], HashLimits::default(), &no_cancel()),
-        HashOutcome::Computed { sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(), bytes: 3 }
+        HashOutcome::Computed {
+            sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
+            bytes: 3,
+            format: reference::ArtifactFormat::Unrecognised
+        }
     );
     assert_eq!(
         fsx::hash_file(&env.root, &["empty"], HashLimits::default(), &no_cancel()),
-        HashOutcome::Computed { sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into(), bytes: 0 }
+        HashOutcome::Computed {
+            sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into(),
+            bytes: 0,
+            format: reference::ArtifactFormat::Unrecognised
+        }
     );
     assert_eq!(
         fsx::hash_file(&env.root, &["big"], small_chunks, &no_cancel()),
-        HashOutcome::Computed { sha256: sha(&big), bytes: big.len() as u64 }
+        HashOutcome::Computed { sha256: sha(&big), bytes: big.len() as u64, format: reference::ArtifactFormat::Unrecognised }
     );
     assert_eq!(
         fsx::hash_file(&env.root, &["big"], HashLimits::default(), &no_cancel()),
-        HashOutcome::Computed { sha256: sha(&big), bytes: big.len() as u64 },
+        HashOutcome::Computed { sha256: sha(&big), bytes: big.len() as u64, format: reference::ArtifactFormat::Unrecognised },
         "the chunk size does not change the digest"
     );
 }
@@ -155,7 +170,7 @@ fn the_digest_belongs_to_the_opened_handle_not_to_whatever_the_path_names_afterw
     assert!(swapped.get());
     assert_eq!(
         out,
-        HashOutcome::Computed { sha256: sha(&original), bytes: original.len() as u64 },
+        HashOutcome::Computed { sha256: sha(&original), bytes: original.len() as u64, format: reference::sniff(&original) },
         "the path was swapped, but the bytes hashed are those of the file that was opened"
     );
 }
@@ -197,9 +212,9 @@ fn file_content_is_only_read_when_fingerprinting_was_allowed_and_requires_the_pa
     let g = path_obs(&with, "gitleaks");
     assert_eq!(
         (g.provenance.artifact.fingerprint, g.provenance.artifact.sha256.clone()),
-        (FingerprintState::Computed, Some(sha(b"content A")))
+        (FingerprintState::Computed, Some(sha(&exe_bytes(b"content A"))))
     );
-    assert_eq!(g.provenance.artifact.bytes, Some(9));
+    assert_eq!(g.provenance.artifact.bytes, Some(exe_bytes(b"content A").len() as u64));
     // the request layer: fingerprinting without the PATH permission is dropped, never silently widened
     let conn = seeded();
     let req = ScanRequest { path_executables: false, user_config: true, project: None, fingerprint_artifacts: true };
@@ -457,10 +472,10 @@ fn a_verified_observation_is_persisted_current_and_then_loses_its_standing_when_
     let prod = store::latest_observations(&conn).unwrap();
     assert!(prod.iter().all(|o| !o.identity_verified));
     // 3. the policy version changes
-    conn.execute("UPDATE discovery_observations SET provenance_json = replace(provenance_json, '\"policyVersion\":1', '\"policyVersion\":0') WHERE subject = 'gitleaks'", []).unwrap();
+    conn.execute("UPDATE discovery_observations SET provenance_json = replace(provenance_json, '\"policyVersion\":2', '\"policyVersion\":0') WHERE subject = 'gitleaks'", []).unwrap();
     assert!(stored_gitleaks(&conn, &set).ladder.artifact.invalidated);
     // 4. a stale scan does not count as verified even if the ladder says so
-    conn.execute("UPDATE discovery_observations SET provenance_json = replace(provenance_json, '\"policyVersion\":0', '\"policyVersion\":1') WHERE subject = 'gitleaks'", []).unwrap();
+    conn.execute("UPDATE discovery_observations SET provenance_json = replace(provenance_json, '\"policyVersion\":0', '\"policyVersion\":2') WHERE subject = 'gitleaks'", []).unwrap();
     assert!(stored_gitleaks(&conn, &set).identity_verified);
     let old = (chrono::Utc::now() - chrono::Duration::hours(30)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     conn.execute("UPDATE discovery_scans SET finished_at = ?1", [&old]).unwrap();
@@ -507,7 +522,7 @@ fn a_hand_edited_row_cannot_claim_a_verification_the_evidence_does_not_support()
     let production = reference::ReferenceSet::production(&conn).unwrap();
     // forge a fully "verified" ladder by editing the database directly
     let forged = format!(
-        "{{\"assessed\":true,\"filenameDetected\":true,\"identity\":\"validated\",\"artifactAuth\":\"digest_match\",\"versionTrust\":\"validated\",\"version\":\"known\",\"artifact\":{{\"policyVersion\":1,\"fingerprint\":\"computed\",\"sha256\":\"{}\",\"reference\":\"authenticated\",\"referenceKind\":\"executable\",\"matchResult\":\"matches_authenticated\",\"referenceEpoch\":\"{}\"}}}}",
+        "{{\"assessed\":true,\"filenameDetected\":true,\"identity\":\"validated\",\"artifactAuth\":\"digest_match\",\"versionTrust\":\"validated\",\"version\":\"known\",\"artifact\":{{\"policyVersion\":2,\"fingerprint\":\"computed\",\"sha256\":\"{}\",\"reference\":\"authenticated\",\"referenceKind\":\"executable\",\"matchResult\":\"matches_authenticated\",\"referenceEpoch\":\"{}\"}}}}",
         sha(b"unknown build"),
         production.epoch()
     );
@@ -527,7 +542,7 @@ fn reference_rows_in_the_database_can_never_be_authenticated_and_malformed_ones_
         &conn,
         "gitleaks",
         ArtifactKind::Executable,
-        "pe-exe",
+        "pe-x64",
         "windows-x64",
         "1.0.0",
         &sha(b"x"),
@@ -539,7 +554,7 @@ fn reference_rows_in_the_database_can_never_be_authenticated_and_malformed_ones_
         &conn,
         "gitleaks",
         ArtifactKind::Executable,
-        "pe-exe",
+        "pe-x64",
         "windows-x64",
         "1.0.0",
         "not-a-digest",
@@ -551,7 +566,7 @@ fn reference_rows_in_the_database_can_never_be_authenticated_and_malformed_ones_
         &conn,
         "gitleaks",
         ArtifactKind::Executable,
-        "pe-exe",
+        "pe-x64",
         "windows-x64",
         "1.0.0",
         &sha(b"x"),
@@ -563,7 +578,7 @@ fn reference_rows_in_the_database_can_never_be_authenticated_and_malformed_ones_
     assert!(conn
         .execute(
             "INSERT INTO reference_digests (entry_id, artifact_kind, format, platform_target, version, algorithm, sha256, source_kind, source_label, authentication, added_at)
-             VALUES ('gitleaks', 'executable', 'pe-exe', 'windows-x64', '1', 'sha256', ?1, 'user_provided', 'x', 'authenticated', 'now')",
+             VALUES ('gitleaks', 'executable', 'pe-x64', 'windows-x64', '1', 'sha256', ?1, 'user_provided', 'x', 'authenticated', 'now')",
             [sha(b"y")]
         )
         .is_err());
@@ -601,7 +616,7 @@ fn the_stored_ladder_still_holds_only_closed_vocabulary_and_one_hex_digest() {
     let conn = seeded();
     crate::discovery::run_scan(&conn, &env.roots(), &fp_auth()).unwrap();
     assert_eq!(discovery_status(&conn).0, "passed");
-    conn.execute("UPDATE discovery_observations SET provenance_json = replace(provenance_json, ?1, 'C:\\\\Users\\\\x\\\\tool.exe') WHERE subject = 'gitleaks' AND method = 'path-executable'", [sha(b"x")]).unwrap();
+    conn.execute("UPDATE discovery_observations SET provenance_json = replace(provenance_json, ?1, 'C:\\\\Users\\\\x\\\\tool.exe') WHERE subject = 'gitleaks' AND method = 'path-executable'", [sha(&exe_bytes(b"x"))]).unwrap();
     assert_eq!(
         discovery_status(&conn),
         ("failed", Some("DISCOVERY_EVIDENCE_UNSAFE")),
@@ -668,4 +683,176 @@ fn no_scan_in_this_phase_runs_a_program_to_learn_anything() {
     let obs = detect::detect_all(&env.roots(), &fp_auth());
     assert_eq!(path_obs(&obs, "gitleaks").provenance.artifact.fingerprint, FingerprintState::Computed);
     assert!(!marker.exists(), "fingerprinting reads bytes; it never starts the file");
+}
+
+// ---- RT-2C-02: an authenticated reference must describe the TYPE of the file that was actually opened ----------------
+
+/// Scans one program file (exact bytes given) against `authenticated` references and returns the observation.
+fn judged(file_bytes: &[u8], authenticated: Vec<ReferenceDigest>) -> Observation {
+    let env = Env::new();
+    fs::write(env.bin.join(exe("gitleaks")), file_bytes).unwrap();
+    let mut roots = env.roots();
+    roots.references = ReferenceSet { authenticated, unauthenticated: vec![] };
+    let obs = detect::detect_all(&roots, &fp_auth());
+    let g = path_obs(&obs, "gitleaks").clone();
+    drop(env);
+    g
+}
+
+fn assert_not_verified(g: &Observation, why: &str) {
+    assert!(!g.identity_verified, "{why}");
+    assert_ne!(g.provenance.identity, IdentityState::Validated, "{why}");
+    assert_eq!(g.provenance.artifact_auth, ArtifactAuth::None, "{why}");
+    assert_eq!(g.version, None, "{why}: no version may be taken from a reference that does not describe this file");
+}
+
+fn native() -> reference::ArtifactFormat {
+    reference::native_executable_format(platform())
+}
+
+fn reference_of(bytes: &[u8], kind: ArtifactKind, format: &str, version: &str) -> ReferenceDigest {
+    ReferenceDigest {
+        entry_id: "gitleaks".to_string(),
+        kind,
+        format: format.to_string(),
+        platform_target: platform().to_string(),
+        version: version.to_string(),
+        sha256: sha(bytes),
+        source: "synthetic test fixture".to_string(),
+    }
+}
+
+#[test]
+fn the_exactly_matching_artifact_still_verifies_and_records_the_format_it_was_verified_as() {
+    let file = reference::synthetic_file(native(), b"payload");
+    let g = judged(&file, vec![reference_of(&file, ArtifactKind::Executable, native().as_str(), "1.0.0")]);
+    assert_eq!((g.provenance.identity, g.identity_verified), (IdentityState::Validated, true));
+    assert_eq!(g.provenance.artifact.verified_format, Some(native()));
+    assert_eq!(g.version.as_deref(), Some("1.0.0"));
+}
+
+#[test]
+fn a_script_digest_does_not_authenticate_an_executable_and_an_executable_digest_does_not_authenticate_a_script() {
+    let program = reference::synthetic_file(native(), b"same payload");
+    let script = reference::synthetic_file(reference::ArtifactFormat::ScriptShebang, b"same payload");
+    // the reference is a genuine SCRIPT reference with the digest of the program's bytes
+    let g = judged(&program, vec![reference_of(&program, ArtifactKind::Script, "script-shebang", "1.0.0")]);
+    assert_not_verified(&g, "script reference, executable file");
+    assert_eq!(g.provenance.artifact.match_result, MatchResult::Incomparable);
+    // and the reverse: an executable reference with the digest of a script file
+    let g = judged(&script, vec![reference_of(&script, ArtifactKind::Executable, native().as_str(), "1.0.0")]);
+    assert_not_verified(&g, "executable reference, script file");
+    assert_eq!(g.provenance.artifact.verified_format, Some(reference::ArtifactFormat::ScriptShebang));
+    // control: the script verifies against its own script reference
+    let g = judged(&script, vec![reference_of(&script, ArtifactKind::Script, "script-shebang", "1.0.0")]);
+    assert_eq!((g.provenance.identity, g.identity_verified), (IdentityState::Validated, true));
+}
+
+#[test]
+fn a_plugin_file_digest_does_not_authenticate_a_standalone_executable() {
+    let program = reference::synthetic_file(native(), b"payload");
+    let g = judged(&program, vec![reference_of(&program, ArtifactKind::PluginFile, native().as_str(), "1.0.0")]);
+    assert_not_verified(&g, "plugin-file reference, standalone executable");
+    assert_eq!(g.provenance.artifact.match_result, MatchResult::Incomparable);
+}
+
+#[test]
+fn a_pe_digest_does_not_authenticate_a_mach_o_file_and_the_reverse_whatever_the_platform_label() {
+    use reference::ArtifactFormat::{MachOArm64, PeX64};
+    let pe = reference::synthetic_file(PeX64, b"payload");
+    let macho = reference::synthetic_file(MachOArm64, b"payload");
+    for (file, wrong_format) in [(&pe, "macho-arm64"), (&macho, "pe-x64")] {
+        // a reference with the file's digest but the OTHER format, labelled with this machine's platform
+        let g = judged(file, vec![reference_of(file, ArtifactKind::Executable, wrong_format, "1.0.0")]);
+        assert_not_verified(&g, "format of the reference differs from the file's verified format");
+    }
+    // a file of the OTHER operating system's format cannot be the artifact of this platform even with a matching reference
+    let foreign = if cfg!(windows) { &macho } else { &pe };
+    let foreign_format = if cfg!(windows) { "macho-arm64" } else { "pe-x64" };
+    let g = judged(foreign, vec![reference_of(foreign, ArtifactKind::Executable, foreign_format, "1.0.0")]);
+    assert_not_verified(&g, "foreign-OS binary format on this platform: the reference itself is malformed for this target");
+    assert_eq!(g.provenance.artifact.match_result, MatchResult::Incomparable);
+}
+
+#[test]
+fn an_authenticated_archive_digest_does_not_authenticate_an_extracted_executable() {
+    let program = reference::synthetic_file(native(), b"payload");
+    for (kind, format) in [(ArtifactKind::Archive, "zip"), (ArtifactKind::Installer, native().as_str()), (ArtifactKind::Package, "gzip")] {
+        // even a reference whose digest equals the file's bytes
+        let g = judged(&program, vec![reference_of(&program, kind, format, "1.0.0")]);
+        assert_not_verified(&g, "archive/installer/package reference");
+        assert_eq!(g.provenance.artifact.match_result, MatchResult::Incomparable, "{kind:?}");
+    }
+}
+
+#[test]
+fn conflicting_authenticated_versions_for_the_same_bytes_verify_nothing() {
+    let program = reference::synthetic_file(native(), b"payload");
+    let g = judged(
+        &program,
+        vec![
+            reference_of(&program, ArtifactKind::Executable, native().as_str(), "1.0.0"),
+            reference_of(&program, ArtifactKind::Executable, native().as_str(), "2.0.0"),
+        ],
+    );
+    assert_not_verified(&g, "two versions claim the same bytes");
+    assert_eq!(g.provenance.artifact.match_result, MatchResult::Incomparable);
+}
+
+#[test]
+fn missing_or_malformed_format_evidence_verifies_nothing() {
+    let program = reference::synthetic_file(native(), b"payload");
+    // malformed evidence in the REFERENCE
+    for bad in ["", "pe-exe", "mach-o", "PE-X64", "unrecognised", "exe"] {
+        let g = judged(&program, vec![reference_of(&program, ArtifactKind::Executable, bad, "1.0.0")]);
+        assert_not_verified(&g, bad);
+    }
+    // missing evidence in the FILE: bytes that no known header identifies (here: the old fixtures' plain "stub" text)
+    let headerless = b"stub".to_vec();
+    let g = judged(&headerless, vec![reference_of(&headerless, ArtifactKind::Executable, native().as_str(), "1.0.0")]);
+    assert_not_verified(&g, "a file whose format cannot be established from its bytes");
+    assert_eq!(g.provenance.artifact.verified_format, Some(reference::ArtifactFormat::Unrecognised));
+    // a truncated native header
+    let truncated = reference::synthetic_file(native(), b"")[..6].to_vec();
+    let g = judged(&truncated, vec![reference_of(&truncated, ArtifactKind::Executable, native().as_str(), "1.0.0")]);
+    assert_not_verified(&g, "truncated header");
+}
+
+#[test]
+fn the_file_name_never_decides_the_format() {
+    // script content under a native program's name: the verified format is the script format, and the name bought nothing
+    let script = reference::synthetic_file(reference::ArtifactFormat::ScriptShebang, b"echo");
+    let g = judged(&script, vec![reference_of(&script, ArtifactKind::Executable, native().as_str(), "1.0.0")]);
+    assert_eq!(g.provenance.artifact.verified_format, Some(reference::ArtifactFormat::ScriptShebang));
+    assert_not_verified(&g, "an executable-named script is not an executable");
+}
+
+#[test]
+fn a_hand_edited_verified_format_in_a_stored_row_cannot_create_a_verification() {
+    let program = reference::synthetic_file(native(), b"payload");
+    let env = Env::new();
+    fs::write(env.bin.join(exe("gitleaks")), &program).unwrap();
+    let mut roots = env.roots();
+    // a (synthetic) SCRIPT reference carrying the program's digest: unbound, so it must not verify
+    roots.references = ReferenceSet {
+        authenticated: vec![reference_of(&program, ArtifactKind::Script, "script-shebang", "1.0.0")],
+        unauthenticated: vec![],
+    };
+    let conn = seeded();
+    crate::discovery::run_scan(&conn, &roots, &fp_auth()).unwrap();
+    let honest = stored_gitleaks(&conn, &roots.references);
+    assert!(!honest.identity_verified && honest.ladder.artifact.match_result == MatchResult::Incomparable);
+    // someone rewrites the stored verified format so that the reference WOULD bind
+    let fmt = native().as_str();
+    let n = conn
+        .execute(
+            &format!("UPDATE discovery_observations SET provenance_json = replace(provenance_json, '\"verifiedFormat\":\"{fmt}\"', '\"verifiedFormat\":\"script-shebang\"') WHERE subject = 'gitleaks' AND method = 'path-executable'"),
+            [],
+        )
+        .unwrap();
+    assert!(n >= 1);
+    let tampered = stored_gitleaks(&conn, &roots.references);
+    assert!(!tampered.identity_verified, "the stored verdict no longer follows from the stored evidence");
+    assert!(tampered.ladder.artifact.invalidated);
+    assert_ne!(tampered.ladder.identity, IdentityState::Validated);
 }

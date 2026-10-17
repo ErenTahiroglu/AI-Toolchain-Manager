@@ -427,11 +427,13 @@ fn fingerprint_step(
                 .not_performed(NotPerformed::ArtifactFingerprint)
                 .limit(format!("Parmak izi hesaplanamadı ({}); sonuç BİLİNMİYOR.", why.code()))
         }
-        fsx::HashOutcome::Computed { sha256, bytes } => {
-            let verdict = reference::evaluate(subject, &roots.platform, &sha256, &roots.references);
+        fsx::HashOutcome::Computed { sha256, bytes, format } => {
+            let observed = reference::ObservedArtifact { entry_id: subject, platform_target: &roots.platform, format, sha256: &sha256 };
+            let verdict = reference::evaluate(&observed, &roots.references);
             art.fingerprint = FingerprintState::Computed;
             art.sha256 = Some(sha256);
             art.bytes = Some(bytes);
+            art.verified_format = Some(format);
             art.reference = verdict.reference;
             art.reference_kind = verdict.kind;
             art.match_result = verdict.result;
@@ -462,7 +464,7 @@ fn fingerprint_step(
                 }
                 MatchResult::Incomparable => {
                     obs = obs.limit(
-                        "Yalnızca arşiv/yükleyici/paket özeti var; bir arşivin özeti çıkarılmış dosyanın özetiyle karşılaştırılamaz.",
+                        "Bu araç için referans özeti var, ancak açılan dosyanın türüyle/biçimiyle bağlanamıyor (arşiv, yükleyici, paket, başka dosya türü veya biçimi, eksik ya da çelişkili kanıt); bu yüzden karşılaştırılamaz ve kimlik doğrulanmaz.",
                     );
                 }
                 MatchResult::NotApplicable => {}

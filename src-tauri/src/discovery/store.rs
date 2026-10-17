@@ -569,7 +569,13 @@ fn apply_artifact_rules(o: &mut StoredObservation, references: &super::reference
         a.reference_kind = None;
     } else if let (FingerprintState::Computed, Some(sha)) = (a.fingerprint, a.sha256.clone()) {
         // same policy, same reference set: the verdict must still follow from the digest
-        let v = evaluate(&o.subject, &o.platform_target, &sha, references);
+        let observed = super::reference::ObservedArtifact {
+            entry_id: &o.subject,
+            platform_target: &o.platform_target,
+            format: a.verified_format.unwrap_or_default(),
+            sha256: &sha,
+        };
+        let v = evaluate(&observed, references);
         if v.result != a.match_result {
             a.invalidated = true;
             a.match_result = MatchResult::NotApplicable;

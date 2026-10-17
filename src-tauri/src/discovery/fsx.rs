@@ -243,7 +243,12 @@ pub fn open_regular(root: &Path, rel: &[&str]) -> Result<fs::File, ReadFail> {
 /// A fingerprint is a property of the bytes read, not a statement about where they came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HashOutcome {
-    Computed { sha256: String, bytes: u64 },
+    /// `format` is established from the first bytes of the SAME opened handle (never from the file name).
+    Computed {
+        sha256: String,
+        bytes: u64,
+        format: super::reference::ArtifactFormat,
+    },
     Unknown(HashUnknown),
 }
 
@@ -281,6 +286,9 @@ impl HashUnknown {
         }
     }
 }
+
+/// How many leading bytes of the hashed handle are kept to establish the file format.
+const HEAD_BYTES: usize = 4096;
 
 #[derive(Debug, Clone, Copy)]
 pub struct HashLimits {
@@ -328,6 +336,7 @@ pub fn hash_file(root: &Path, rel: &[&str], limits: HashLimits, cancel: &std::sy
     let mut buf = vec![0u8; limits.chunk.clamp(1024, 4 * 1024 * 1024)];
     let mut total = 0u64;
     let mut first = true;
+    let mut head: Vec<u8> = Vec::with_capacity(HEAD_BYTES);
     loop {
         if cancel.load(Ordering::Relaxed) {
             return HashOutcome::Unknown(HashUnknown::Cancelled);
@@ -349,6 +358,10 @@ pub fn hash_file(root: &Path, rel: &[&str], limits: HashLimits, cancel: &std::sy
             return HashOutcome::Unknown(HashUnknown::TooLarge);
         }
         hasher.update(&buf[..n]);
+        if head.len() < HEAD_BYTES {
+            let take = (HEAD_BYTES - head.len()).min(n);
+            head.extend_from_slice(&buf[..take]);
+        }
     }
     if total != size || stamp(&file) != Some((size, modified)) {
         return HashOutcome::Unknown(HashUnknown::ChangedWhileReading);
@@ -358,7 +371,7 @@ pub fn hash_file(root: &Path, rel: &[&str], limits: HashLimits, cancel: &std::sy
     for b in digest {
         hex.push_str(&format!("{b:02x}"));
     }
-    HashOutcome::Computed { sha256: hex, bytes: total }
+    HashOutcome::Computed { sha256: hex, bytes: total, format: super::reference::sniff(&head) }
 }
 
 /// Reads at most `max_bytes` from the START of one regular file (no UTF-8 requirement). Used for file headers only.

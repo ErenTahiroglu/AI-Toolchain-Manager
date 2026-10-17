@@ -144,6 +144,8 @@ pub struct BackupEntry {
     pub tables_with_findings: Vec<String>,
     /// Private-path-shaped byte sequences in the raw file(s); can include text no row refers to any more (free pages).
     pub raw_path_like_matches: i64,
+    /// Raw layers (main file / WAL) in which a credential, e-mail or private-path shape was seen (a count of layers, never content).
+    pub raw_sensitive_shape_layers: i64,
     pub has_wal_sidecar: bool,
 }
 
@@ -300,35 +302,45 @@ fn scan_all_text(conn: &Connection, max_cells: u64, deadline: Instant) -> rusqli
 
 /// Streams a handle through the path-shape pattern in bounded chunks (with an overlap so a match split across two
 /// chunks is still seen). Returns (matches, outcome, reason). Nothing larger than one chunk is held in memory.
+#[cfg(test)]
 fn raw_scan(file: &mut fs::File, max_bytes: u64, deadline: Instant) -> (i64, LayerOutcome, &'static str) {
+    let (m, _, o, r) = raw_scan_shapes(file, max_bytes, deadline);
+    (m, o, r)
+}
+
+/// Same stream, additionally reporting whether a credential / e-mail / private-path shape was seen anywhere in the
+/// raw bytes (a flag, never content; free pages and an unreplayed WAL can hold text no SQL row refers to).
+fn raw_scan_shapes(file: &mut fs::File, max_bytes: u64, deadline: Instant) -> (i64, bool, LayerOutcome, &'static str) {
     let mut matches = 0i64;
+    let mut sensitive = false;
     let mut carry: Vec<u8> = Vec::new();
     let mut consumed = 0u64;
     let mut buf = vec![0u8; RAW_CHUNK];
     loop {
         if Instant::now() >= deadline {
-            return (matches, LayerOutcome::Partial, "time_limit");
+            return (matches, sensitive, LayerOutcome::Partial, "time_limit");
         }
         let want = (max_bytes.saturating_sub(consumed)).min(RAW_CHUNK as u64) as usize;
         if want == 0 {
             // The cap was reached: complete only if the file really ends here.
             let mut probe = [0u8; 1];
             return match file.read(&mut probe) {
-                Ok(0) => (matches, LayerOutcome::Completed, "all_bytes_inspected"),
-                Ok(_) => (matches, LayerOutcome::Partial, "size_limit"),
-                Err(_) => (matches, LayerOutcome::Unreadable, "read_error"),
+                Ok(0) => (matches, sensitive, LayerOutcome::Completed, "all_bytes_inspected"),
+                Ok(_) => (matches, sensitive, LayerOutcome::Partial, "size_limit"),
+                Err(_) => (matches, sensitive, LayerOutcome::Unreadable, "read_error"),
             };
         }
         let n = match file.read(&mut buf[..want]) {
-            Ok(0) => return (matches, LayerOutcome::Completed, "all_bytes_inspected"),
+            Ok(0) => return (matches, sensitive, LayerOutcome::Completed, "all_bytes_inspected"),
             Ok(n) => n,
-            Err(_) => return (matches, LayerOutcome::Unreadable, "read_error"),
+            Err(_) => return (matches, sensitive, LayerOutcome::Unreadable, "read_error"),
         };
         consumed += n as u64;
         let boundary = String::from_utf8_lossy(&carry).len();
         let mut window = std::mem::take(&mut carry);
         window.extend_from_slice(&buf[..n]);
         let text = String::from_utf8_lossy(&window);
+        sensitive = sensitive || redact::has_sensitive_shape(&text);
         matches += raw_path_regex().find_iter(&text).filter(|m| m.end() > boundary).count() as i64;
         let keep = window.len().min(RAW_OVERLAP);
         carry = window[window.len() - keep..].to_vec();
@@ -352,6 +364,51 @@ fn fail_reason(f: &ReadFail) -> &'static str {
     }
 }
 
+/// Judges whether the logical (SQL) layers can claim to have seen the WAL's content. Reads only the 32-byte header from
+/// the already-open handle. A WAL with frames after a valid header holds transactions that may be committed but are not
+/// in the main file image: `Partial / wal_not_replayed`. A non-empty WAL whose header cannot be recognised (truncated,
+/// foreign bytes) cannot be ruled out either: `Partial / wal_header_unrecognised`. Only an empty WAL or a bare valid
+/// header (no frames) is `Completed`.
+fn wal_logical_state(wal: &mut fs::File, size: u64) -> (LayerOutcome, &'static str) {
+    if size == 0 {
+        return (LayerOutcome::Completed, "wal_empty");
+    }
+    let mut head = [0u8; 32];
+    if size < 32 || wal.seek(SeekFrom::Start(0)).is_err() || wal.read_exact(&mut head).is_err() {
+        return (LayerOutcome::Partial, "wal_header_unrecognised");
+    }
+    let magic = u32::from_be_bytes([head[0], head[1], head[2], head[3]]);
+    if magic != 0x377f_0682 && magic != 0x377f_0683 {
+        return (LayerOutcome::Partial, "wal_header_unrecognised");
+    }
+    if size == 32 {
+        (LayerOutcome::Completed, "wal_no_frames")
+    } else {
+        (LayerOutcome::Partial, "wal_not_replayed")
+    }
+}
+
+/// A WAL-mode main file declares journal mode "WAL" in header bytes 18/19, which an in-memory image cannot honour. The
+/// bytes are rewritten to "rollback journal" (1) IN MEMORY while the image is loaded; the file itself is never touched.
+/// The WAL is not applied either way (see `wal_logical_state`).
+struct RollbackHeader<R> {
+    inner: R,
+    pos: u64,
+}
+
+impl<R: Read> Read for RollbackHeader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        for off in [18u64, 19u64] {
+            if off >= self.pos && off < self.pos + n as u64 && buf[(off - self.pos) as usize] == 2 {
+                buf[(off - self.pos) as usize] = 1;
+            }
+        }
+        self.pos += n as u64;
+        Ok(n)
+    }
+}
+
 fn stamp(f: &fs::File) -> Option<(u64, Option<std::time::SystemTime>)> {
     f.metadata().ok().map(|m| (m.len(), m.modified().ok()))
 }
@@ -372,6 +429,7 @@ fn inspect(dir: &Path, name: &str, schema: Option<i64>, limits: ScanLimits) -> B
         other_text_findings: 0,
         tables_with_findings: Vec::new(),
         raw_path_like_matches: 0,
+        raw_sensitive_shape_layers: 0,
         has_wal_sidecar: false,
     };
     let mut file = match fsx::open_regular(dir, &[name]) {
@@ -382,6 +440,7 @@ fn inspect(dir: &Path, name: &str, schema: Option<i64>, limits: ScanLimits) -> B
                 entry.layers.push(layer(l, LayerOutcome::Unreadable, why));
             }
             entry.layers.push(layer("raw_wal", LayerOutcome::Unreadable, "main_file_refused"));
+            entry.layers.push(layer("wal_logical_sql", LayerOutcome::Unreadable, "main_file_refused"));
             entry.reason = why.to_string();
             return entry;
         }
@@ -395,8 +454,9 @@ fn inspect(dir: &Path, name: &str, schema: Option<i64>, limits: ScanLimits) -> B
         .unwrap_or_default();
 
     // Layer: raw main file (streamed).
-    let (raw_main, outcome, reason) = raw_scan(&mut file, limits.max_raw_bytes, deadline);
+    let (raw_main, raw_main_sensitive, outcome, reason) = raw_scan_shapes(&mut file, limits.max_raw_bytes, deadline);
     entry.raw_path_like_matches += raw_main;
+    entry.raw_sensitive_shape_layers += raw_main_sensitive as i64;
     entry.layers.push(layer("raw_main", outcome, reason));
 
     // Layers: SQL-visible content, from an image read through the SAME handle.
@@ -408,7 +468,7 @@ fn inspect(dir: &Path, name: &str, schema: Option<i64>, limits: ScanLimits) -> B
         let loaded = (|| -> Result<Connection, ()> {
             file.seek(SeekFrom::Start(0)).map_err(|_| ())?;
             let mut conn = Connection::open_in_memory().map_err(|_| ())?;
-            conn.deserialize_read_exact(rusqlite::MAIN_DB, &file, size as usize, true).map_err(|_| ())?;
+            conn.deserialize_read_exact(rusqlite::MAIN_DB, RollbackHeader { inner: &file, pos: 0 }, size as usize, true).map_err(|_| ())?;
             Ok(conn)
         })();
         match loaded {
@@ -441,22 +501,48 @@ fn inspect(dir: &Path, name: &str, schema: Option<i64>, limits: ScanLimits) -> B
     }
     entry.observation_rows_failing_gate = rows_result.flatten();
 
-    // Layer: the WAL sidecar, confined exactly like the main file.
+    // Layers: the WAL sidecar, confined exactly like the main file. Two different questions are answered separately:
+    //  * `raw_wal`: a bounded pattern scan over the WAL's raw bytes;
+    //  * `wal_logical_sql`: could the SQL layers above have seen what the WAL holds? They read the MAIN FILE image only,
+    //    so committed transactions that sit only in the WAL are NOT replayed (no checkpoint, no VFS, nothing is written).
     let wal_name = format!("{name}-wal");
+    let mut wal_stamp: Option<((u64, Option<std::time::SystemTime>), fs::File)> = None;
     match fsx::open_regular(dir, &[wal_name.as_str()]) {
-        Err(ReadFail::NotFound) => entry.layers.push(layer("raw_wal", LayerOutcome::NotPresent, "no_sidecar")),
-        Err(e) => entry.layers.push(layer("raw_wal", LayerOutcome::Unreadable, fail_reason(&e))),
+        Err(ReadFail::NotFound) => {
+            entry.layers.push(layer("raw_wal", LayerOutcome::NotPresent, "no_sidecar"));
+            entry.layers.push(layer("wal_logical_sql", LayerOutcome::NotPresent, "no_sidecar"));
+        }
+        Err(e) => {
+            entry.layers.push(layer("raw_wal", LayerOutcome::Unreadable, fail_reason(&e)));
+            entry.layers.push(layer("wal_logical_sql", LayerOutcome::Unreadable, fail_reason(&e)));
+        }
         Ok(mut wal) => {
             entry.has_wal_sidecar = true;
-            let (m, o, r) = raw_scan(&mut wal, limits.max_raw_bytes, deadline);
+            let wal_before = stamp(&wal);
+            let (outcome, why) = wal_logical_state(&mut wal, wal_before.map(|b| b.0).unwrap_or(0));
+            let _ = wal.seek(SeekFrom::Start(0));
+            let (m, sensitive, o, r) = raw_scan_shapes(&mut wal, limits.max_raw_bytes, deadline);
             entry.raw_path_like_matches += m;
+            entry.raw_sensitive_shape_layers += sensitive as i64;
             entry.layers.push(layer("raw_wal", o, r));
+            entry.layers.push(layer("wal_logical_sql", outcome, why));
+            if let Some(b) = wal_before {
+                wal_stamp = Some((b, wal));
+            }
+        }
+    }
+    if let Some((before_wal, wal)) = wal_stamp {
+        if stamp(&wal) != Some(before_wal) {
+            for l in entry.layers.iter_mut().filter(|l| l.layer == "raw_wal" || l.layer == "wal_logical_sql") {
+                l.outcome = LayerOutcome::Unreadable;
+                l.reason = "changed_while_scanning".to_string();
+            }
         }
     }
 
     // The file must not have changed under us.
     if stamp(&file) != before {
-        for l in entry.layers.iter_mut().filter(|l| l.layer != "raw_wal") {
+        for l in entry.layers.iter_mut().filter(|l| l.layer != "raw_wal" && l.layer != "wal_logical_sql") {
             l.outcome = LayerOutcome::Unreadable;
             l.reason = "changed_while_scanning".to_string();
         }
@@ -473,7 +559,10 @@ fn classify(e: &mut BackupEntry) {
     let any_unreadable = all(|o| o == LayerOutcome::Unreadable);
     let any_partial = all(|o| matches!(o, LayerOutcome::Partial | LayerOutcome::Unsupported));
     let main_unreadable = e.layers.iter().any(|l| l.layer == "raw_main" && l.outcome == LayerOutcome::Unreadable);
-    let observed = e.observation_rows_failing_gate.unwrap_or(0) > 0 || e.other_text_findings > 0 || e.raw_path_like_matches > 0;
+    let observed = e.observation_rows_failing_gate.unwrap_or(0) > 0
+        || e.other_text_findings > 0
+        || e.raw_path_like_matches > 0
+        || e.raw_sensitive_shape_layers > 0;
     let legacy = e.schema_version.map(|v| v < 5).unwrap_or(true);
     e.coverage = if any_unreadable {
         "incomplete"
@@ -589,7 +678,10 @@ pub fn cleanup_plan_with(conn: &Connection, backup_dir: &Path, limits: ScanLimit
         notes.push("Bazı yedekler iş sınırları (hücre sayısı, boyut veya süre) nedeniyle yalnızca KISMEN tarandı; bulunmayan bir şey, taranmayan bölümde olabilir.".to_string());
     }
     if entries.iter().any(|e| e.has_wal_sidecar) {
-        notes.push("Bazı yedeklerin -wal yan dosyası var; ham tarama onu da (aynı güvenli açma kuralıyla) kapsadı.".to_string());
+        notes.push("Bazı yedeklerin -wal yan dosyası var; ham örüntü taraması onu da (aynı güvenli açma kuralıyla) kapsadı.".to_string());
+    }
+    if entries.iter().any(|e| e.layers.iter().any(|l| l.layer == "wal_logical_sql" && l.outcome == LayerOutcome::Partial)) {
+        notes.push("Bazı yedeklerin -wal dosyasında ana dosyaya henüz işlenmemiş işlemler olabilir. Bu işlemler SQL satırları olarak İNCELENMEDİ (yedeğe hiçbir şey yazılmaz; kontrol noktası veya yeniden oynatma yapılmaz); yalnızca ham baytları örüntü olarak tarandı. Bu yedekler \"kısmen tarandı\" sayılır.".to_string());
     }
     if review_candidates.is_empty()
         && not_assessable.is_empty()
@@ -961,14 +1053,15 @@ mod tests {
         let (_d, base) = root();
         let backups = base.join("backups");
         many_cells(&backups, "20261101T000000Z", 500_000, true); // 500_001 rows: the secret is cell number 1000002 counting ids
-        let e = entry_of(&backups, "20261101");
+                                                                 // The raw pattern layer would see the secret bytes; its budget is kept tiny so that THIS test isolates the cell budget.
+        let e = entry_with(&backups, "20261101", ScanLimits { max_raw_bytes: 64, ..ScanLimits::default() });
         let text = layer_of(&e, "all_text");
         assert_eq!((text.outcome, text.reason.as_str()), (LayerOutcome::Partial, "cell_limit"), "{:?}", e.layers);
         assert_eq!(e.other_text_findings, 0, "the secret lies beyond the inspection budget");
         assert_eq!(e.coverage, "partial");
         assert_eq!(e.privacy_status, "partially_scanned_no_findings", "never none_detected after a partial scan");
         let live = live_db(&base);
-        let plan = cleanup_plan(&live, &backups).unwrap();
+        let plan = cleanup_plan_with(&live, &backups, ScanLimits { max_raw_bytes: 64, ..ScanLimits::default() }).unwrap();
         assert!(plan.no_violation_detected.is_empty() && plan.partially_scanned == vec![e.file_name.clone()]);
         assert!(plan.notes.iter().any(|n| n.contains("KISMEN")));
     }
@@ -998,8 +1091,15 @@ mod tests {
         );
         let partial = entry_with(&backups, "20261103", tiny);
         assert_eq!((partial.coverage.as_str(), partial.privacy_status.as_str()), ("partial", "partially_scanned_no_findings"));
-        let beyond = entry_with(&backups, "20261104", tiny);
+        // (the raw layer would see the secret bytes; its budget is tiny here so that the cell budget is what is being tested)
+        let beyond = entry_with(&backups, "20261104", ScanLimits { max_raw_bytes: 64, ..tiny });
         assert_eq!((beyond.other_text_findings, beyond.privacy_status.as_str()), (0, "partially_scanned_no_findings"));
+        let seen_by_raw = entry_with(&backups, "20261104", tiny);
+        assert_eq!(
+            (seen_by_raw.other_text_findings, seen_by_raw.raw_sensitive_shape_layers, seen_by_raw.privacy_status.as_str()),
+            (0, 1, "violations_observed"),
+            "with the default raw budget the bounded raw scan reports the credential-shaped bytes"
+        );
         let hit = entry_with(&backups, "20261105", tiny);
         assert_eq!(hit.coverage, "partial");
         assert_eq!(
@@ -1255,5 +1355,171 @@ mod tests {
         let e = entry_of(&backups, "20261205");
         fsx::hook::clear();
         assert_nothing_from_outside(&e);
+    }
+
+    // ---- RT-2C-01: transactions that live only in the WAL ----------------------------------------------------------------
+
+    const WAL_SECRET: &str = "token=ghp_SYNTHETICSYNTHETICSYNTHETICSYNTH12";
+
+    /// A real WAL-mode database whose last transaction is committed ONLY in the `-wal` file (auto-checkpoint off, the
+    /// writer connection stays open while the two files are copied). Returns the backup's base name.
+    fn wal_only_backup(backups: &Path, stamp: &str, committed_value: &str) -> String {
+        fs::create_dir_all(backups).unwrap();
+        let (_scratch, base) = root();
+        let src = base.join("src.sqlite");
+        let conn = Connection::open(&src).unwrap();
+        conn.query_row("PRAGMA journal_mode=WAL", [], |_| Ok(())).unwrap();
+        conn.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
+        conn.execute_batch("CREATE TABLE notes (id INTEGER PRIMARY KEY, v TEXT); INSERT INTO notes (v) VALUES ('plain words');").unwrap();
+        conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(())).unwrap();
+        conn.execute("INSERT INTO notes (v) VALUES (?1)", [committed_value]).unwrap();
+        let name = format!("atm-v5-{stamp}.sqlite");
+        fs::copy(&src, backups.join(&name)).unwrap();
+        fs::copy(base.join("src.sqlite-wal"), backups.join(format!("{name}-wal"))).unwrap();
+        drop(conn);
+        // the fixture really is what the tests claim: the value is in the WAL and NOT in the main file
+        assert!(!contains(&fs::read(backups.join(&name)).unwrap(), committed_value.as_bytes()), "the main file must not hold the value");
+        assert!(
+            contains(&fs::read(backups.join(format!("{name}-wal"))).unwrap(), committed_value.as_bytes()),
+            "the WAL must hold the value"
+        );
+        name
+    }
+
+    #[test]
+    fn a_credential_committed_only_to_the_wal_is_never_reported_as_a_complete_or_clean_logical_inspection() {
+        let (_d, base) = root();
+        let backups = base.join("backups");
+        wal_only_backup(&backups, "20270101T000000Z", &format!("note {WAL_SECRET}"));
+        let e = entry_of(&backups, "20270101");
+        // the logical (SQL) layers read the main file image and cannot see the WAL-only row ...
+        assert_eq!((e.other_text_findings, e.tables_with_findings.clone()), (0, Vec::<String>::new()), "{e:?}");
+        // ... and the entry says so instead of claiming complete coverage
+        let wal_sql = layer_of(&e, "wal_logical_sql");
+        assert_eq!((wal_sql.outcome, wal_sql.reason.as_str()), (LayerOutcome::Partial, "wal_not_replayed"), "{:?}", e.layers);
+        assert_eq!(layer_of(&e, "raw_wal").outcome, LayerOutcome::Completed, "the raw pattern scan is a different layer");
+        assert_eq!(e.coverage, "partial");
+        assert_ne!(e.privacy_status, "none_detected_in_examined_content");
+        // the bounded raw WAL scan still finds the credential-shaped bytes, so it is a reported finding
+        assert_eq!(e.raw_sensitive_shape_layers, 1);
+        assert_eq!(e.privacy_status, "violations_observed");
+        assert!(e.has_wal_sidecar);
+    }
+
+    #[test]
+    fn a_clean_wal_with_frames_is_partially_scanned_never_none_detected() {
+        let (_d, base) = root();
+        let backups = base.join("backups");
+        wal_only_backup(&backups, "20270102T000000Z", "more plain words");
+        let e = entry_of(&backups, "20270102");
+        assert_eq!(e.privacy_status, "partially_scanned_no_findings", "{:?}", e.layers);
+        assert_eq!(e.coverage, "partial");
+        assert_eq!(layer_of(&e, "wal_logical_sql").reason, "wal_not_replayed");
+        let live = live_db(&base);
+        let plan = cleanup_plan(&live, &backups).unwrap();
+        assert!(plan.no_violation_detected.is_empty());
+        assert_eq!(plan.partially_scanned, vec![e.file_name.clone()]);
+        assert!(plan.notes.iter().any(|n| n.contains("SQL satırları olarak İNCELENMEDİ")), "{:?}", plan.notes);
+    }
+
+    #[test]
+    fn an_absent_or_empty_or_header_only_wal_does_not_lower_the_logical_coverage() {
+        let (_d, base) = root();
+        let backups = base.join("backups");
+        backup(&backups, 5, "20270103T000000Z", CLEAN5);
+        let none = entry_of(&backups, "20270103");
+        assert_eq!(
+            (layer_of(&none, "wal_logical_sql").outcome, layer_of(&none, "wal_logical_sql").reason.as_str()),
+            (LayerOutcome::NotPresent, "no_sidecar")
+        );
+        assert_eq!(none.privacy_status, "none_detected_in_examined_content");
+        assert_eq!(none.coverage, "complete");
+        // an empty sidecar
+        let empty = backups.join("atm-v5-20270103T000000Z.sqlite-wal");
+        fs::write(&empty, b"").unwrap();
+        let e = entry_of(&backups, "20270103");
+        assert_eq!(
+            (layer_of(&e, "wal_logical_sql").outcome, layer_of(&e, "wal_logical_sql").reason.as_str()),
+            (LayerOutcome::Completed, "wal_empty")
+        );
+        assert_eq!(e.privacy_status, "none_detected_in_examined_content");
+        // a bare, valid 32-byte header without any frame
+        let mut head = vec![0u8; 32];
+        head[..4].copy_from_slice(&0x377f_0682u32.to_be_bytes());
+        head[4..8].copy_from_slice(&3_007_000u32.to_be_bytes());
+        fs::write(&empty, &head).unwrap();
+        let e = entry_of(&backups, "20270103");
+        assert_eq!(layer_of(&e, "wal_logical_sql").reason, "wal_no_frames");
+        assert_eq!(e.privacy_status, "none_detected_in_examined_content");
+    }
+
+    #[test]
+    fn a_truncated_or_foreign_wal_is_never_trusted_to_be_empty() {
+        let (_d, base) = root();
+        let backups = base.join("backups");
+        let name = wal_only_backup(&backups, "20270104T000000Z", "more plain words");
+        let wal = backups.join(format!("{name}-wal"));
+        let full = fs::read(&wal).unwrap();
+        assert!(full.len() > 40);
+        // cut inside the header
+        fs::write(&wal, &full[..20]).unwrap();
+        let cut_header = entry_of(&backups, "20270104");
+        assert_eq!(layer_of(&cut_header, "wal_logical_sql").reason, "wal_header_unrecognised");
+        assert_eq!(cut_header.privacy_status, "partially_scanned_no_findings");
+        // cut inside the first frame (valid header, partial frame)
+        fs::write(&wal, &full[..40]).unwrap();
+        let cut_frame = entry_of(&backups, "20270104");
+        assert_eq!(layer_of(&cut_frame, "wal_logical_sql").reason, "wal_not_replayed");
+        assert_eq!(cut_frame.privacy_status, "partially_scanned_no_findings");
+        // foreign bytes
+        fs::write(&wal, vec![b'x'; 400]).unwrap();
+        let foreign = entry_of(&backups, "20270104");
+        assert_eq!(layer_of(&foreign, "wal_logical_sql").reason, "wal_header_unrecognised");
+        assert_ne!(foreign.privacy_status, "none_detected_in_examined_content");
+        // a truncated WAL that still contains the credential bytes is still found by the raw pattern scan
+        let (_d2, base2) = root();
+        let backups2 = base2.join("backups");
+        let name2 = wal_only_backup(&backups2, "20270105T000000Z", &format!("note {WAL_SECRET}"));
+        let wal2 = backups2.join(format!("{name2}-wal"));
+        let full2 = fs::read(&wal2).unwrap();
+        fs::write(&wal2, &full2[..full2.len() - 100]).unwrap();
+        let partial_frame = entry_of(&backups2, "20270105");
+        assert_ne!(partial_frame.privacy_status, "none_detected_in_examined_content");
+    }
+
+    #[test]
+    fn an_unreadable_wal_makes_the_backup_not_assessable_in_both_wal_layers() {
+        let (_d, base) = root();
+        let backups = base.join("backups");
+        backup(&backups, 5, "20270106T000000Z", CLEAN5);
+        // a directory where the sidecar should be: cannot be opened as a regular file
+        fs::create_dir_all(backups.join("atm-v5-20270106T000000Z.sqlite-wal")).unwrap();
+        let e = entry_of(&backups, "20270106");
+        for l in ["raw_wal", "wal_logical_sql"] {
+            assert_eq!(layer_of(&e, l).outcome, LayerOutcome::Unreadable, "{l}: {:?}", e.layers);
+        }
+        assert_eq!(e.privacy_status, "not_assessable");
+        assert_eq!(e.coverage, "incomplete");
+    }
+
+    #[test]
+    fn inspecting_a_wal_backup_never_writes_checkpoints_or_creates_files() {
+        let (_d, base) = root();
+        let backups = base.join("backups");
+        let name = wal_only_backup(&backups, "20270108T000000Z", &format!("note {WAL_SECRET}"));
+        let snapshot = |dir: &Path| {
+            let mut v: Vec<(String, Vec<u8>)> = fs::read_dir(dir)
+                .unwrap()
+                .flatten()
+                .map(|f| (f.file_name().to_string_lossy().into_owned(), fs::read(f.path()).unwrap()))
+                .collect();
+            v.sort();
+            v
+        };
+        let before = snapshot(&backups);
+        let e = entry_of(&backups, "20270108");
+        let _ = cleanup_plan(&live_db(&base), &backups).unwrap();
+        assert_eq!(snapshot(&backups), before, "no backup byte changed, nothing (-shm, -journal, checkpoint) was created: {name}");
+        assert_eq!(e.privacy_status, "violations_observed");
     }
 }

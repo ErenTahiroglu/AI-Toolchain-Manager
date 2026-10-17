@@ -64,7 +64,7 @@ function artifactSteps(o: StoredObservation): Step[] {
     mismatches_authenticated: "Kurulu dosya doğrulanmış referanstan FARKLI",
     matches_unauthenticated: "Yerel özet doğrulanmamış bir referansla eşleşiyor (kanıt değil)",
     mismatches_unauthenticated: "Yerel özet doğrulanmamış referansla uyuşmuyor (sonuç çıkarılmadı)",
-    incomparable: "Referans bir arşiv/yükleyici/paket özeti; çıkarılmış dosyayla karşılaştırılamaz",
+    incomparable: "Referans, açılan dosyanın türüne/biçimine bağlanamıyor (arşiv/yükleyici/paket özeti, başka dosya türü veya biçimi, eksik ya da çelişkili kayıt); karşılaştırılamaz",
   };
   if (m[a.matchResult]) out.push({ key: "match", yes: a.matchResult === "matches_authenticated" ? true : a.matchResult === "mismatches_authenticated" ? null : null, text: m[a.matchResult] });
   if (a.recordLink === "unverifiable") out.push({ key: "link", yes: null, text: "Kayıt ile dosya arasındaki bağ doğrulanamadı" });
