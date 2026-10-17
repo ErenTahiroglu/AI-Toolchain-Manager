@@ -7,6 +7,7 @@ import { ProjectsPage } from "./pages/Projects";
 import { PromptsPage } from "./pages/Prompts";
 import { SettingsPage } from "./pages/Settings";
 import { CatalogPage } from "./pages/Catalog";
+import { InventoryPage } from "./pages/Inventory";
 import { RecommendationsPage } from "./pages/Recommendations";
 import { applyTheme, isThemeChoice } from "./theme";
 
@@ -15,6 +16,7 @@ const PAGES = [
   { id: "projects", label: "Projeler" },
   { id: "tools", label: "Araç Kütüphanesi" },
   { id: "recommendations", label: "Öneriler" },
+  { id: "inventory", label: "Bilgisayar Envanteri" },
   { id: "prompts", label: "İstem Kütüphanesi" },
   { id: "activity", label: "Etkinlik ve Denetim" },
   { id: "settings", label: "Ayarlar" },
@@ -57,7 +59,7 @@ export default function App() {
             </li>
           ))}
         </ul>
-        <p className="phase small">Faz 1B · katalog ve tercihler (kurulum yok)</p>
+        <p className="phase small">Faz 2A · salt okunur envanter (kurulum yok)</p>
       </nav>
       <main id="main" className="content">
         {info.data?.degraded && (
@@ -71,6 +73,7 @@ export default function App() {
           {page === "projects" && <ProjectsPage />}
           {page === "tools" && <CatalogPage />}
           {page === "recommendations" && <RecommendationsPage />}
+          {page === "inventory" && <InventoryPage />}
           {page === "prompts" && <PromptsPage />}
           {page === "activity" && <ActivityPage />}
           {page === "settings" && <SettingsPage />}

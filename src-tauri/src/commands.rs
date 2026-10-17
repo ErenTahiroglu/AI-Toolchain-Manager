@@ -5,6 +5,12 @@ use crate::{
     audit::{self, ChainReport, NewEvent},
     catalog::{self, CatalogEntry, PromptSourceRow, UrlPreview},
     db, diagnostics,
+    discovery::{
+        self,
+        detect::Roots,
+        store::{Inventory, ScanSummary},
+        ScanRequest,
+    },
     error::{AppError, AppResult},
     health::{self, AutostartState, HealthContext, HealthReport},
     projects::{self, PreferenceView, ProjectView},
@@ -203,6 +209,21 @@ pub fn list_scenarios() -> AppResult<Vec<Scenario>> {
 #[tauri::command]
 pub fn evaluate_task(state: State<'_, AppState>, input: TaskInput) -> AppResult<Evaluation> {
     state.with_db(|c| recommend::evaluate(c, &input))
+}
+
+/// Read-only scan of this computer, limited to what the user authorised in `request`. It never executes a
+/// program, starts an agent or MCP server, uses the network, or writes outside this app's own database.
+#[tauri::command]
+pub fn run_discovery_scan(state: State<'_, AppState>, request: ScanRequest) -> AppResult<ScanSummary> {
+    state.with_db(|c| {
+        let auth = discovery::authorize(c, &request)?;
+        discovery::run_scan(c, &Roots::from_environment(), &auth)
+    })
+}
+
+#[tauri::command]
+pub fn list_inventory(state: State<'_, AppState>) -> AppResult<Inventory> {
+    state.with_db(discovery::store::inventory)
 }
 
 #[tauri::command]

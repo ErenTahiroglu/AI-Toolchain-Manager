@@ -448,11 +448,17 @@ fn shown_count(conn: &Connection, project_id: &str, task_id: &str, phase: Option
     Ok(n as usize)
 }
 
-/// Keeps the log small per project, so one busy project can never evict another project's state.
-fn prune_log(conn: &Connection, project_id: &str) -> AppResult<()> {
+/// Retention policy: the most recent `MAX_LOG_PER_PROJECT` suggestion records of EACH project.
+pub const MAX_LOG_PER_PROJECT: i64 = 500;
+
+/// Keeps the log small per project. `rowid` is allocated globally, so subtracting from it would count other
+/// projects' rows as this project's (Issue #4). Instead this project's own rows are ranked newest-first and
+/// everything beyond the allowed count is removed; other projects are never touched.
+pub(crate) fn prune_log(conn: &Connection, project_id: &str) -> AppResult<()> {
     conn.execute(
-        "DELETE FROM suggestion_log WHERE project_id = ?1 AND rowid <= (SELECT max(rowid) FROM suggestion_log WHERE project_id = ?1) - 500",
-        [project_id],
+        "DELETE FROM suggestion_log WHERE project_id = ?1 AND rowid NOT IN
+           (SELECT rowid FROM suggestion_log WHERE project_id = ?1 ORDER BY rowid DESC LIMIT ?2)",
+        rusqlite::params![project_id, MAX_LOG_PER_PROJECT],
     )?;
     Ok(())
 }

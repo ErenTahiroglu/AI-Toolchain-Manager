@@ -98,3 +98,42 @@ export const licenseLabel = (s: string) => LICENSE[s] ?? s;
 
 const SCOPE: Record<string, string> = { unknown: "Kapsam bilinmiyor (kurulum denetlenmedi)" };
 export const scopeLabel = (s: string) => SCOPE[s] ?? s;
+
+const PRESENCE: Record<string, string> = { present: "Bulundu", absent: "Bulunamadı", unknown: "Bilinmiyor", unsupported: "Desteklenmiyor" };
+export const presenceLabel = (s: string) => PRESENCE[s] ?? s;
+
+const CONFIGURATION: Record<string, string> = {
+  configured: "Yapılandırılmış (başvuru var)",
+  disabled: "Kapalı olarak işaretli",
+  not_configured: "Yapılandırılmamış",
+  referenced_not_present: "Başvuru var, dosyalar yok",
+  malformed: "Yapılandırma dosyası bozuk",
+  not_applicable: "Uygulanamaz",
+  unknown: "Bilinmiyor",
+};
+export const configurationLabel = (s: string) => CONFIGURATION[s] ?? s;
+
+const OBS_SCOPE: Record<string, string> = { global: "Genel (kullanıcı/bilgisayar)", project: "Proje", local: "Bu projeye özel (yerel)", unknown: "Bilinmiyor" };
+export const obsScopeLabel = (s: string) => OBS_SCOPE[s] ?? s;
+
+const CONFIDENCE: Record<string, string> = { high: "yüksek", medium: "orta", low: "düşük", none: "yok" };
+export const confidenceLabel = (s: string) => CONFIDENCE[s] ?? s;
+
+const METHOD: Record<string, string> = {
+  "path-executable": "PATH klasörlerinde dosya adı",
+  "native-install-location": "Claude Code'un belgelenmiş kurulum konumu",
+  "legacy-local-install": "Eski yerel kurulum konumu",
+  "claude-settings-file": "Claude Code ayar dosyası",
+  "claude-plugin-declaration": "Claude Code eklenti kaydı",
+  "claude-mcp-config": "Claude Code MCP yapılandırması",
+  "no-detector": "Algılama yöntemi yok",
+  "not-documented": "Belgelenmiş yöntem yok",
+  "unsupported-platform": "Desteklenmeyen platform",
+};
+export const methodLabel = (s: string) => METHOD[s] ?? s;
+
+const OBSERVED: Record<string, string> = { present: "Bulundu", absent: "Bulunamadı", unknown: "Belirlenemedi", not_scanned: "Henüz taranmadı" };
+export const observedLabel = (s: string) => OBSERVED[s] ?? s;
+
+export const subjectLabel = (subject: string, names: Record<string, string>) =>
+  subject === "agent:claude-code" ? "Claude Code (ajan)" : subject === "agent:antigravity-ide" ? "Antigravity masaüstü IDE (ajan)" : names[subject] ?? subject;

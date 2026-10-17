@@ -21,10 +21,10 @@ beforeEach(() => {
 });
 
 describe("navigation", () => {
-  it("shows the seven sections and marks the current one", async () => {
+  it("shows the eight sections and marks the current one", async () => {
     render(<App />);
     const nav = screen.getByRole("navigation", { name: "Ana gezinme" });
-    for (const name of ["Ana Sayfa", "Projeler", "Araç Kütüphanesi", "Öneriler", "İstem Kütüphanesi", "Etkinlik ve Denetim", "Ayarlar"]) {
+    for (const name of ["Ana Sayfa", "Projeler", "Araç Kütüphanesi", "Öneriler", "Bilgisayar Envanteri", "İstem Kütüphanesi", "Etkinlik ve Denetim", "Ayarlar"]) {
       expect(within(nav).getByRole("button", { name })).toBeInTheDocument();
     }
     expect(within(nav).getByRole("button", { name: "Ana Sayfa" })).toHaveAttribute("aria-current", "page");

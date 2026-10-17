@@ -4,7 +4,11 @@
 **Durum:** Phase 0 R1 duzeltmeleri hazir; bagimsiz Red Team yeniden degerlendirmesi bekleniyor. Uygulama kodu ve arac kurulumu yok.  
 **Dal:** `phase0/architecture` (yalnizca yerel; commit veya push yapilmadi).
 
-## Phase 1B Durumu (guncel)
+## Phase 2A Durumu (guncel)
+
+Phase 1B'nin ustune bilgisayarin **salt okunur** envanteri eklendi: bilinen program adlari, Claude Code kullanici/proje ayar dosyalari, eklenti kayitlari ve MCP tanimlari izinle taranir. "Bulundu", "yapilandirildi" ve "calisiyor" ayri tutulur; hicbir program calistirilmaz, hicbir sey kurulmaz veya degistirilmez, internete baglanilmaz. Ayrintilar ve kanitlar: [docs/PHASE-2A.md](docs/PHASE-2A.md). Bagimsiz Red Team incelemesi beklenir; `main` degistirilmedi.
+
+## Phase 1B Durumu
 
 Phase 1A'nin ustune dinamik katalog (13 kayit: dokuz arac + Frontend Design, Strix, agent-browser, agentic-awesome-skills), kullanicinin GitHub baglantisi ekleyebildigi aday kayitlari, proje tercihleri (istek ile gercek durum ayri) ve sabit kurallarla calisan, yapay zeka cagirmayan oneri onizlemesi eklendi. Hicbir sey kurulmaz, indirilmez veya calistirilmaz. Ayrintilar ve kanitlar: [docs/PHASE-1B.md](docs/PHASE-1B.md). Bagimsiz Red Team incelemesi beklenir; `main` degistirilmedi.
 

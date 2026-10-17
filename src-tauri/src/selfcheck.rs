@@ -34,6 +34,7 @@ fn run(out: PathBuf) -> i32 {
         let scenario_results = run_scenarios(&conn).map_err(|e| e.to_string())?;
         let probe = preference_probe(&conn).map_err(|e| e.to_string())?;
         let closure = closure_probe(&conn).map_err(|e| e.to_string())?;
+        let discovery_probe = crate::discovery_probe::synthetic_probe(&conn, &dir).map_err(|e| e.to_string())?;
         let report = health::run_and_record(&conn, &ctx).map_err(|e| e.to_string())?;
         let chain = audit::verify(&conn).map_err(|e| e.to_string())?;
         Ok(json!({
@@ -44,6 +45,7 @@ fn run(out: PathBuf) -> i32 {
             "scenarioResults": scenario_results,
             "preferenceProbe": probe,
             "closureProbe": closure,
+            "discoveryProbe": discovery_probe,
             "report": report,
             "auditChain": chain,
             "auditEvents": audit::list_ascending(&conn).map_err(|e| e.to_string())?,

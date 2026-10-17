@@ -161,33 +161,114 @@ fn the_database_key_allows_two_projects_but_refuses_a_duplicate_within_one() {
     );
 }
 
+fn project_id(conn: &Connection, alias: &str) -> String {
+    conn.query_row("SELECT project_id FROM project_registry WHERE alias = ?1", [alias], |r| r.get(0)).unwrap()
+}
+
+fn log_row(conn: &Connection, project: &str, task: &str) {
+    conn.execute(
+        "INSERT INTO suggestion_log (project_id, task_id, entry_id, phase, shown_at) VALUES (?1, ?2, 'strix', 'start', 'x')",
+        rusqlite::params![project, task],
+    )
+    .unwrap();
+}
+
+fn log_count(conn: &Connection, project: &str) -> i64 {
+    conn.query_row("SELECT count(*) FROM suggestion_log WHERE project_id = ?1", [project], |r| r.get(0)).unwrap()
+}
+
+fn log_tasks(conn: &Connection, project: &str) -> Vec<String> {
+    let mut stmt = conn.prepare("SELECT task_id FROM suggestion_log WHERE project_id = ?1 ORDER BY rowid").unwrap();
+    stmt.query_map([project], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect()
+}
+
 #[test]
-fn pruning_is_per_project_so_a_busy_project_cannot_evict_another_projects_state() {
+fn issue_4_sparse_project_keeps_all_its_records_while_a_busy_project_interleaves() {
     let conn = setup();
-    let id = |alias: &str| -> String {
-        conn.query_row("SELECT project_id FROM project_registry WHERE alias = ?1", [alias], |r| r.get(0)).unwrap()
-    };
-    let (a, b) = (id("proje-a"), id("proje-b"));
+    let (a, b) = (project_id(&conn, "proje-a"), project_id(&conn, "proje-b"));
+    for i in 0..5 {
+        log_row(&conn, &a, &format!("a-{i}"));
+    }
+    for i in 0..700 {
+        log_row(&conn, &b, &format!("b-{i}")); // hundreds of rows from another project in between
+    }
+    log_row(&conn, &a, "a-5");
+    // The reproduction from the Red Team report: A has 6 records, B has 700.
+    recommend::prune_log(&conn, &a).unwrap();
+    assert_eq!(log_tasks(&conn, &a), ["a-0", "a-1", "a-2", "a-3", "a-4", "a-5"], "all six of A's records remain");
+    assert_eq!(log_count(&conn, &b), 700, "pruning A never touches B");
+    // B, over the limit, is bounded to exactly the allowed number: its newest ones.
+    recommend::prune_log(&conn, &b).unwrap();
+    assert_eq!(log_count(&conn, &b), recommend::MAX_LOG_PER_PROJECT);
+    assert_eq!(log_tasks(&conn, &b).first().unwrap(), "b-200");
+    assert_eq!(log_tasks(&conn, &b).last().unwrap(), "b-699");
+    assert_eq!(log_count(&conn, &a), 6, "and pruning B never touches A");
+}
+
+#[test]
+fn issue_4_a_project_over_the_limit_is_cut_to_exactly_the_newest_records_even_when_interleaved() {
+    let conn = setup();
+    let (a, b) = (project_id(&conn, "proje-a"), project_id(&conn, "proje-b"));
     for i in 0..650 {
-        conn.execute(
-            "INSERT INTO suggestion_log (project_id, task_id, entry_id, phase, shown_at) VALUES (?1, ?2, 'strix', 'start', 'x')",
-            rusqlite::params![a, format!("old-{i}")],
-        )
-        .unwrap();
+        log_row(&conn, &a, &format!("a-{i}"));
+        log_row(&conn, &b, &format!("b-{i}")); // every A row is followed by a B row: global rowids differ by 2
     }
-    for i in 0..3 {
-        conn.execute(
-            "INSERT INTO suggestion_log (project_id, task_id, entry_id, phase, shown_at) VALUES (?1, ?2, 'strix', 'start', 'x')",
-            rusqlite::params![b, format!("keep-{i}")],
-        )
-        .unwrap();
+    recommend::prune_log(&conn, &a).unwrap();
+    let kept = log_tasks(&conn, &a);
+    assert_eq!(kept.len() as i64, recommend::MAX_LOG_PER_PROJECT);
+    assert_eq!((kept.first().unwrap().as_str(), kept.last().unwrap().as_str()), ("a-150", "a-649"));
+    assert_eq!(log_count(&conn, &b), 650, "B unchanged");
+    // The rule is by this project's own count: exactly the limit keeps everything, one more drops exactly the oldest.
+    recommend::prune_log(&conn, &a).unwrap();
+    assert_eq!(log_count(&conn, &a), recommend::MAX_LOG_PER_PROJECT, "idempotent at the limit");
+    log_row(&conn, &a, "a-650");
+    log_row(&conn, &b, "b-650");
+    recommend::prune_log(&conn, &a).unwrap();
+    let kept = log_tasks(&conn, &a);
+    assert_eq!((kept.len() as i64, kept[0].as_str()), (recommend::MAX_LOG_PER_PROJECT, "a-151"));
+}
+
+#[test]
+fn issue_4_old_evaluations_in_a_quiet_project_are_not_reprompted_after_heavy_activity_elsewhere() {
+    let conn = setup();
+    let text = "Design a React component";
+    assert_eq!(recommend::evaluate(&conn, &input("proje-a", "long-lived-task", text)).unwrap().recommendations.len(), 1);
+    // Project B works through hundreds of tasks (each is evaluated and pruned) while A sits idle.
+    for i in 0..700 {
+        recommend::evaluate(&conn, &input("proje-b", &format!("b-task-{i}"), text)).unwrap();
     }
-    recommend::evaluate(&conn, &input("proje-a", "fresh", "Design a React component")).unwrap();
-    let count =
-        |p: &str| -> i64 { conn.query_row("SELECT count(*) FROM suggestion_log WHERE project_id = ?1", [p], |r| r.get(0)).unwrap() };
-    assert!(count(&a) <= 502, "project A is bounded: {}", count(&a));
-    assert_eq!(count(&b), 3, "project B's state is untouched");
-    assert_eq!(reason(&recommend::evaluate(&conn, &input("proje-b", "keep-1", "Design a React component")).unwrap(), "strix"), None);
+    assert!(log_count(&conn, &project_id(&conn, "proje-b")) <= recommend::MAX_LOG_PER_PROJECT);
+    let again = recommend::evaluate(&conn, &input("proje-a", "long-lived-task", text)).unwrap();
+    assert!(again.recommendations.is_empty(), "A's long-lived task is still remembered");
+    assert_eq!(reason(&again, FRONTEND_DESIGN), Some("already-shown-this-task"));
+}
+
+#[test]
+fn issue_4_regression_on_a_real_migrated_v2_database_and_other_data_is_untouched() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("atm.sqlite");
+    std::fs::copy(V2_FIXTURE, &path).unwrap();
+    let conn = db::open_file(&path, None).unwrap();
+    let a = project_id(&conn, "benim-sitem");
+    let before_a = log_tasks(&conn, &a);
+    assert!(!before_a.is_empty());
+    let (prefs, events, history) = (
+        n(&conn, "SELECT count(*) FROM project_preferences"),
+        n(&conn, "SELECT count(*) FROM audit_events"),
+        n(&conn, "SELECT count(*) FROM preference_history"),
+    );
+    let b = project_id(&conn, "ornek-web-sitesi");
+    for i in 0..800 {
+        log_row(&conn, &b, &format!("busy-{i}"));
+    }
+    recommend::prune_log(&conn, &a).unwrap();
+    recommend::prune_log(&conn, &b).unwrap();
+    assert_eq!(log_tasks(&conn, &a), before_a, "the migrated records of the quiet project survive");
+    assert_eq!(log_count(&conn, &b), recommend::MAX_LOG_PER_PROJECT);
+    assert_eq!(n(&conn, "SELECT count(*) FROM project_preferences"), prefs);
+    assert_eq!(n(&conn, "SELECT count(*) FROM audit_events"), events);
+    assert_eq!(n(&conn, "SELECT count(*) FROM preference_history"), history);
+    assert!(audit::verify(&conn).unwrap().ok);
 }
 
 #[test]

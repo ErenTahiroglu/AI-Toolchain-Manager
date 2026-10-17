@@ -6,6 +6,8 @@ mod commands;
 mod crash;
 mod db;
 mod diagnostics;
+mod discovery;
+mod discovery_probe;
 mod error;
 mod gate;
 mod github_url;
@@ -164,6 +166,9 @@ pub fn run() {
     if let Some(code) = selfcheck::maybe_run() {
         std::process::exit(code);
     }
+    if let Some(code) = discovery_probe::maybe_discover_local() {
+        std::process::exit(code);
+    }
     crash::install_hook();
 
     let built = tauri::Builder::default()
@@ -200,6 +205,8 @@ pub fn run() {
             commands::reset_project_preference,
             commands::list_scenarios,
             commands::evaluate_task,
+            commands::run_discovery_scan,
+            commands::list_inventory,
             commands::list_prompt_sources,
             commands::run_health_checks,
             commands::list_audit_events,

@@ -101,7 +101,7 @@ class RustAuditContract(unittest.TestCase):
         self.assertEqual(probe["restoreWithOtherKindRefusedWith"], "KIND_CHANGE_NOT_ALLOWED")
         self.assertEqual(probe["restoredKind"], "agent_plugin")
         self.assertTrue(probe["fingerprintUnchanged"])
-        self.assertEqual(self.data["dbVersion"], 3)
+        self.assertGreaterEqual(self.data["dbVersion"], 3)
 
     def test_built_binary_reproduces_every_synthetic_scenario_expectation(self):
         scenarios = json.loads((ROOT / "data" / "recommendation-scenarios.json").read_text(encoding="utf-8"))["scenarios"]

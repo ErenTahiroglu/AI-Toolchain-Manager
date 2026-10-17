@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppError, AppInfo, AuditEvent, CatalogEntry, ChainReport, Dashboard, DiagnosticRow, Evaluation, ExecutionBlock, HealthReport,
-  PreferenceView, ProjectView, PromptSourceRow, Scenario, Settings, StartupState, TaskInput, UrlPreview,
+  Inventory, PreferenceView, ProjectView, PromptSourceRow, ScanRequest, ScanSummary, Scenario, Settings, StartupState, TaskInput, UrlPreview,
 } from "./types";
 
 /** Normalises whatever the IPC layer throws into the AppError shape the UI renders. */
@@ -55,6 +55,10 @@ export const api = {
   // Deterministic, local, zero model calls.
   listScenarios: () => call<Scenario[]>("list_scenarios"),
   evaluateTask: (input: TaskInput) => call<Evaluation>("evaluate_task", { input }),
+
+  // Read-only discovery. Never installs, runs or verifies anything.
+  runDiscoveryScan: (request: ScanRequest) => call<ScanSummary>("run_discovery_scan", { request }),
+  listInventory: () => call<Inventory>("list_inventory"),
 
   listPromptSources: () => call<PromptSourceRow[]>("list_prompt_sources"),
   runHealthChecks: () => call<HealthReport>("run_health_checks"),

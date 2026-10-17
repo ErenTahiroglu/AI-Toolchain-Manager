@@ -236,3 +236,63 @@ export interface StartupState {
   preference: boolean;
   osEnabled: boolean | null;
 }
+
+// ---- Phase 2A: read-only local discovery -------------------------------------------------------
+
+export interface ScanRequest {
+  pathExecutables: boolean;
+  userConfig: boolean;
+  project: { alias: string; directory: string } | null;
+}
+
+export interface ScanSummary {
+  scanId: string;
+  startedAt: string;
+  finishedAt: string;
+  platformTarget: string;
+  authorizedPath: boolean;
+  authorizedUserConfig: boolean;
+  authorizedProject: boolean;
+  status: string;
+  observationCount: number;
+}
+
+export interface StoredObservation {
+  id: number;
+  scanId: string;
+  subject: string;
+  platformTarget: string;
+  agentSurface: string;
+  method: string;
+  presence: "present" | "absent" | "unknown" | "unsupported";
+  configuration: string;
+  version: string | null;
+  versionSource: string | null;
+  scope: "global" | "project" | "local" | "unknown";
+  projectAlias: string | null;
+  confidence: "high" | "medium" | "low" | "none";
+  evidence: string;
+  location: string | null;
+  limitations: string[];
+  identityVerified: boolean;
+  functionalityTested: boolean;
+  observedAt: string;
+  stale: boolean;
+  ageHours: number;
+}
+
+export interface RequestVsObservation {
+  entryId: string;
+  entryName: string;
+  acceptedProjects: number;
+  observed: "present" | "absent" | "unknown" | "not_scanned";
+  note: string;
+}
+
+export interface Inventory {
+  lastScan: ScanSummary | null;
+  observations: StoredObservation[];
+  requests: RequestVsObservation[];
+  notChecked: string[];
+  staleAfterHours: number;
+}

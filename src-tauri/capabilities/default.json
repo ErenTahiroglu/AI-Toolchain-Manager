@@ -22,6 +22,8 @@
     "allow-reset-project-preference",
     "allow-list-scenarios",
     "allow-evaluate-task",
+    "allow-run-discovery-scan",
+    "allow-list-inventory",
     "allow-list-prompt-sources",
     "allow-run-health-checks",
     "allow-list-audit-events",

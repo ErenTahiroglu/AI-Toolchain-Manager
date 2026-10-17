@@ -1,7 +1,7 @@
 // In-memory stand-in for the Rust commands. It mirrors the wire shapes in src/types.ts so the UI can be
 // tested; the real behaviour of every command (validation, gates, migration, audit) is covered by the
 // Rust tests and by the --self-check contract test, not by this mock.
-import type { CatalogEntry, Evaluation, HealthReport, PreferenceView, ProjectView, Recommendation } from "../types";
+import type { CatalogEntry, Evaluation, HealthReport, Inventory, PreferenceView, ProjectView, Recommendation, StoredObservation } from "../types";
 
 export const SEED_IDS = [
   "ponytail", "codebase-memory-mcp", "graphify", "gitleaks", "markitdown", "caveman", "cloudflare-security-audit-skill", "superpowers", "betterleaks",
@@ -34,6 +34,19 @@ export const report = (overall: HealthReport["overall"]): HealthReport => ({
   ],
 });
 
+export const obs = (over: Partial<StoredObservation> = {}): StoredObservation => ({
+  id: 1, scanId: "s1", subject: "gitleaks", platformTarget: "windows-x64", agentSurface: "local-cli", method: "path-executable", presence: "present",
+  configuration: "not_applicable", version: null, versionSource: null, scope: "global", projectAlias: null, confidence: "low",
+  evidence: "PATH klasörlerinden birinde 'gitleaks' adlı bir dosya bulundu. Bu yalnızca bir ad eşleşmesidir.", location: "~/bin/gitleaks.exe",
+  limitations: ["Ad eşleşmesi: aynı adlı başka bir program olabilir."], identityVerified: false, functionalityTested: false,
+  observedAt: new Date().toISOString(), stale: false, ageHours: 0, ...over,
+});
+
+export const emptyInventory = (): Inventory => ({
+  lastScan: null, observations: [], requests: [], staleAfterHours: 24,
+  notChecked: ["Henüz hiç tarama yapılmadı; aşağıdakilerin hiçbirine bakılmadı.", "Programların sürümleri: kimliği doğrulanmamış hiçbir program çalıştırılmadı."],
+});
+
 export interface Backend {
   calls: { cmd: string; args?: Record<string, unknown> }[];
   settings: Record<string, string>;
@@ -44,6 +57,7 @@ export interface Backend {
   entries: CatalogEntry[];
   projects: ProjectView[];
   nextEvaluation: Evaluation;
+  inventory: Inventory;
   handle: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -71,6 +85,7 @@ export function createBackend(): Backend {
       { projectId: "p1", alias: "ornek-web-sitesi", displayName: "Örnek: Web sitesi", kind: "synthetic", localNote: "", createdAt: "2026-10-17T00:00:00Z", preferences: [pref()] },
     ],
     nextEvaluation: { taskId: "t", phase: "start", recommendations: [], suppressed: [], disclaimer: "Hiçbir şey kurulmadı." },
+    inventory: emptyInventory(),
     async handle(cmd, args) {
       b.calls.push({ cmd, args });
       if (b.failures[cmd]) throw b.failures[cmd];
@@ -145,6 +160,12 @@ export function createBackend(): Backend {
             { id: "backend-with-css-in-repo", title: "Yalnızca arka uç işi", taskText: "SQL migration düzelt", evidenceFiles: ["styles.css"] },
           ];
         case "evaluate_task": return b.nextEvaluation;
+        case "list_inventory": return JSON.parse(JSON.stringify(b.inventory));
+        case "run_discovery_scan": {
+          const r = args?.request as { pathExecutables: boolean; userConfig: boolean; project: unknown };
+          if (!r.pathExecutables && !r.userConfig && !r.project) throw { code: "SCAN_NOT_AUTHORIZED", message: "Taramak için en az bir bölüme izin vermelisiniz; hiçbir şey okunmadı." };
+          return { scanId: "s-new", startedAt: "x", finishedAt: "x", platformTarget: "windows-x64", authorizedPath: r.pathExecutables, authorizedUserConfig: r.userConfig, authorizedProject: !!r.project, status: "completed", observationCount: b.inventory.observations.length };
+        }
         case "list_prompt_sources":
           return ["prompts.chat", "the-prompt-library", "Fabric"].map((n) => ({
             sourceId: n, displayName: n, repoUrl: `https://github.com/x/${n}`, licenseNote: "MIT", plannedFormat: "csv", notes: "-", trustStatus: "untrusted-reference", status: "planned", readOnly: true,

@@ -178,6 +178,67 @@ fn check_chain(report: &AppResult<ChainReport>) -> CheckResult {
     }
 }
 
+fn check_discovery(conn: &Connection) -> CheckResult {
+    const ID: &str = "discovery";
+    const TITLE: &str = "Bilgisayar taraması (gözlemler)";
+    let scans = scalar(conn, "SELECT count(*) FROM discovery_scans");
+    let Some(scans) = scans else {
+        return check(ID, TITLE, "failed", "Tarama kayıtları okunamadı.", Some("DISCOVERY_UNREADABLE"));
+    };
+    if scans == 0 {
+        return check(ID, TITLE, "unknown", "Henüz bu bilgisayar taranmadı; hiçbir araç için gözlem yok.", None);
+    }
+    // Stored text must already be redacted: running the redactor again must change nothing, and no
+    // observation may claim a test (the SQL constraint says so too; this catches a bypassed database).
+    let unsafe_rows = (|| -> rusqlite::Result<i64> {
+        let mut stmt =
+            conn.prepare("SELECT evidence, limitations_json, coalesce(version, ''), functionality_tested FROM discovery_observations")?;
+        let mut bad = 0;
+        for row in
+            stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?)))?
+        {
+            let (evidence, limitations, version, tested) = row?;
+            if tested != 0
+                || crate::redact::sanitize(&evidence, 4000) != evidence
+                || crate::redact::sanitize(&version, 200) != version
+                || crate::redact::sanitize(&limitations, 20000) != limitations
+            {
+                bad += 1;
+            }
+        }
+        Ok(bad)
+    })();
+    match unsafe_rows {
+        Ok(0) => {
+            let newest: Option<String> = conn.query_row("SELECT max(finished_at) FROM discovery_scans", [], |r| r.get(0)).ok().flatten();
+            let stale = newest
+                .as_deref()
+                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                .map(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_hours() >= crate::discovery::store::STALE_AFTER_HOURS)
+                .unwrap_or(true);
+            if stale {
+                check(ID, TITLE, "unknown", "Son tarama eski; gözlemler güncel olmayabilir. Yeniden tarayın.", None)
+            } else {
+                check(
+                    ID,
+                    TITLE,
+                    "passed",
+                    "Gözlemler tutarlı ve gizli bilgi içermiyor. Bunlar bulunma/yapılandırma kanıtıdır; işlev doğrulaması değildir.",
+                    None,
+                )
+            }
+        }
+        Ok(_) => check(
+            ID,
+            TITLE,
+            "failed",
+            "Kayıtlı gözlemlerden en az biri güvensiz içerik taşıyor veya test edilmiş gibi işaretli.",
+            Some("DISCOVERY_EVIDENCE_UNSAFE"),
+        ),
+        Err(_) => check(ID, TITLE, "failed", "Gözlem kayıtları okunamadı.", Some("DISCOVERY_UNREADABLE")),
+    }
+}
+
 const CAPABILITIES_JSON: &str = include_str!("../capabilities/default.json");
 /// The only permissions the WebView may ever hold: one `allow-*` per typed app command (see build.rs).
 /// Anything else, including broad plugin/core permissions, fails the check. Adding a command means
@@ -199,6 +260,8 @@ pub const ALLOWED_PERMISSIONS: &[&str] = &[
     "allow-reset-project-preference",
     "allow-list-scenarios",
     "allow-evaluate-task",
+    "allow-run-discovery-scan",
+    "allow-list-inventory",
     "allow-list-prompt-sources",
     "allow-run-health-checks",
     "allow-list-audit-events",
@@ -334,6 +397,7 @@ pub fn run(conn: &Connection, ctx: &HealthContext) -> HealthReport {
         check_database(conn),
         check_invariants(conn),
         check_chain(&chain),
+        check_discovery(conn),
         check_capabilities(),
         check_tray(ctx),
         check_startup(conn, ctx),

@@ -17,6 +17,8 @@ const COMMANDS: &[&str] = &[
     "reset_project_preference",
     "list_scenarios",
     "evaluate_task",
+    "run_discovery_scan",
+    "list_inventory",
     "list_prompt_sources",
     "run_health_checks",
     "list_audit_events",
