@@ -154,7 +154,7 @@ fn malicious_version_and_text_values_are_replaced_before_persistence_even_withou
     let raw: Vec<Observation> =
         ["1.0.0-ghp-SENTINEL", "../../escape", "my-company-internal-1", "latest", "1.0.0+secret"].iter().map(|v| evil(v)).collect();
     // `save_scan` is called with un-finalized observations on purpose: the gate must hold on its own.
-    let auth = Authorization { path_executables: true, user_config: false, project: None };
+    let auth = Authorization { path_executables: true, user_config: false, project: None, ..Default::default() };
     let summary = store::save_scan(&conn, &env.roots(), &auth, &raw, "2026-10-17T00:00:00Z").unwrap();
     assert_eq!(summary.observation_count, 5);
     let stored = store::latest_observations(&conn).unwrap();

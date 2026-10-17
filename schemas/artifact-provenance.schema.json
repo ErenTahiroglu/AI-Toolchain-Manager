@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ErenTahiroglu/AI-Toolchain-Manager/schemas/artifact-provenance.schema.json",
+  "title": "Artifact provenance contract (validation policy v1)",
+  "description": "Shape and invariants of an observation's evidence ladder. Evidence order: 1 discovered (ladder.filenameDetected), 2 fingerprint computed (artifact.fingerprint), 3 installer record (ladder.installRecord), 4 record linked to the exact artifact (artifact.recordLink), 5 reference digest available (artifact.reference), 6 reference independently authenticated (artifact.reference = authenticated), 7 exact installed artifact matches that reference (artifact.matchResult), 8 functional verification (never performed: functionalityTested is always false). A locally computed digest is a fingerprint, not proof of origin. Digests copied from a README, package.json, a repository or typed by a user are never an independent trust anchor. An archive/installer/package digest is never compared with an extracted file. identity 'validated' / identityVerified true require steps 2, 5-7 with an AUTHENTICATED exact-file reference; the compiled-in authenticated list is empty in this phase.",
+  "type": "object",
+  "required": ["identityVerified", "functionalityTested", "ladder"],
+  "properties": {
+    "identityVerified": { "type": "boolean" },
+    "functionalityTested": { "const": false },
+    "ladder": { "$ref": "#/$defs/ladder" }
+  },
+  "allOf": [
+    { "if": { "properties": { "identityVerified": { "const": true } }, "required": ["identityVerified"] }, "then": { "properties": { "ladder": { "properties": { "identity": { "const": "validated" } } } } } },
+    { "if": { "properties": { "ladder": { "properties": { "identity": { "const": "validated" } }, "required": ["identity"] } }, "required": ["ladder"] }, "then": { "properties": { "ladder": { "$ref": "#/$defs/validatedLadder" } } } }
+  ],
+  "$defs": {
+    "hex64": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "artifact": {
+      "type": "object",
+      "required": ["policyVersion", "fingerprint", "recordLink", "reference", "matchResult", "invalidated"],
+      "properties": {
+        "policyVersion": { "type": "integer", "minimum": 0 },
+        "fingerprint": { "enum": ["not_requested", "computed", "unknown"] },
+        "unknownReason": { "type": ["string", "null"], "pattern": "^[a-z_]{1,24}$" },
+        "sha256": { "oneOf": [{ "$ref": "#/$defs/hex64" }, { "type": "null" }] },
+        "bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "recordLink": { "enum": ["none", "unverifiable", "folder_by_name"] },
+        "reference": { "enum": ["none", "unauthenticated", "authenticated"] },
+        "referenceKind": { "enum": ["archive", "installer", "executable", "script", "plugin_file", "package", null] },
+        "matchResult": { "enum": ["not_applicable", "incomparable", "matches_unauthenticated", "mismatches_unauthenticated", "matches_authenticated", "mismatches_authenticated"] },
+        "referenceEpoch": { "oneOf": [{ "$ref": "#/$defs/hex64" }, { "type": "null" }] },
+        "invalidated": { "type": "boolean" }
+      },
+      "allOf": [
+        { "if": { "properties": { "fingerprint": { "const": "computed" } }, "required": ["fingerprint"] }, "then": { "required": ["sha256"], "properties": { "sha256": { "$ref": "#/$defs/hex64" } } } },
+        { "if": { "properties": { "fingerprint": { "enum": ["not_requested", "unknown"] } }, "required": ["fingerprint"] }, "then": { "properties": { "matchResult": { "enum": ["not_applicable"] } } } },
+        { "if": { "properties": { "reference": { "const": "unauthenticated" } }, "required": ["reference"] }, "then": { "properties": { "matchResult": { "not": { "enum": ["matches_authenticated", "mismatches_authenticated"] } } } } }
+      ]
+    },
+    "ladder": {
+      "type": "object",
+      "required": ["assessed", "identity", "version", "versionTrust", "artifactAuth", "artifact", "notPerformed"],
+      "properties": {
+        "assessed": { "type": "boolean" },
+        "identity": { "enum": ["not_assessed", "unknown", "evidence_available", "record_corroborated", "validated", "conflicted"] },
+        "version": { "enum": ["unknown", "known", "conflicted"] },
+        "versionTrust": { "enum": ["none", "declared", "installer_recorded", "validated"] },
+        "artifactAuth": { "enum": ["none", "digest_match", "signature_chain"] },
+        "artifact": { "$ref": "#/$defs/artifact" },
+        "notPerformed": { "type": "array", "items": { "enum": ["active_version_probe", "signature_chain_validation", "signature_parsing_unsupported", "installed_file_digest", "package_metadata_not_found", "no_package_detector_for_tool", "record_to_file_linkage", "artifact_authentication", "artifact_fingerprint", "plugin_directory_digest", "authenticated_reference"] } }
+      }
+    },
+    "validatedLadder": {
+      "type": "object",
+      "properties": {
+        "artifactAuth": { "const": "digest_match" },
+        "artifact": {
+          "type": "object",
+          "required": ["fingerprint", "reference", "referenceKind", "matchResult", "invalidated", "sha256"],
+          "properties": {
+            "fingerprint": { "const": "computed" },
+            "reference": { "const": "authenticated" },
+            "referenceKind": { "enum": ["executable", "script", "plugin_file"] },
+            "matchResult": { "const": "matches_authenticated" },
+            "invalidated": { "const": false },
+            "sha256": { "$ref": "#/$defs/hex64" }
+          }
+        }
+      }
+    }
+  }
+}

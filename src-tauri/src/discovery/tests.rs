@@ -16,6 +16,8 @@ use std::{
 };
 use tempfile::TempDir;
 
+#[path = "tests_artifact.rs"]
+mod artifact;
 #[path = "tests_fs.rs"]
 mod fs_security;
 #[path = "tests_history.rs"]
@@ -70,6 +72,7 @@ impl Env {
             path_entries: vec![self.bin.clone()],
             system_dirs: vec![],
             pins: vec![],
+            references: Default::default(),
         }
     }
 
@@ -100,6 +103,7 @@ fn all_auth(project: Option<&Path>) -> Authorization {
         path_executables: true,
         user_config: true,
         project: project.map(|p| ProjectScan { alias: "proje".to_string(), dir: p.to_path_buf() }),
+        ..Default::default()
     }
 }
 
@@ -355,12 +359,12 @@ fn without_user_config_authorization_no_user_file_is_reported() {
     let env = Env::new();
     env.home_write(".claude/settings.json", &settings(&[(FD_KEY, true)]));
     env.home_write(".claude.json", "{\"mcpServers\":{}}");
-    let auth = Authorization { path_executables: true, user_config: false, project: None };
+    let auth = Authorization { path_executables: true, user_config: false, project: None, ..Default::default() };
     let obs = detect::detect_all(&env.roots(), &auth);
     assert!(obs
         .iter()
         .all(|o| !matches!(o.method, Method::ClaudePluginDeclaration | Method::ClaudeMcpConfig | Method::ClaudeSettingsFile)));
-    let none = Authorization { path_executables: false, user_config: false, project: None };
+    let none = Authorization { path_executables: false, user_config: false, project: None, ..Default::default() };
     let obs = detect::detect_all(&env.roots(), &none);
     assert!(obs.iter().all(|o| matches!(o.method, Method::NotDocumented | Method::NoDetector)), "only the always-unknown entries remain");
 }
@@ -940,18 +944,20 @@ fn a_scan_needs_at_least_one_authorization_and_a_registered_project() {
     let env = Env::new();
     let conn = db::open_memory().unwrap();
     catalog::seed_all(&conn).unwrap();
-    let nothing = ScanRequest { path_executables: false, user_config: false, project: None };
+    let nothing = ScanRequest { path_executables: false, user_config: false, project: None, fingerprint_artifacts: false };
     assert_eq!(super::authorize(&conn, &nothing).unwrap_err().code, "SCAN_NOT_AUTHORIZED");
     let unknown = ScanRequest {
         path_executables: false,
         user_config: false,
         project: Some(super::ProjectRequest { alias: "yok".into(), directory: env.project().to_string_lossy().into_owned() }),
+        fingerprint_artifacts: false,
     };
     assert_eq!(super::authorize(&conn, &unknown).unwrap_err().code, "PROJECT_NOT_FOUND");
     let ok = ScanRequest {
         path_executables: false,
         user_config: false,
         project: Some(super::ProjectRequest { alias: "ornek-web-sitesi".into(), directory: env.project().to_string_lossy().into_owned() }),
+        fingerprint_artifacts: false,
     };
     assert!(super::authorize(&conn, &ok).unwrap().project.is_some());
     assert_eq!(nothing_count(&conn), 0, "refused requests leave no scan behind");
@@ -995,7 +1001,12 @@ fn a_later_scan_with_fewer_authorizations_does_not_erase_earlier_observations() 
     let conn = seeded();
     env.home_write(".claude/settings.json", &settings(&[(FD_KEY, true)]));
     super::run_scan(&conn, &env.roots(), &all_auth(None)).unwrap();
-    super::run_scan(&conn, &env.roots(), &Authorization { path_executables: true, user_config: false, project: None }).unwrap();
+    super::run_scan(
+        &conn,
+        &env.roots(),
+        &Authorization { path_executables: true, user_config: false, project: None, ..Default::default() },
+    )
+    .unwrap();
     let inv = store::inventory(&conn).unwrap();
     assert!(
         inv.observations.iter().any(|o| o.method == "claude-settings-file"),

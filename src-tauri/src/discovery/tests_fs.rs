@@ -66,6 +66,7 @@ fn a_link_in_a_parent_of_the_project_folder_is_refused_and_nothing_below_it_is_o
         path_executables: false,
         user_config: false,
         project: Some(ProjectScan { alias: "proje".to_string(), dir: through_link.clone() }),
+        ..Default::default()
     };
     let obs = detect::detect_all(&env.roots(), &only_project);
     fsx::hook::clear();

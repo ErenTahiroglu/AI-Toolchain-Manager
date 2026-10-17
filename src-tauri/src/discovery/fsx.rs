@@ -224,6 +224,143 @@ pub fn read_text(root: &Path, rel: &[&str], max_bytes: u64) -> ReadOutcome {
     }
 }
 
+/// Opens one regular file below `root` through the confined, no-follow layer and returns the OPEN HANDLE. Everything
+/// that must be read from the file (text, a database image, a digest, a header) is then read from this very handle, so
+/// a path that is swapped afterwards is never opened a second time.
+pub fn open_regular(root: &Path, rel: &[&str]) -> Result<fs::File, ReadFail> {
+    match imp::open_file(root, rel) {
+        Ok(f) => match f.metadata() {
+            Ok(m) if m.is_file() => Ok(f),
+            Ok(_) => Err(ReadFail::Skipped(Skip::NotRegularFile)),
+            Err(_) => Err(ReadFail::Skipped(Skip::Io)),
+        },
+        Err(OpenFail::NotFound) => Err(ReadFail::NotFound),
+        Err(OpenFail::Skip(s)) => Err(ReadFail::Skipped(s)),
+    }
+}
+
+/// A SHA-256 fingerprint of one file, computed from the opened handle in bounded chunks. Nothing is executed.
+/// A fingerprint is a property of the bytes read, not a statement about where they came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HashOutcome {
+    Computed { sha256: String, bytes: u64 },
+    Unknown(HashUnknown),
+}
+
+/// Why no fingerprint exists. Every one of these means "unknown", never "verified".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HashUnknown {
+    NotFound,
+    /// A link, junction or redirected path was refused.
+    Redirected,
+    /// Network, remote or unrecognised file system.
+    NonLocal,
+    NotRegularFile,
+    AccessDenied,
+    TooLarge,
+    TimedOut,
+    Cancelled,
+    /// The file's size or modification time differed before and after reading, or fewer/more bytes arrived than expected.
+    ChangedWhileReading,
+    Io,
+}
+
+impl HashUnknown {
+    pub fn code(self) -> &'static str {
+        match self {
+            HashUnknown::NotFound => "not_found",
+            HashUnknown::Redirected => "redirected",
+            HashUnknown::NonLocal => "non_local",
+            HashUnknown::NotRegularFile => "not_regular_file",
+            HashUnknown::AccessDenied => "access_denied",
+            HashUnknown::TooLarge => "too_large",
+            HashUnknown::TimedOut => "timed_out",
+            HashUnknown::Cancelled => "cancelled",
+            HashUnknown::ChangedWhileReading => "changed_while_reading",
+            HashUnknown::Io => "io",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct HashLimits {
+    pub max_bytes: u64,
+    pub timeout: std::time::Duration,
+    pub chunk: usize,
+}
+
+impl Default for HashLimits {
+    fn default() -> Self {
+        HashLimits { max_bytes: 512 * 1024 * 1024, timeout: std::time::Duration::from_secs(20), chunk: 256 * 1024 }
+    }
+}
+
+fn unknown_of(f: ReadFail) -> HashUnknown {
+    match f {
+        ReadFail::NotFound => HashUnknown::NotFound,
+        ReadFail::Skipped(Skip::Link) => HashUnknown::Redirected,
+        ReadFail::Skipped(Skip::Network | Skip::UnknownFilesystem) => HashUnknown::NonLocal,
+        ReadFail::Skipped(Skip::NotRegularFile) => HashUnknown::NotRegularFile,
+        ReadFail::Skipped(Skip::AccessDenied) => HashUnknown::AccessDenied,
+        ReadFail::Skipped(Skip::TooLarge) => HashUnknown::TooLarge,
+        ReadFail::Skipped(_) => HashUnknown::Io,
+    }
+}
+
+/// Streams the file through SHA-256. Refuses links/redirects/non-local volumes (same layer as every other read),
+/// enforces a size cap, a deadline and a cancel flag, and reports `ChangedWhileReading` when the handle's size or
+/// modification time moved or the byte count disagrees with the size seen at the start. Limitation: a rewrite that keeps
+/// size and (coarse) timestamp identical and happens between two chunks cannot be detected.
+pub fn hash_file(root: &Path, rel: &[&str], limits: HashLimits, cancel: &std::sync::atomic::AtomicBool) -> HashOutcome {
+    use sha2::{Digest, Sha256};
+    use std::sync::atomic::Ordering;
+    let mut file = match open_regular(root, rel) {
+        Ok(f) => f,
+        Err(e) => return HashOutcome::Unknown(unknown_of(e)),
+    };
+    let stamp = |f: &fs::File| f.metadata().ok().map(|m| (m.len(), m.modified().ok()));
+    let Some((size, modified)) = stamp(&file) else { return HashOutcome::Unknown(HashUnknown::Io) };
+    if size > limits.max_bytes {
+        return HashOutcome::Unknown(HashUnknown::TooLarge);
+    }
+    let deadline = std::time::Instant::now() + limits.timeout;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; limits.chunk.clamp(1024, 4 * 1024 * 1024)];
+    let mut total = 0u64;
+    let mut first = true;
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return HashOutcome::Unknown(HashUnknown::Cancelled);
+        }
+        if std::time::Instant::now() >= deadline {
+            return HashOutcome::Unknown(HashUnknown::TimedOut);
+        }
+        if !first {
+            hook::fire("hash-chunk");
+        }
+        first = false;
+        let n = match file.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(_) => return HashOutcome::Unknown(HashUnknown::Io),
+        };
+        total += n as u64;
+        if total > limits.max_bytes {
+            return HashOutcome::Unknown(HashUnknown::TooLarge);
+        }
+        hasher.update(&buf[..n]);
+    }
+    if total != size || stamp(&file) != Some((size, modified)) {
+        return HashOutcome::Unknown(HashUnknown::ChangedWhileReading);
+    }
+    let digest = hasher.finalize();
+    let mut hex = String::with_capacity(64);
+    for b in digest {
+        hex.push_str(&format!("{b:02x}"));
+    }
+    HashOutcome::Computed { sha256: hex, bytes: total }
+}
+
 /// Reads at most `max_bytes` from the START of one regular file (no UTF-8 requirement). Used for file headers only.
 pub fn read_prefix(root: &Path, rel: &[&str], max_bytes: u64) -> Result<Vec<u8>, ReadFail> {
     let file = match imp::open_file(root, rel) {

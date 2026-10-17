@@ -40,9 +40,9 @@ export const obs = (over: Partial<StoredObservation> = {}): StoredObservation =>
   evidence: "PATH klasörlerinden birinde 'gitleaks' adlı bir dosya bulundu. Bu yalnızca bir ad eşleşmesidir.", location: "PATH girdisi #1 · başka bir klasör · gitleaks.exe",
   limitations: ["Ad eşleşmesi: aynı adlı başka bir program olabilir."], identityVerified: false, functionalityTested: false,
   observedAt: new Date().toISOString(), stale: false, ageHours: 0, legacy: false, scanFinishedAt: new Date().toISOString(),
-  scanAuthorizedPath: true, scanAuthorizedUserConfig: false, scanAuthorizedProject: false, provenance: "latest_scan", latestScanChecked: true,
+  scanAuthorizedPath: true, scanAuthorizedUserConfig: false, scanAuthorizedProject: false, scanAuthorizedFingerprint: false, provenance: "latest_scan", latestScanChecked: true,
   current: true, notCurrentReason: null,
-  ladder: { assessed: true, filenameDetected: true, installRecord: false, publisher: "none", identity: "unknown", version: "unknown", versionTrust: "none", signatureBlock: "not_assessed", installedFilesSeen: false, artifactAuth: "none", reclassified: false, notPerformed: ["active_version_probe", "installed_file_digest", "no_package_detector_for_tool"] },
+  ladder: { assessed: true, filenameDetected: true, installRecord: false, publisher: "none", identity: "unknown", version: "unknown", versionTrust: "none", signatureBlock: "not_assessed", installedFilesSeen: false, artifactAuth: "none", reclassified: false, artifact: { policyVersion: 1, fingerprint: "not_requested", unknownReason: null, sha256: null, bytes: null, recordLink: "none", reference: "none", referenceKind: null, matchResult: "not_applicable", referenceEpoch: null, invalidated: false }, notPerformed: ["active_version_probe", "installed_file_digest", "no_package_detector_for_tool"] },
   ...over,
 });
 
@@ -91,7 +91,7 @@ export function createBackend(): Backend {
     ],
     nextEvaluation: { taskId: "t", phase: "start", recommendations: [], suppressed: [], disclaimer: "Hiçbir şey kurulmadı." },
     inventory: emptyInventory(),
-    backupPlan: { entries: [], preconditions: [], examined: ["Tüm tablolardaki metin değerleri (örüntü taraması)"], notExamined: ["Hiçbir örüntüye uymayan kişisel metin taranamaz"], reviewCandidates: [], noViolationDetected: [], notAssessable: [], unrecognisedFiles: 0, deletionAvailable: false, executed: false, notes: ["Bu bir ÖNİZLEMEDİR: hiçbir yedek silinmedi, taşınmadı veya değiştirilmedi."] },
+    backupPlan: { entries: [], preconditions: [], examined: ["Tüm tablolardaki metin değerleri (örüntü taraması)"], notExamined: ["Hiçbir örüntüye uymayan kişisel metin taranamaz"], reviewCandidates: [], noViolationDetected: [], partiallyScanned: [], notAssessable: [], directoryStatus: "ok", limits: { maxTextCells: 500000, maxRawBytes: 268435456, maxSqliteImageBytes: 134217728, timeoutSeconds: 30 }, unrecognisedFiles: 0, deletionAvailable: false, executed: false, notes: ["Bu bir ÖNİZLEMEDİR: hiçbir yedek silinmedi, taşınmadı veya değiştirilmedi."] },
     async handle(cmd, args) {
       b.calls.push({ cmd, args });
       if (b.failures[cmd]) throw b.failures[cmd];
@@ -171,7 +171,7 @@ export function createBackend(): Backend {
         case "run_discovery_scan": {
           const r = args?.request as { pathExecutables: boolean; userConfig: boolean; project: unknown };
           if (!r.pathExecutables && !r.userConfig && !r.project) throw { code: "SCAN_NOT_AUTHORIZED", message: "Taramak için en az bir bölüme izin vermelisiniz; hiçbir şey okunmadı." };
-          return { scanId: "s-new", startedAt: "x", finishedAt: "x", platformTarget: "windows-x64", authorizedPath: r.pathExecutables, authorizedUserConfig: r.userConfig, authorizedProject: !!r.project, status: "completed", observationCount: b.inventory.observations.length };
+          return { scanId: "s-new", startedAt: "x", finishedAt: "x", platformTarget: "windows-x64", authorizedPath: r.pathExecutables, authorizedUserConfig: r.userConfig, authorizedProject: !!r.project, authorizedFingerprint: false, status: "completed", observationCount: b.inventory.observations.length };
         }
         case "list_prompt_sources":
           return ["prompts.chat", "the-prompt-library", "Fabric"].map((n) => ({

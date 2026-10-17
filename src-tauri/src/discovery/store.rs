@@ -35,6 +35,7 @@ pub struct ScanSummary {
     pub authorized_path: bool,
     pub authorized_user_config: bool,
     pub authorized_project: bool,
+    pub authorized_fingerprint: bool,
     pub status: String,
     pub observation_count: i64,
 }
@@ -50,8 +51,8 @@ pub fn save_scan(
     let finished = now_utc();
     let tx = conn.unchecked_transaction()?;
     tx.execute(
-        "INSERT INTO discovery_scans (scan_id, started_at, finished_at, platform_target, authorized_path, authorized_user_config, authorized_project, status, observation_count)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'completed', ?8)",
+        "INSERT INTO discovery_scans (scan_id, started_at, finished_at, platform_target, authorized_path, authorized_user_config, authorized_project, status, observation_count, authorized_fingerprint)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'completed', ?8, ?9)",
         rusqlite::params![
             scan_id,
             started_at,
@@ -60,7 +61,8 @@ pub fn save_scan(
             auth.path_executables as i64,
             auth.user_config as i64,
             auth.project.is_some() as i64,
-            observations.len() as i64
+            observations.len() as i64,
+            auth.fingerprint_artifacts as i64
         ],
     )?;
     // The privacy gate runs again right before persistence, so a caller that skipped `Observation::finalize`
@@ -122,6 +124,7 @@ pub fn save_scan(
         authorized_path: auth.path_executables,
         authorized_user_config: auth.user_config,
         authorized_project: auth.project.is_some(),
+        authorized_fingerprint: auth.fingerprint_artifacts,
         status: "completed".to_string(),
         observation_count: observations.len() as i64,
     })
@@ -273,6 +276,7 @@ pub struct StoredObservation {
     pub scan_authorized_path: bool,
     pub scan_authorized_user_config: bool,
     pub scan_authorized_project: bool,
+    pub scan_authorized_fingerprint: bool,
     /// `latest_scan` | `earlier_scan`
     pub provenance: String,
     /// Did the LATEST scan look at the area this observation belongs to (path / user files / this project)?
@@ -292,6 +296,7 @@ pub struct ScanRef {
     pub authorized_path: bool,
     pub authorized_user_config: bool,
     pub authorized_project: bool,
+    pub authorized_fingerprint: bool,
 }
 
 /// What the user asked for (one accepted preference) next to what the scans saw, never merged.
@@ -331,7 +336,7 @@ fn age_hours(observed_at: &str) -> i64 {
 fn last_scan(conn: &Connection) -> AppResult<Option<ScanSummary>> {
     Ok(conn
         .query_row(
-            "SELECT scan_id, started_at, finished_at, platform_target, authorized_path, authorized_user_config, authorized_project, status, observation_count
+            "SELECT scan_id, started_at, finished_at, platform_target, authorized_path, authorized_user_config, authorized_project, status, observation_count, authorized_fingerprint
              FROM discovery_scans ORDER BY finished_at DESC, rowid DESC LIMIT 1",
             [],
             |r| {
@@ -345,6 +350,7 @@ fn last_scan(conn: &Connection) -> AppResult<Option<ScanSummary>> {
                     authorized_project: r.get::<_, i64>(6)? == 1,
                     status: r.get(7)?,
                     observation_count: r.get(8)?,
+                    authorized_fingerprint: r.get::<_, i64>(9)? == 1,
                 })
             },
         )
@@ -457,6 +463,13 @@ fn reason_not_current(o: &StoredObservation, last: &ScanSummary, in_latest: bool
 /// The newest observation for each (subject, platform, surface, method, scope, project) key — history stays in the
 /// database — with provenance and currentness derived against the latest scan.
 pub fn latest_observations(conn: &Connection) -> AppResult<Vec<StoredObservation>> {
+    let references = super::reference::ReferenceSet::production(conn)?;
+    latest_observations_with(conn, &references)
+}
+
+/// Same, judging stored artifact verdicts against an explicit reference set (production passes the real one; tests pass a
+/// synthetic authenticated set to prove the verified path end to end).
+pub fn latest_observations_with(conn: &Connection, references: &super::reference::ReferenceSet) -> AppResult<Vec<StoredObservation>> {
     let last = last_scan(conn)?;
     let aliases: BTreeSet<String> = match &last {
         Some(l) => {
@@ -471,7 +484,7 @@ pub fn latest_observations(conn: &Connection) -> AppResult<Vec<StoredObservation
         "SELECT o.id, o.scan_id, o.subject, o.platform_target, o.agent_surface, o.method, o.presence, o.configuration, o.version, o.version_source,
                 o.scope, o.project_alias, o.confidence, o.evidence, o.location, o.limitations_json, o.identity_verified, o.functionality_tested, o.observed_at,
                 o.record_version, s.finished_at, s.authorized_path, s.authorized_user_config, s.authorized_project,
-                o.identity_state, o.version_state, o.provenance_json
+                o.identity_state, o.version_state, o.provenance_json, s.authorized_fingerprint
          FROM discovery_observations o JOIN discovery_scans s ON s.scan_id = o.scan_id
          WHERE o.id IN (SELECT max(id) FROM discovery_observations GROUP BY subject, platform_target, agent_surface, method, scope, COALESCE(project_alias, ''))
          ORDER BY o.subject, o.scope, o.method",
@@ -507,6 +520,7 @@ pub fn latest_observations(conn: &Connection) -> AppResult<Vec<StoredObservation
             scan_authorized_path: r.get::<_, i64>(21)? == 1,
             scan_authorized_user_config: r.get::<_, i64>(22)? == 1,
             scan_authorized_project: r.get::<_, i64>(23)? == 1,
+            scan_authorized_fingerprint: r.get::<_, i64>(27)? == 1,
             provenance: String::new(),
             latest_scan_checked: false,
             current: false,
@@ -515,8 +529,8 @@ pub fn latest_observations(conn: &Connection) -> AppResult<Vec<StoredObservation
         })
     })?;
     let mut out = rows.collect::<Result<Vec<_>, _>>()?;
+    let epoch = references.epoch();
     for o in &mut out {
-        o.identity_verified = o.ladder.identity == IdentityState::Validated;
         sanitize_on_read(o);
         match &last {
             Some(l) => {
@@ -533,7 +547,56 @@ pub fn latest_observations(conn: &Connection) -> AppResult<Vec<StoredObservation
             }
         }
     }
+    // Artifact verdicts are re-derived from the stored digest against TODAY's code-embedded references, so a hand-edited row
+    // can never claim a higher trust than the evidence allows, and a verdict made under another policy or reference set is void.
+    for o in &mut out {
+        apply_artifact_rules(o, references, &epoch);
+        o.identity_verified = o.ladder.identity == IdentityState::Validated && o.current && !o.ladder.artifact.invalidated;
+    }
     Ok(out)
+}
+
+fn apply_artifact_rules(o: &mut StoredObservation, references: &super::reference::ReferenceSet, epoch: &str) {
+    use super::reference::{evaluate, MatchResult, ReferenceState, POLICY_VERSION};
+    use super::types::{ArtifactAuth, FingerprintState, VersionTrust};
+    let a = &mut o.ladder.artifact;
+    let judged =
+        a.fingerprint == FingerprintState::Computed || a.reference != ReferenceState::None || a.match_result != MatchResult::NotApplicable;
+    if judged && (a.policy_version != POLICY_VERSION || a.reference_epoch.as_deref() != Some(epoch)) {
+        a.invalidated = true;
+        a.match_result = MatchResult::NotApplicable;
+        a.reference = ReferenceState::None;
+        a.reference_kind = None;
+    } else if let (FingerprintState::Computed, Some(sha)) = (a.fingerprint, a.sha256.clone()) {
+        // same policy, same reference set: the verdict must still follow from the digest
+        let v = evaluate(&o.subject, &o.platform_target, &sha, references);
+        if v.result != a.match_result {
+            a.invalidated = true;
+            a.match_result = MatchResult::NotApplicable;
+            a.reference = ReferenceState::None;
+            a.reference_kind = None;
+        }
+    }
+    let authenticated = o.ladder.artifact.fingerprint == FingerprintState::Computed
+        && o.ladder.artifact.match_result == MatchResult::MatchesAuthenticated
+        && !o.ladder.artifact.invalidated;
+    if !authenticated {
+        if o.ladder.identity == IdentityState::Validated {
+            o.ladder.identity = if o.ladder.install_record { IdentityState::EvidenceAvailable } else { IdentityState::Unknown };
+            o.ladder.reclassified = true;
+        }
+        o.ladder.artifact_auth = ArtifactAuth::None;
+        if o.ladder.version_trust == VersionTrust::Validated {
+            o.ladder.version_trust = VersionTrust::Declared;
+        }
+        // A version that came only from an authenticated reference falls with that reference.
+        if o.version_source.as_deref() == Some("yetkili referans özeti") {
+            o.version = None;
+            o.version_source = None;
+            o.ladder.version = VersionState::Unknown;
+            o.ladder.version_trust = VersionTrust::None;
+        }
+    }
 }
 
 fn rank(presence: &str) -> u8 {
@@ -559,6 +622,7 @@ fn scan_ref(o: &StoredObservation) -> ScanRef {
         authorized_path: o.scan_authorized_path,
         authorized_user_config: o.scan_authorized_user_config,
         authorized_project: o.scan_authorized_project,
+        authorized_fingerprint: o.scan_authorized_fingerprint,
     }
 }
 

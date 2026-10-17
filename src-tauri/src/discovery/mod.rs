@@ -6,6 +6,7 @@
 pub mod detect;
 pub mod fsx;
 pub mod privacy;
+pub mod reference;
 pub mod store;
 pub mod types;
 
@@ -36,6 +37,9 @@ pub struct ScanRequest {
     pub path_executables: bool,
     pub user_config: bool,
     pub project: Option<ProjectRequest>,
+    /// Allow reading the CONTENT of program files found by name, only to compute a SHA-256 fingerprint. Nothing is run.
+    #[serde(default)]
+    pub fingerprint_artifacts: bool,
 }
 
 fn dir_error(code: &'static str, message: &str) -> AppError {
@@ -107,7 +111,13 @@ pub fn authorize(conn: &Connection, request: &ScanRequest) -> AppResult<Authoriz
     if !request.path_executables && !request.user_config && project.is_none() {
         return Err(AppError::new("SCAN_NOT_AUTHORIZED", "Taramak için en az bir bölüme izin vermelisiniz; hiçbir şey okunmadı."));
     }
-    Ok(Authorization { path_executables: request.path_executables, user_config: request.user_config, project })
+    Ok(Authorization {
+        path_executables: request.path_executables,
+        user_config: request.user_config,
+        project,
+        // Fingerprinting reads file content of programs found on PATH, so it is meaningless (and refused) without the PATH look.
+        fingerprint_artifacts: request.fingerprint_artifacts && request.path_executables,
+    })
 }
 
 /// The origin each (non-removed) catalog entry pins: `owner/repo` parsed from its repository link.
@@ -130,6 +140,11 @@ pub fn run_scan(conn: &Connection, roots: &Roots, auth: &Authorization) -> AppRe
     let mut roots = roots.clone();
     if roots.pins.is_empty() {
         roots.pins = load_pins(conn)?;
+    }
+    // Reference digests: the compiled-in authenticated list plus the database's UNAUTHENTICATED rows. A caller (tests, the
+    // synthetic probe) may supply its own set; production never does.
+    if roots.references == reference::ReferenceSet::default() {
+        roots.references = reference::ReferenceSet::production(conn)?;
     }
     let roots = &roots;
     let observations = detect::detect_all(roots, auth);

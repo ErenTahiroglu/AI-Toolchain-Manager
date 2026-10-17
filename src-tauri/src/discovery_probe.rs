@@ -98,6 +98,7 @@ pub fn synthetic_probe(conn: &Connection, dir: &Path) -> AppResult<Value> {
     )?;
     write(&home.join(format!(".local/bin/{}", exe("claude"))), "stub")?;
     write(&bin.join(exe("gitleaks")), "stub")?;
+    write(&bin.join(exe("graphify")), "different bytes under a catalogued name")?;
     write(&project.join(".mcp.json"), &json!({ "mcpServers": { "codebase-memory": { "command": "codebase-memory-mcp", "headers": { "Authorization": format!("Bearer {DUMMY_SECRET}") } } } }).to_string())?;
     write(&project.join(".claude/settings.json"), &json!({ "enabledPlugins": { key: false } }).to_string())?;
     write(&project.join("unrelated-source.txt"), DUMMY_SECRET_2)?;
@@ -109,23 +110,50 @@ pub fn synthetic_probe(conn: &Connection, dir: &Path) -> AppResult<Value> {
         path_entries: vec![bin.clone()],
         system_dirs: vec![],
         pins: vec![],
+        // SYNTHETIC authenticated references, used only by this probe to exercise the whole verification path in the built
+        // binary. gitleaks: the reference equals the stub file; graphify: the reference differs from the file. Production
+        // scans never see these (the compiled-in authenticated list is empty).
+        references: discovery::reference::ReferenceSet {
+            authenticated: ["gitleaks", "graphify"]
+                .iter()
+                .map(|id| discovery::reference::ReferenceDigest {
+                    entry_id: (*id).to_string(),
+                    kind: discovery::reference::ArtifactKind::Executable,
+                    format: if cfg!(windows) { "pe-exe" } else { "mach-o" }.to_string(),
+                    platform_target: if cfg!(windows) { PLATFORM_WINDOWS } else { PLATFORM_MACOS }.to_string(),
+                    version: "0.0.1".to_string(),
+                    sha256: crate::audit::sha256_hex(if *id == "gitleaks" { "stub" } else { "the genuine bytes" }),
+                    source: "synthetic probe fixture".to_string(),
+                })
+                .collect(),
+            unauthenticated: vec![],
+        },
     };
     let auth = Authorization {
         path_executables: true,
         user_config: true,
         project: Some(ProjectScan { alias: "probe-project".into(), dir: project.clone() }),
+        fingerprint_artifacts: true,
     };
     let before = tree_fingerprint(&base)?;
     let summary = discovery::run_scan(conn, &roots, &auth)?;
     let again = discovery::run_scan(conn, &roots, &auth)?; // repeated scanning
     let after = tree_fingerprint(&base)?;
-    let observations = store::latest_observations(conn)?;
+    let observations = store::latest_observations_with(conn, &roots.references)?;
     let dump = serde_json::to_string(&observations)?;
+    // The synthetic references exist only for this probe. Its two scans are removed from the self-check database afterwards
+    // (a "validated" row built from a synthetic reference must never sit in a database the self-audit then judges against the
+    // real, empty authenticated list), and one ordinary scan — production references, no fingerprinting — takes their place.
+    conn.execute("DELETE FROM discovery_scans WHERE scan_id IN (?1, ?2)", [&summary.scan_id, &again.scan_id])?;
+    let ordinary = Authorization { fingerprint_artifacts: false, ..auth.clone() };
+    let plain_roots = Roots { references: Default::default(), ..roots.clone() };
+    discovery::run_scan(conn, &plain_roots, &ordinary)?;
     Ok(json!({
         "scan": summary,
         "secondScanId": again.scan_id,
         "treeUnchanged": before == after,
         "dummySecretInObservations": dump.contains("SELFCHECK") || dump.contains("selfcheck-dummy") || dump.contains("Bearer"),
+        "syntheticReferences": true,
         "observations": observations,
     }))
 }
@@ -147,7 +175,7 @@ pub fn maybe_discover_local() -> Option<i32> {
         let conn = crate::db::open_file(&dir.join("atm.sqlite"), Some(&dir.join("backups")))?;
         crate::catalog::seed_all(&conn)?;
         let roots = Roots::from_environment();
-        let auth = Authorization { path_executables: true, user_config: true, project: None };
+        let auth = Authorization { path_executables: true, user_config: true, project: None, ..Default::default() };
         let summary = discovery::run_scan(&conn, &roots, &auth)?;
         Ok(json!({ "scan": summary, "inventory": store::inventory(&conn)? }))
     })();

@@ -17,7 +17,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled", "serialize"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -41,3 +41,8 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# The SHA-256 fingerprint of large program files must not take tens of seconds in debug builds (it would hit the
+# per-file deadline); optimise only this crate in the dev profile.
+[profile.dev.package.sha2]
+opt-level = 3

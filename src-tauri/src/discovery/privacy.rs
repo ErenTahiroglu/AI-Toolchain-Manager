@@ -17,7 +17,7 @@ use std::sync::OnceLock;
 pub const LOCATION_REMOVED: &str = "eski kayıt: konum gizlilik nedeniyle kaldırıldı";
 pub const TEXT_REMOVED: &str = "[konum gizlendi]";
 /// The only provenance label a version may carry.
-pub const VERSION_SOURCES: &[&str] = &["Claude Code kurulum kaydı", "npm paket kaydı"];
+pub const VERSION_SOURCES: &[&str] = &["Claude Code kurulum kaydı", "npm paket kaydı", "yetkili referans özeti"];
 
 /// Folders below the user's home where a PATH entry is recognisable and carries no private name.
 pub const KNOWN_HOME_DIRS: &[&str] = &[
@@ -166,11 +166,19 @@ pub fn strip_server_names(text: &str) -> String {
 #[serde(from = "super::types::Provenance")]
 pub struct LadderCheck {
     pub identity: String,
+    /// Is the stored digest (if any) a plain lower-case hex SHA-256?
+    pub digest_ok: bool,
+    pub sha256: Option<String>,
 }
 
 impl From<super::types::Provenance> for LadderCheck {
     fn from(p: super::types::Provenance) -> Self {
-        LadderCheck { identity: p.identity.as_str().to_string() }
+        let sha = p.artifact.sha256.clone();
+        LadderCheck {
+            identity: p.identity.as_str().to_string(),
+            digest_ok: sha.as_deref().map(super::reference::is_hex_digest).unwrap_or(true),
+            sha256: sha,
+        }
     }
 }
 

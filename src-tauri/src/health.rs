@@ -191,10 +191,11 @@ fn check_discovery(conn: &Connection) -> CheckResult {
     // Stored fields must already satisfy the privacy gate (closed grammars for location, version, version source and
     // project alias; free text without absolute paths, server names or anything the redactor would change), and no
     // observation may claim a test (the SQL constraint says so too; this catches a bypassed database).
+    let references = crate::discovery::reference::ReferenceSet::production(conn).unwrap_or_default();
     let unsafe_rows = (|| -> rusqlite::Result<i64> {
         use crate::discovery::privacy;
         let mut stmt = conn.prepare(
-            "SELECT evidence, limitations_json, version, version_source, location, project_alias, functionality_tested, provenance_json, identity_state, identity_verified FROM discovery_observations",
+            "SELECT evidence, limitations_json, version, version_source, location, project_alias, functionality_tested, provenance_json, identity_state, identity_verified, subject, platform_target FROM discovery_observations",
         )?;
         let mut bad = 0;
         for row in stmt.query_map([], |r| {
@@ -209,13 +210,41 @@ fn check_discovery(conn: &Connection) -> CheckResult {
                 r.get::<_, String>(7)?,
                 r.get::<_, String>(8)?,
                 r.get::<_, i64>(9)?,
+                r.get::<_, String>(10)?,
+                r.get::<_, String>(11)?,
             ))
         })? {
-            let (evidence, limitations, version, source, location, alias, tested, ladder, identity_state, identity_verified) = row?;
+            let (
+                evidence,
+                limitations,
+                version,
+                source,
+                location,
+                alias,
+                tested,
+                ladder,
+                identity_state,
+                identity_verified,
+                subject,
+                platform,
+            ) = row?;
             // The evidence ladder must parse as closed vocabulary and agree with the columns and the verified flag.
             let ladder_bad = (identity_verified == 1) != (identity_state == "validated")
                 || (ladder != "{}"
-                    && serde_json::from_str::<privacy::LadderCheck>(&ladder).map(|l| l.identity != identity_state).unwrap_or(true));
+                    && serde_json::from_str::<privacy::LadderCheck>(&ladder)
+                        .map(|l| {
+                            // A "validated" row must follow from its digest and the code-embedded authenticated references.
+                            let validated_ok = identity_state != "validated"
+                                || l.sha256
+                                    .as_deref()
+                                    .map(|d| {
+                                        crate::discovery::reference::evaluate(&subject, &platform, d, &references).result
+                                            == crate::discovery::reference::MatchResult::MatchesAuthenticated
+                                    })
+                                    .unwrap_or(false);
+                            l.identity != identity_state || !l.digest_ok || !validated_ok
+                        })
+                        .unwrap_or(true));
             let limitation_list: Vec<String> = serde_json::from_str(&limitations).unwrap_or_else(|_| vec!["\u{1}".to_string()]); // an unreadable list counts as unsafe
             if tested != 0
                 || ladder_bad

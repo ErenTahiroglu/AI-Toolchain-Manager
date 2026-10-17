@@ -4,11 +4,15 @@
 isolated directory, scans them with the real engine and reports what it observed. Set ATM_SELFCHECK_JSON to
 that file; without it these tests are reported as SKIPPED (never as passed). CI always sets it.
 """
+import copy
+import hashlib
 import json
 import os
 import pathlib
 import re
 import unittest
+
+import jsonschema
 
 SELFCHECK = os.environ.get("ATM_SELFCHECK_JSON")
 FORBIDDEN_WORDS = ("install", "update", "approve", "verify", "rollback", "uninstall")
@@ -42,7 +46,7 @@ class DiscoveryContract(unittest.TestCase):
     def test_scan_completed_twice_and_the_schema_version_includes_discovery(self):
         self.assertEqual(self.probe["scan"]["status"], "completed")
         self.assertNotEqual(self.probe["scan"]["scanId"], self.probe["secondScanId"])
-        self.assertGreaterEqual(self.data["dbVersion"], 7)
+        self.assertGreaterEqual(self.data["dbVersion"], 8)
 
     def test_nothing_in_the_scanned_tree_changed(self):
         self.assertTrue(self.probe["treeUnchanged"], "a read-only scan must leave sizes, contents and timestamps untouched")
@@ -67,7 +71,7 @@ class DiscoveryContract(unittest.TestCase):
         self.assertNotEqual(g["configuration"], p["configuration"])
 
     def test_executables_are_found_by_name_only_without_versions_or_verification(self):
-        g = self.one("gitleaks", "path-executable", "global")
+        g = self.one("graphify", "path-executable", "global")
         self.assertEqual((g["presence"], g["confidence"], g["identityVerified"]), ("present", "low", False))
         self.assertIsNone(g["version"])
         s = self.one("strix", "path-executable", "global")
@@ -90,7 +94,7 @@ class DiscoveryContract(unittest.TestCase):
         for o in self.obs:
             self.assertFalse(o["functionalityTested"], o["subject"])
             if o["version"] is not None:
-                self.assertEqual(o["versionSource"], "Claude Code kurulum kaydı", "only the plugin registry may supply a version")
+                self.assertIn(o["versionSource"], ("Claude Code kurulum kaydı", "yetkili referans özeti"), "only the plugin registry or an authenticated reference may supply a version")
             text = json.dumps(o, ensure_ascii=False)
             self.assertNotIn("discovery-probe/home", text.replace("\\", "/"), "the probe's home folder must be collapsed to ~")
 
@@ -137,7 +141,12 @@ class DiscoveryContract(unittest.TestCase):
     NOT_PERFORMED = {
         "active_version_probe", "signature_chain_validation", "signature_parsing_unsupported", "installed_file_digest",
         "package_metadata_not_found", "no_package_detector_for_tool", "record_to_file_linkage", "artifact_authentication",
+        "artifact_fingerprint", "plugin_directory_digest", "authenticated_reference",
     }
+    SCHEMA = json.loads((pathlib.Path(__file__).resolve().parents[1] / "schemas" / "artifact-provenance.schema.json").read_text(encoding="utf-8"))
+    # Only the synthetic probe has authenticated references (compiled-in production list is empty). Tool -> bytes it was given.
+    SYNTHETIC_MATCH = {"gitleaks": b"stub"}
+    SYNTHETIC_MISMATCH = {"graphify": b"different bytes under a catalogued name"}
 
     def test_every_ladder_uses_closed_vocabulary_and_obeys_the_invariants(self):
         for o in self.obs:
@@ -146,9 +155,15 @@ class DiscoveryContract(unittest.TestCase):
             for key, allowed in self.VOCAB.items():
                 self.assertIn(l[key], allowed, f"{o['subject']}.{key}")
             self.assertTrue(set(l["notPerformed"]) <= self.NOT_PERFORMED, l["notPerformed"])
-            # "validated" is reserved for authenticated evidence bound to the installed artifact; nothing produces it yet.
-            self.assertNotEqual(l["identity"], "validated", o["subject"])
-            self.assertEqual(l["artifactAuth"], "none", o["subject"])
+            # "validated" requires an AUTHENTICATED exact-file reference matched by the fingerprint of the installed file.
+            a = l["artifact"]
+            if l["identity"] == "validated":
+                self.assertEqual((l["artifactAuth"], a["fingerprint"], a["reference"], a["matchResult"], a["invalidated"]), ("digest_match", "computed", "authenticated", "matches_authenticated", False), o["subject"])
+                self.assertIn(a["referenceKind"], ("executable", "script", "plugin_file"))
+                self.assertEqual(l["versionTrust"], "validated")
+            else:
+                self.assertEqual(l["artifactAuth"], "none", o["subject"])
+            self.assertEqual(l["identity"] == "validated", l["artifactAuth"] == "digest_match", o["subject"])
             if l["identity"] == "record_corroborated":
                 self.assertTrue(l["installRecord"] and l["installedFilesSeen"] and l["publisher"] == "marketplace", "corroboration needs record + marketplace + files")
                 self.assertIn("artifact_authentication", l["notPerformed"])
@@ -165,10 +180,72 @@ class DiscoveryContract(unittest.TestCase):
     def test_a_corroborated_plugin_record_and_a_name_only_program_sit_on_different_rungs(self):
         fd = self.one("anthropic-frontend-design", "claude-plugin-declaration", "global")["ladder"]
         self.assertEqual((fd["identity"], fd["publisher"], fd["installRecord"], fd["versionTrust"]), ("record_corroborated", "marketplace", True, "installer_recorded"))
-        g = self.one("gitleaks", "path-executable", "global")["ladder"]
+        g = self.one("agent:claude-code", "native-install-location", "global")["ladder"]
         self.assertEqual((g["filenameDetected"], g["installRecord"], g["identity"], g["version"]), (True, False, "unknown", "unknown"))
         self.assertIn("active_version_probe", g["notPerformed"])
         self.assertIn("installed_file_digest", g["notPerformed"])
+        self.assertEqual(g["artifact"]["fingerprint"], "computed")
+        self.assertEqual(g["artifact"]["matchResult"], "not_applicable", "a fingerprint with no reference concludes nothing")
+
+    # ---- Phase 2C: artifact fingerprints and the reference-digest trust contract -----------------------------------
+
+    def test_every_observation_validates_against_the_artifact_provenance_schema(self):
+        validator = jsonschema.Draft202012Validator(self.SCHEMA)
+        for o in self.obs:
+            errors = list(validator.iter_errors(o))
+            self.assertEqual(errors, [], f"{o['subject']}: {[e.message for e in errors][:3]}")
+
+    def test_the_schema_rejects_forged_verification(self):
+        validator = jsonschema.Draft202012Validator(self.SCHEMA)
+        good = copy.deepcopy(self.one("gitleaks", "path-executable", "global"))
+        self.assertEqual(list(validator.iter_errors(good)), [])
+        def broken(mutate):
+            o = copy.deepcopy(good)
+            mutate(o)
+            return list(validator.iter_errors(o))
+        # a verified flag without a validated ladder
+        self.assertTrue(broken(lambda o: o["ladder"].update(identity="record_corroborated")))
+        # validated, but the reference is only self-declared
+        self.assertTrue(broken(lambda o: o["ladder"]["artifact"].update(reference="unauthenticated")))
+        # validated, but the "reference" is an archive digest
+        self.assertTrue(broken(lambda o: o["ladder"]["artifact"].update(referenceKind="archive")))
+        # validated without a fingerprint
+        self.assertTrue(broken(lambda o: o["ladder"]["artifact"].update(fingerprint="unknown", sha256=None, matchResult="not_applicable")))
+        # validated but the verdict was invalidated
+        self.assertTrue(broken(lambda o: o["ladder"]["artifact"].update(invalidated=True)))
+        # a path instead of a digest
+        self.assertTrue(broken(lambda o: o["ladder"]["artifact"].update(sha256="C:\\Users\\x\\tool.exe")))
+        # functionality claimed
+        self.assertTrue(broken(lambda o: o.update(functionalityTested=True)))
+        # a computed fingerprint with no digest
+        self.assertTrue(broken(lambda o: o["ladder"]["artifact"].update(sha256=None)))
+
+    def test_the_fingerprints_are_independently_recomputable_and_only_the_synthetic_exact_reference_verifies(self):
+        for tool, content in {**self.SYNTHETIC_MATCH, **self.SYNTHETIC_MISMATCH}.items():
+            o = self.one(tool, "path-executable", "global")
+            a = o["ladder"]["artifact"]
+            self.assertEqual(a["fingerprint"], "computed")
+            self.assertEqual(a["sha256"], hashlib.sha256(content).hexdigest(), f"{tool}: the digest must equal an independent SHA-256 of the bytes")
+            self.assertEqual(a["bytes"], len(content))
+        ok = self.one("gitleaks", "path-executable", "global")
+        self.assertEqual((ok["identityVerified"], ok["ladder"]["identity"], ok["version"], ok["versionSource"]), (True, "validated", "0.0.1", "yetkili referans özeti"))
+        bad = self.one("graphify", "path-executable", "global")
+        self.assertEqual((bad["identityVerified"], bad["ladder"]["identity"], bad["ladder"]["artifact"]["matchResult"]), (False, "conflicted", "mismatches_authenticated"))
+        verified = [o["subject"] for o in self.obs if o["identityVerified"]]
+        self.assertEqual(verified, ["gitleaks"], "nothing else may be verified: no reference, no archive digest, no record alone")
+
+    def test_a_computed_fingerprint_without_a_reference_and_a_plugin_record_stay_unverified(self):
+        c = self.one("agent:claude-code", "native-install-location", "global")
+        self.assertEqual((c["identityVerified"], c["ladder"]["artifact"]["reference"]), (False, "none"))
+        fd = self.one("anthropic-frontend-design", "claude-plugin-declaration", "global")
+        self.assertEqual((fd["identityVerified"], fd["ladder"]["identity"], fd["ladder"]["artifact"]["recordLink"]), (False, "record_corroborated", "folder_by_name"))
+        self.assertIn("plugin_directory_digest", fd["ladder"]["notPerformed"])
+        self.assertEqual(fd["ladder"]["artifact"]["fingerprint"], "not_requested")
+
+    def test_the_probe_reports_that_its_references_are_synthetic_and_the_scan_recorded_the_fingerprint_permission(self):
+        self.assertTrue(self.probe["syntheticReferences"])
+        self.assertTrue(self.probe["scan"]["authorizedFingerprint"])
+        self.assertTrue(all(o["scanAuthorizedFingerprint"] for o in self.obs))
 
     def test_the_scan_is_audited_with_a_schema_valid_inspect_event_and_never_with_install_like_events(self):
         types = [e["eventType"] for e in self.data["auditEvents"]]

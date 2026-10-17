@@ -17,6 +17,7 @@ fn auth(path: bool, user: bool, project: Option<(&str, &Path)>) -> Authorization
         path_executables: path,
         user_config: user,
         project: project.map(|(alias, dir)| ProjectScan { alias: alias.to_string(), dir: dir.to_path_buf() }),
+        ..Default::default()
     }
 }
 
@@ -159,6 +160,7 @@ fn so(subject: &str, alias: Option<&str>, surface: &str, platform: &str, presenc
         scan_authorized_path: false,
         scan_authorized_user_config: true,
         scan_authorized_project: true,
+        scan_authorized_fingerprint: false,
         provenance: if current { "latest_scan" } else { "earlier_scan" }.into(),
         latest_scan_checked: current,
         current,

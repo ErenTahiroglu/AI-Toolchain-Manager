@@ -2,6 +2,7 @@
 //! single "ok": *presence* (something was found), *configuration* (something refers to it), *identity*
 //! (we know it is the catalogued tool) and *functionality* (it was tested — always `false` in Phase 2A).
 
+use super::reference::{ArtifactKind, MatchResult, ReferenceState};
 use crate::redact;
 use serde::{Deserialize, Serialize};
 
@@ -247,6 +248,60 @@ pub enum NotPerformed {
     RecordToFileLinkage,
     /// No digest or signature chain bound to the installed files was checked.
     ArtifactAuthentication,
+    /// File content was not read to compute a fingerprint (permission not given, or it could not be computed).
+    ArtifactFingerprint,
+    /// A plugin is a directory; no digest of a whole directory or skill collection is defined or accepted.
+    PluginDirectoryDigest,
+    /// No independently authenticated reference digest exists for this artifact.
+    AuthenticatedReference,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FingerprintState {
+    /// The user did not allow reading file contents for this scan (or there is nothing to fingerprint).
+    #[default]
+    NotRequested,
+    /// A SHA-256 of the exact opened file was computed. It identifies bytes, not origin.
+    Computed,
+    /// It could not be computed; `unknown_reason` says why. Never "verified".
+    Unknown,
+}
+
+/// How a package/installer record relates to the exact file that was fingerprinted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordLink {
+    #[default]
+    None,
+    /// A record exists but nothing verifiable ties it to this file (wrapper script, shim, link, nearby metadata).
+    Unverifiable,
+    /// The record names a folder by marketplace/plugin/version and that folder exists. This ties the record to a folder
+    /// NAME, not to file content.
+    FolderByName,
+}
+
+/// The artifact-provenance contract (policy version in `reference::POLICY_VERSION`), in the order of the evidence:
+/// 1 discovered (`filename_detected`), 2 fingerprint, 3 record (`install_record`), 4 record link, 5 reference digest,
+/// 6 reference authentication, 7 match; 8 functional verification is never performed (`functionality_tested`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ArtifactEvidence {
+    pub policy_version: u32,
+    pub fingerprint: FingerprintState,
+    /// A closed code from `fsx::HashUnknown::code` (never content).
+    pub unknown_reason: Option<String>,
+    /// Lower-case hex SHA-256 of the local file, nothing else. A fingerprint, not proof of origin.
+    pub sha256: Option<String>,
+    pub bytes: Option<u64>,
+    pub record_link: RecordLink,
+    pub reference: ReferenceState,
+    pub reference_kind: Option<ArtifactKind>,
+    pub match_result: MatchResult,
+    /// Fingerprint of the reference set this verdict was judged against.
+    pub reference_epoch: Option<String>,
+    /// Set when it is read back: the policy or the reference set changed since, so the verdict is void.
+    pub invalidated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -266,6 +321,7 @@ pub struct Provenance {
     pub artifact_auth: ArtifactAuth,
     /// An earlier build stored a higher trust level than the evidence supports; it was lowered, not hidden.
     pub reclassified: bool,
+    pub artifact: ArtifactEvidence,
     pub not_performed: Vec<NotPerformed>,
 }
 
@@ -359,6 +415,10 @@ impl Observation {
         self.provenance.install_record = found;
         self
     }
+    pub fn artifact(mut self, a: ArtifactEvidence) -> Self {
+        self.provenance.artifact = a;
+        self
+    }
     pub fn installed_files_seen(mut self, seen: bool) -> Self {
         self.provenance.installed_files_seen = seen;
         self
@@ -416,8 +476,30 @@ impl Observation {
         // Trust can only be lowered here, never raised. `Validated` needs authenticated evidence bound to the installed
         // artifact; `RecordCorroborated` needs a record, an installer-recorded marketplace and the files on disk.
         let corroborated_ok = p.install_record && p.publisher == Publisher::Marketplace && p.installed_files_seen;
-        if p.identity == IdentityState::Validated && !(p.artifact_auth != ArtifactAuth::None && p.install_record) {
+        // The ONE place that decides whether an artifact is authenticated: a fingerprint was computed from the exact file,
+        // it equals an AUTHENTICATED reference digest of an exact-file kind, and the verdict was not invalidated.
+        let a = &mut p.artifact;
+        if !a.sha256.as_deref().map(super::reference::is_hex_digest).unwrap_or(false) {
+            a.sha256 = None;
+            if a.fingerprint == FingerprintState::Computed {
+                a.fingerprint = FingerprintState::Unknown;
+                a.unknown_reason = Some("invalid_digest".to_string());
+            }
+        }
+        a.unknown_reason = a.unknown_reason.take().filter(|r| r.len() <= 24 && r.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'));
+        let authenticated = a.fingerprint == FingerprintState::Computed
+            && a.match_result == MatchResult::MatchesAuthenticated
+            && a.reference == ReferenceState::Authenticated
+            && a.reference_kind.map(ArtifactKind::is_exact_file).unwrap_or(false)
+            && a.sha256.is_some()
+            && !a.invalidated;
+        p.artifact_auth = if authenticated { ArtifactAuth::DigestMatch } else { ArtifactAuth::None };
+        if p.identity == IdentityState::Validated && p.artifact_auth == ArtifactAuth::None {
             p.identity = IdentityState::RecordCorroborated;
+        }
+        // An authenticated artifact match IS validated identity; nothing else is.
+        if p.artifact_auth == ArtifactAuth::DigestMatch && p.identity != IdentityState::Conflicted {
+            p.identity = IdentityState::Validated;
         }
         if p.identity == IdentityState::RecordCorroborated && !corroborated_ok {
             p.identity = if p.install_record { IdentityState::EvidenceAvailable } else { IdentityState::Unknown };
@@ -457,7 +539,14 @@ impl Observation {
         {
             p.not_performed.push(NotPerformed::ArtifactAuthentication);
         }
-        if p.filename_detected && !p.not_performed.contains(&NotPerformed::InstalledFileDigest) {
+        // The fingerprint itself exists now, but without an AUTHENTICATED reference it proves nothing about origin.
+        if (p.install_record || p.filename_detected)
+            && p.artifact.reference != ReferenceState::Authenticated
+            && !p.not_performed.contains(&NotPerformed::AuthenticatedReference)
+        {
+            p.not_performed.push(NotPerformed::AuthenticatedReference);
+        }
+        if p.filename_detected && p.artifact_auth == ArtifactAuth::None && !p.not_performed.contains(&NotPerformed::InstalledFileDigest) {
             p.not_performed.push(NotPerformed::InstalledFileDigest);
         }
         self.identity_verified = p.identity == IdentityState::Validated;

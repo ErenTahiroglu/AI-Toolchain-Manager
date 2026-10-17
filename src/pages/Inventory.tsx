@@ -2,15 +2,16 @@ import { useMemo, useState } from "react";
 import { api, toAppError } from "../api";
 import { ErrorNotice, useLoad } from "../components/common";
 import {
-  backupStatusLabel, configurationLabel, confidenceLabel, formatTime, methodLabel, notPerformedLabel, obsScopeLabel, observedLabel, platformLabel, presenceLabel, subjectLabel, surfaceLabel,
+  backupStatusLabel, configurationLabel, layerLabel, confidenceLabel, formatTime, methodLabel, notPerformedLabel, obsScopeLabel, observedLabel, platformLabel, presenceLabel, subjectLabel, surfaceLabel,
 } from "../labels";
 import type { AppError, CleanupPlan, ScanRef, StoredObservation } from "../types";
 
-const permissionText = (p: { authorizedPath: boolean; authorizedUserConfig: boolean; authorizedProject: boolean }) => {
+const permissionText = (p: { authorizedPath: boolean; authorizedUserConfig: boolean; authorizedProject: boolean; authorizedFingerprint: boolean }) => {
   const parts = [
     p.authorizedPath ? "program adları (PATH)" : null,
     p.authorizedUserConfig ? "Claude Code kullanıcı dosyaları" : null,
     p.authorizedProject ? "bir proje klasörü" : null,
+    p.authorizedFingerprint ? "dosya parmak izi (SHA-256)" : null,
   ].filter(Boolean);
   return parts.length ? parts.join(" + ") : "hiçbir bölüm";
 };
@@ -30,6 +31,46 @@ function PresenceBadge({ presence }: { presence: string }) {
 
 
 type Step = { key: string; yes: boolean | null; text: string };
+
+const REASONS: Record<string, string> = {
+  not_found: "dosya bulunamadı", redirected: "bağlantı/yönlendirme olduğu için okunmadı", non_local: "yerel olmayan birim", not_regular_file: "normal dosya değil",
+  access_denied: "erişim izni yok", too_large: "boyut sınırını aşıyor", timed_out: "süre sınırı aşıldı", cancelled: "iptal edildi",
+  changed_while_reading: "okunurken değişti", io: "okunamadı", invalid_digest: "geçersiz özet",
+};
+
+/** Fingerprint, reference and match as separate lines: a local hash, a self-declared reference and an authenticated one are three different things. */
+function artifactSteps(o: StoredObservation): Step[] {
+  const a = o.ladder.artifact;
+  if (!a) return [];
+  const out: Step[] = [];
+  out.push(
+    a.fingerprint === "computed"
+      ? { key: "fingerprint", yes: true, text: `Yerel parmak izi hesaplandı (SHA-256 ${a.sha256?.slice(0, 12) ?? ""}…; yalnızca baytları tanımlar, kaynağı kanıtlamaz)` }
+      : a.fingerprint === "unknown"
+        ? { key: "fingerprint", yes: null, text: `Parmak izi hesaplanamadı (${REASONS[a.unknownReason ?? ""] ?? "okunamadı"}); sonuç bilinmiyor` }
+        : { key: "fingerprint", yes: false, text: "Parmak izi alınmadı (dosya içeriği okunmadı)" },
+  );
+  if (o.ladder.installRecord || o.ladder.publisher !== "none") out.push({ key: "source", yes: true, text: "Kaynak bilgisi var (yerel kayıt veya paketin kendi beyanı)" });
+  out.push(
+    a.reference === "authenticated"
+      ? { key: "reference", yes: true, text: "Referans özeti var ve bağımsız olarak doğrulanmış" }
+      : a.reference === "unauthenticated"
+        ? { key: "reference", yes: null, text: "Referans özeti var ama doğrulanmamış (kendi beyanı; güven dayanağı değil)" }
+        : { key: "reference", yes: false, text: "Doğrulanmış referans özeti yok" },
+  );
+  if (a.invalidated) out.push({ key: "invalidated", yes: null, text: "Önceki doğrulama geçersiz: ilke veya referans kümesi değişti" });
+  const m: Record<string, string> = {
+    matches_authenticated: "Kurulu dosya doğrulanmış referansla eşleşiyor",
+    mismatches_authenticated: "Kurulu dosya doğrulanmış referanstan FARKLI",
+    matches_unauthenticated: "Yerel özet doğrulanmamış bir referansla eşleşiyor (kanıt değil)",
+    mismatches_unauthenticated: "Yerel özet doğrulanmamış referansla uyuşmuyor (sonuç çıkarılmadı)",
+    incomparable: "Referans bir arşiv/yükleyici/paket özeti; çıkarılmış dosyayla karşılaştırılamaz",
+  };
+  if (m[a.matchResult]) out.push({ key: "match", yes: a.matchResult === "matches_authenticated" ? true : a.matchResult === "mismatches_authenticated" ? null : null, text: m[a.matchResult] });
+  if (a.recordLink === "unverifiable") out.push({ key: "link", yes: null, text: "Kayıt ile dosya arasındaki bağ doğrulanamadı" });
+  if (a.recordLink === "folder_by_name") out.push({ key: "link", yes: null, text: "Kayıt, klasör adıyla eşleşiyor (dosya içeriğiyle değil)" });
+  return out;
+}
 
 /** Each conclusion is one line; none of them is green, and "functionality" is always untested. */
 function ladderSteps(o: StoredObservation): Step[] {
@@ -56,10 +97,11 @@ function ladderSteps(o: StoredObservation): Step[] {
     {
       key: "validated",
       yes: l.identity === "validated",
-      text: l.identity === "validated" ? "Kimlik doğrulandı (kurulu dosyaya bağlı bağımsız kanıt)" : "Kimlik doğrulanmadı",
+      text: l.identity === "validated" ? "Kimlik doğrulandı (doğrulanmış referans + kurulu dosya eşleşmesi)" : "Kimlik doğrulanmadı",
     },
     ...(l.reclassified ? [{ key: "reclassified", yes: null, text: "Önceki sürümde daha yüksek güvenle kaydedilmişti; kanıtı yetersiz olduğu için düşürüldü" } as Step] : []),
     { key: "version", yes: l.version === "known", text: versionText },
+    ...artifactSteps(o),
     { key: "function", yes: false, text: "İşlev test edilmedi" },
     ...(l.identity === "conflicted" || l.version === "conflicted" ? [{ key: "conflict", yes: null, text: "Çelişkili gözlemler var" } as Step] : []),
     ...(o.stale || !o.current ? [{ key: "stale", yes: null, text: "Eski / güncel olmayan gözlem" } as Step] : []),
@@ -118,7 +160,7 @@ function ObservationRow({ o }: { o: StoredObservation }) {
       <td className="small"><Ladder o={o} /></td>
       <td className="small">
         {formatTime(o.observedAt)}
-        <ScanProvenance scan={{ scanId: o.scanId, finishedAt: o.scanFinishedAt, authorizedPath: o.scanAuthorizedPath, authorizedUserConfig: o.scanAuthorizedUserConfig, authorizedProject: o.scanAuthorizedProject }} />
+        <ScanProvenance scan={{ scanId: o.scanId, finishedAt: o.scanFinishedAt, authorizedPath: o.scanAuthorizedPath, authorizedUserConfig: o.scanAuthorizedUserConfig, authorizedProject: o.scanAuthorizedProject, authorizedFingerprint: o.scanAuthorizedFingerprint }} />
         {o.stale && <div><span className="badge badge-unknown">Eski ({o.ageHours} saat)</span></div>}
         {!o.current && o.notCurrentReason && <div className="muted">{o.notCurrentReason}</div>}
         {o.legacy && <div><span className="badge badge-skipped">Eski kayıt biçimi — gizlilik için konum/ad bilgisi temizlendi</span></div>}
@@ -177,6 +219,13 @@ function BackupPanel() {
       {plan && (
         <div aria-live="polite">
           <p className="small"><strong>Bu tarama bir örüntü taramasıdır.</strong> “İhlal bulunmadı”, yedeğin kişisel veri içermediği veya silinmesinin güvenli olduğu anlamına gelmez.</p>
+          {plan.directoryStatus !== "ok" && plan.directoryStatus !== "missing" && (
+            <p role="alert" className="small"><strong>Yedek klasörü güvenli biçimde açılamadı</strong> (bağlantı/junction, ağ yolu veya erişim sorunu); hiçbir yedeğe dokunulmadı.</p>
+          )}
+          <p className="small muted">
+            Tarama sınırları: en çok {plan.limits.maxTextCells.toLocaleString("tr-TR")} metin hücresi, {Math.round(plan.limits.maxRawBytes / 1048576)} MiB ham tarama,
+            {" "}{Math.round(plan.limits.maxSqliteImageBytes / 1048576)} MiB veritabanı görüntüsü, {plan.limits.timeoutSeconds} sn. Sınır aşılırsa sonuç “kısmi” olur, “tamamlandı” olmaz.
+          </p>
           <details>
             <summary className="small">Neler incelendi, neler incelenmedi?</summary>
             <p className="small"><strong>İncelenen:</strong></p>
@@ -188,7 +237,7 @@ function BackupPanel() {
             <div className="table-wrap">
               <table>
                 <caption className="sr-only">Veritabanı yedekleri</caption>
-                <thead><tr><th scope="col">Yedek</th><th scope="col">Şema</th><th scope="col">Boyut</th><th scope="col">Gizlilik durumu</th><th scope="col">Bulgular (yalnızca sayı)</th></tr></thead>
+                <thead><tr><th scope="col">Yedek</th><th scope="col">Şema</th><th scope="col">Boyut</th><th scope="col">Gizlilik durumu</th><th scope="col">Tarama kapsamı</th><th scope="col">Bulgular (yalnızca sayı)</th></tr></thead>
                 <tbody>
                   {plan.entries.map((e) => (
                     <tr key={e.fileName}>
@@ -196,6 +245,10 @@ function BackupPanel() {
                       <td className="small">v{e.schemaVersion ?? "?"}</td>
                       <td className="small">{Math.max(1, Math.round(e.sizeBytes / 1024))} KB</td>
                       <td className="small">{backupStatusLabel(e.privacyStatus)}</td>
+                      <td className="small">
+                        {e.coverage === "complete" ? "Tüm katmanlar tamamlandı" : e.coverage === "partial" ? "KISMİ tarama" : "Eksik: bazı katmanlar okunamadı"}
+                        <ul>{e.layers.map((l) => <li key={l.layer}>{layerLabel(l)}</li>)}</ul>
+                      </td>
                       <td className="small">
                         Gözlem tablosu: {e.observationRowsFailingGate === null ? "incelenemedi" : e.observationRowsFailingGate} · Diğer metin bulgusu: {e.otherTextFindings}
                         {e.tablesWithFindings.length > 0 && <> (tablo: {e.tablesWithFindings.join(", ")})</>} · Ham dosyada yol biçimi: {e.rawPathLikeMatches}
@@ -225,6 +278,7 @@ export function InventoryPage() {
   const [pathExec, setPathExec] = useState(false);
   const [userConfig, setUserConfig] = useState(false);
   const [projectOn, setProjectOn] = useState(false);
+  const [fingerprint, setFingerprint] = useState(false);
   const [alias, setAlias] = useState("");
   const [directory, setDirectory] = useState("");
   const [busy, setBusy] = useState(false);
@@ -241,7 +295,7 @@ export function InventoryPage() {
     setError(null);
     setDone("");
     try {
-      const s = await api.runDiscoveryScan({ pathExecutables: pathExec, userConfig, project: projectOn ? { alias, directory } : null });
+      const s = await api.runDiscoveryScan({ pathExecutables: pathExec, userConfig, project: projectOn ? { alias, directory } : null, fingerprintArtifacts: pathExec && fingerprint });
       setDone(`Tarama tamamlandı: ${s.observationCount} gözlem kaydedildi. Hiçbir şey kurulmadı, çalıştırılmadı veya değiştirilmedi.`);
       inventory.reload();
     } catch (e) {
@@ -276,6 +330,13 @@ export function InventoryPage() {
           <span>
             <strong>Bilinen program adlarını ara.</strong> PATH klasörlerinde ve Claude Code'un belgelenmiş kurulum konumlarında yalnızca “bu adda bir dosya var mı” diye bakılır.
             Dosyalar açılmaz ve çalıştırılmaz; sürümleri öğrenilmez.
+          </span>
+        </label>
+        <label className="choice">
+          <input type="checkbox" checked={fingerprint && pathExec} disabled={!pathExec} onChange={(e) => setFingerprint(e.target.checked)} />
+          <span>
+            <strong>Bulunan program dosyalarının parmak izini (SHA-256) hesapla.</strong> Önceki adımda bulunan program dosyasının <em>içeriği okunur</em> ve bir özet hesaplanır; dosya çalıştırılmaz,
+            hiçbir yere gönderilmez. Bir özet yalnızca dosyanın baytlarını tanımlar; kaynağını kanıtlamaz. Bunun için önce “program adlarını ara” seçilmelidir.
           </span>
         </label>
         <label className="choice">

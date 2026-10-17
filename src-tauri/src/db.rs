@@ -6,6 +6,7 @@ use std::path::Path;
 
 /// One schema step. Each step runs in its own transaction together with the `user_version` bump,
 /// so a failure rolls back completely and leaves the previous version intact.
+#[derive(Clone, Copy)]
 pub enum Migration {
     Sql(&'static str),
     Rust(fn(&Transaction) -> AppResult<()>),
@@ -40,6 +41,7 @@ fn migrate_7(tx: &Transaction) -> AppResult<()> {
 /// 6 = Phase 2B: passive provenance ladder columns on discovery observations (additive).
 /// 7 = Phase 2B closure: identity taxonomy (`record_corroborated`; `validated` reserved) and in-place lowering of
 ///     high-trust values stored by earlier builds. Table rebuild; every row and id is preserved.
+/// 8 = Phase 2C: `discovery_scans.authorized_fingerprint` and the (always unauthenticated) `reference_digests` table.
 const MIGRATIONS: &[Migration] = &[
     Migration::Sql(include_str!("../migrations/0001_init.sql")),
     Migration::Rust(migrate_2),
@@ -48,9 +50,16 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Rust(migrate_5),
     Migration::Sql(include_str!("../migrations/0006_passive_provenance.sql")),
     Migration::Rust(migrate_7),
+    Migration::Sql(include_str!("../migrations/0008_artifact_provenance.sql")),
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
+
+/// The first `n` shipped migrations (tests build databases "as an earlier build left them").
+#[cfg(test)]
+pub(crate) fn migrations_prefix(n: usize) -> Vec<Migration> {
+    MIGRATIONS[..n].to_vec()
+}
 
 fn configure(conn: &Connection) -> AppResult<()> {
     conn.pragma_update(None, "foreign_keys", true)?;

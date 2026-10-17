@@ -243,6 +243,8 @@ export interface ScanRequest {
   pathExecutables: boolean;
   userConfig: boolean;
   project: { alias: string; directory: string } | null;
+  /** Read the content of program files found by name, only to compute SHA-256 fingerprints. Nothing is run. */
+  fingerprintArtifacts: boolean;
 }
 
 export interface ScanSummary {
@@ -253,6 +255,7 @@ export interface ScanSummary {
   authorizedPath: boolean;
   authorizedUserConfig: boolean;
   authorizedProject: boolean;
+  authorizedFingerprint: boolean;
   status: string;
   observationCount: number;
 }
@@ -285,6 +288,7 @@ export interface StoredObservation {
   scanAuthorizedPath: boolean;
   scanAuthorizedUserConfig: boolean;
   scanAuthorizedProject: boolean;
+  scanAuthorizedFingerprint: boolean;
   provenance: "latest_scan" | "earlier_scan";
   /** Did the latest scan look at the area this observation belongs to? */
   latestScanChecked: boolean;
@@ -298,7 +302,23 @@ export interface StoredObservation {
 export type IdentityState = "not_assessed" | "unknown" | "evidence_available" | "record_corroborated" | "validated" | "conflicted";
 export type NotPerformed =
   | "active_version_probe" | "signature_chain_validation" | "signature_parsing_unsupported" | "installed_file_digest"
-  | "package_metadata_not_found" | "no_package_detector_for_tool" | "record_to_file_linkage" | "artifact_authentication";
+  | "package_metadata_not_found" | "no_package_detector_for_tool" | "record_to_file_linkage" | "artifact_authentication"
+  | "artifact_fingerprint" | "plugin_directory_digest" | "authenticated_reference";
+
+/** Phase 2C artifact evidence (policy v1). A fingerprint identifies bytes; only an AUTHENTICATED exact-file reference verifies. */
+export interface ArtifactEvidence {
+  policyVersion: number;
+  fingerprint: "not_requested" | "computed" | "unknown";
+  unknownReason: string | null;
+  sha256: string | null;
+  bytes: number | null;
+  recordLink: "none" | "unverifiable" | "folder_by_name";
+  reference: "none" | "unauthenticated" | "authenticated";
+  referenceKind: "archive" | "installer" | "executable" | "script" | "plugin_file" | "package" | null;
+  matchResult: "not_applicable" | "incomparable" | "matches_unauthenticated" | "mismatches_unauthenticated" | "matches_authenticated" | "mismatches_authenticated";
+  referenceEpoch: string | null;
+  invalidated: boolean;
+}
 
 /** The Phase 2B evidence ladder. `assessed` is false for rows written before it existed. */
 export interface Ladder {
@@ -314,10 +334,17 @@ export interface Ladder {
   artifactAuth: "none" | "digest_match" | "signature_chain";
   /** An earlier build stored a higher trust level than the evidence supports; it was lowered. */
   reclassified: boolean;
+  artifact: ArtifactEvidence;
   notPerformed: NotPerformed[];
 }
 
-export type BackupPrivacyStatus = "violations_observed" | "potentially_sensitive" | "none_detected_in_examined_content" | "not_assessable";
+export type BackupPrivacyStatus = "violations_observed" | "potentially_sensitive" | "none_detected_in_examined_content" | "partially_scanned_no_findings" | "not_assessable";
+
+export interface BackupLayer {
+  layer: "observation_rows" | "all_text" | "raw_main" | "raw_wal";
+  outcome: "completed" | "partial" | "unreadable" | "unsupported" | "not_present";
+  reason: string;
+}
 
 export interface BackupEntry {
   fileName: string;
@@ -326,6 +353,9 @@ export interface BackupEntry {
   modified: string;
   privacyStatus: BackupPrivacyStatus;
   reason: string;
+  /** complete | partial | incomplete: whether every layer finished. */
+  coverage: "complete" | "partial" | "incomplete";
+  layers: BackupLayer[];
   /** null = the discovery table is absent or unreadable ("not examined", not "zero"). */
   observationRowsFailingGate: number | null;
   otherTextFindings: number;
@@ -341,7 +371,10 @@ export interface CleanupPlan {
   notExamined: string[];
   reviewCandidates: string[];
   noViolationDetected: string[];
+  partiallyScanned: string[];
   notAssessable: string[];
+  directoryStatus: "ok" | "missing" | "refused_redirect" | "refused_non_local" | "unreadable";
+  limits: { maxTextCells: number; maxRawBytes: number; maxSqliteImageBytes: number; timeoutSeconds: number };
   unrecognisedFiles: number;
   deletionAvailable: boolean;
   executed: boolean;
@@ -354,6 +387,7 @@ export interface ScanRef {
   authorizedPath: boolean;
   authorizedUserConfig: boolean;
   authorizedProject: boolean;
+  authorizedFingerprint: boolean;
 }
 
 export type RequestStatus =

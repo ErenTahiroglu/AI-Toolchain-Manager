@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { createBackend, obs, type Backend } from "./test/backend";
-import type { BackupEntry, Ladder } from "./types";
+import type { ArtifactEvidence, BackupEntry, Ladder } from "./types";
 
 let backend: Backend;
 vi.mock("@tauri-apps/api/core", () => ({
@@ -20,7 +20,7 @@ const scanned = (observations = [obs()]) => {
   backend.inventory = {
     lastScan: {
       scanId: "s1", startedAt: "x", finishedAt: new Date().toISOString(), platformTarget: "windows-x64", authorizedPath: true, authorizedUserConfig: false,
-      authorizedProject: false, status: "completed", observationCount: observations.length,
+      authorizedProject: false, authorizedFingerprint: false, status: "completed", observationCount: observations.length,
     },
     observations,
     requests: [],
@@ -49,7 +49,7 @@ describe("computer inventory (read-only discovery)", () => {
   it("explains exactly what each permission reads and does not pre-select any of them", async () => {
     await open();
     const boxes = await screen.findAllByRole("checkbox");
-    expect(boxes).toHaveLength(3);
+    expect(boxes).toHaveLength(4);
     boxes.forEach((b) => expect(b).not.toBeChecked());
     expect(screen.getByText(/yalnızca “bu adda bir dosya var mı” diye bakılır/)).toBeInTheDocument();
     expect(screen.getByText(/Şifreler, anahtarlar ve diğer içerik saklanmaz/)).toBeInTheDocument();
@@ -60,7 +60,7 @@ describe("computer inventory (read-only discovery)", () => {
     await open();
     await userEvent.click(await screen.findByRole("checkbox", { name: /Bilinen program adlarını ara/ }));
     await userEvent.click(screen.getByRole("button", { name: "Bu bilgisayarı tara" }));
-    expect(calls("run_discovery_scan")[0].args).toEqual({ request: { pathExecutables: true, userConfig: false, project: null } });
+    expect(calls("run_discovery_scan")[0].args).toEqual({ request: { pathExecutables: true, userConfig: false, project: null, fingerprintArtifacts: false } });
     expect(await screen.findByText(/Hiçbir şey kurulmadı, çalıştırılmadı veya değiştirilmedi/)).toBeInTheDocument();
   });
 
@@ -78,7 +78,7 @@ describe("computer inventory (read-only discovery)", () => {
     expect(scan).toBeEnabled();
     await userEvent.click(scan);
     expect(calls("run_discovery_scan")[0].args).toEqual({
-      request: { pathExecutables: false, userConfig: false, project: { alias: "benim-sitem", directory: "C:\\Projeler\\sitem" } },
+      request: { pathExecutables: false, userConfig: false, project: { alias: "benim-sitem", directory: "C:\\Projeler\\sitem" }, fingerprintArtifacts: false },
     });
     expect(screen.getByText(/reddedilir/)).toBeInTheDocument();
   });
@@ -147,7 +147,7 @@ describe("computer inventory (read-only discovery)", () => {
         entryId: "anthropic-frontend-design", entryName: "Anthropic Frontend Design", projectAlias: "web", projectName: "Web sitesi",
         agentSurface: "claude-code-terminal", platformTarget: "windows-x64", status: "absent_current",
         note: "Etkinleştirmek istediniz, ancak son taramada bu bilgisayarda bulunamadı.",
-        basis: { scanId: "abcdef0123456789", finishedAt: new Date().toISOString(), authorizedPath: true, authorizedUserConfig: true, authorizedProject: false },
+        basis: { scanId: "abcdef0123456789", finishedAt: new Date().toISOString(), authorizedPath: true, authorizedUserConfig: true, authorizedProject: false, authorizedFingerprint: false },
       },
       {
         entryId: "gitleaks", entryName: "Gitleaks", projectAlias: "web", projectName: "Web sitesi", agentSurface: "local-cli", platformTarget: "macos-arm64",
@@ -172,7 +172,7 @@ describe("computer inventory (read-only discovery)", () => {
       {
         entryId: "gitleaks", entryName: "Gitleaks", projectAlias: "web", projectName: "Web sitesi", agentSurface: "local-cli", platformTarget: "windows-x64",
         status: "previously_present", note: "Eski sonuç (Son taramada bu bölüm denetlenmedi (yetki verilmedi)). Yeniden tarayın; eski bir sonuç hiçbir işlem için dayanak sayılmaz.",
-        basis: { scanId: "11111111-aaaa", finishedAt: "2026-10-16T09:00:00Z", authorizedPath: true, authorizedUserConfig: false, authorizedProject: false },
+        basis: { scanId: "11111111-aaaa", finishedAt: "2026-10-16T09:00:00Z", authorizedPath: true, authorizedUserConfig: false, authorizedProject: false, authorizedFingerprint: false },
       },
     ];
     await open();
@@ -223,9 +223,13 @@ describe("computer inventory (read-only discovery)", () => {
     await waitFor(() => expect(screen.queryByText(/Tarama tamamlandı/)).not.toBeInTheDocument());
   });
 
+  const art = (over: Partial<ArtifactEvidence> = {}): ArtifactEvidence => ({
+    policyVersion: 1, fingerprint: "not_requested", unknownReason: null, sha256: null, bytes: null, recordLink: "none", reference: "none", referenceKind: null,
+    matchResult: "not_applicable", referenceEpoch: null, invalidated: false, ...over,
+  });
   const ladder = (over: Partial<Ladder>): Ladder => ({
     assessed: true, filenameDetected: true, installRecord: false, publisher: "none", identity: "unknown", version: "unknown", versionTrust: "none",
-    signatureBlock: "not_assessed", installedFilesSeen: false, artifactAuth: "none", reclassified: false, notPerformed: ["active_version_probe"], ...over,
+    signatureBlock: "not_assessed", installedFilesSeen: false, artifactAuth: "none", reclassified: false, artifact: art(), notPerformed: ["active_version_probe"], ...over,
   });
 
   it("shows each rung of the evidence ladder separately and never a green success for a merely detected tool", async () => {
@@ -298,20 +302,24 @@ describe("computer inventory (read-only discovery)", () => {
   it("previews old backups with honest coverage: nothing is called clean, safe or deletable", async () => {
     const entry = (over: Partial<BackupEntry>): BackupEntry => ({
       fileName: "atm-v4-20261016T100000Z.sqlite", schemaVersion: 4, sizeBytes: 204800, modified: "2026-10-16T10:00:00Z", privacyStatus: "violations_observed" as const,
-      reason: "findings_in_examined_content", observationRowsFailingGate: 4, otherTextFindings: 2, tablesWithFindings: ["diagnostics"], rawPathLikeMatches: 6, hasWalSidecar: false, ...over,
+      reason: "findings_in_examined_content", coverage: "complete", layers: [{ layer: "raw_main", outcome: "completed", reason: "all_bytes_inspected" }], observationRowsFailingGate: 4, otherTextFindings: 2, tablesWithFindings: ["diagnostics"], rawPathLikeMatches: 6, hasWalSidecar: false, ...over,
     });
     backend.backupPlan = {
       entries: [
         entry({}),
         entry({ fileName: "atm-v2-20261001T000000Z.sqlite", schemaVersion: 2, privacyStatus: "potentially_sensitive", observationRowsFailingGate: null, otherTextFindings: 0, tablesWithFindings: [], rawPathLikeMatches: 0 }),
         entry({ fileName: "atm-v5-20261007T000000Z.sqlite", schemaVersion: 5, privacyStatus: "none_detected_in_examined_content", observationRowsFailingGate: 0, otherTextFindings: 0, tablesWithFindings: [], rawPathLikeMatches: 0 }),
-        entry({ fileName: "atm-v5-20261005T000000Z.sqlite", schemaVersion: 5, privacyStatus: "not_assessable", observationRowsFailingGate: null, otherTextFindings: 0, tablesWithFindings: [], rawPathLikeMatches: 0 }),
+        entry({ fileName: "atm-v5-20261005T000000Z.sqlite", schemaVersion: 5, privacyStatus: "not_assessable", coverage: "incomplete", layers: [{ layer: "raw_wal", outcome: "unreadable", reason: "redirected" }], observationRowsFailingGate: null, otherTextFindings: 0, tablesWithFindings: [], rawPathLikeMatches: 0 }),
+        entry({
+          fileName: "atm-v5-20261008T000000Z.sqlite", schemaVersion: 5, privacyStatus: "partially_scanned_no_findings", coverage: "partial",
+          layers: [{ layer: "all_text", outcome: "partial", reason: "cell_limit" }], observationRowsFailingGate: 0, otherTextFindings: 0, tablesWithFindings: [], rawPathLikeMatches: 0,
+        }),
       ],
       preconditions: [{ id: "integrity", ok: true, text: "SQLite bütünlük denetimi (integrity_check) başarılı." }],
       examined: ["Tüm tablolardaki tüm metin değerleri: özel klasör yolu, gizli anahtar/parola/e-posta biçimleri (örüntü taraması)"],
       notExamined: ["Yedek dışındaki kopyalar: dosya sistemi anlık görüntüleri, gölge kopyalar, çöp kutusu, bulut eşitleme"],
       reviewCandidates: ["atm-v4-20261016T100000Z.sqlite", "atm-v2-20261001T000000Z.sqlite"], noViolationDetected: ["atm-v5-20261007T000000Z.sqlite"],
-      notAssessable: ["atm-v5-20261005T000000Z.sqlite"], unrecognisedFiles: 1, deletionAvailable: false, executed: false,
+      partiallyScanned: ["atm-v5-20261008T000000Z.sqlite"], notAssessable: ["atm-v5-20261005T000000Z.sqlite"], directoryStatus: "ok", limits: { maxTextCells: 500000, maxRawBytes: 268435456, maxSqliteImageBytes: 134217728, timeoutSeconds: 30 }, unrecognisedFiles: 1, deletionAvailable: false, executed: false,
       notes: ["Bu bir ÖNİZLEMEDİR: hiçbir yedek silinmedi, taşınmadı veya değiştirilmedi.", "Dosyanın silinmesi, içeriğin fiziksel olarak yok edildiğini garanti etmez: SSD'lerde aşınma dengeleme olabilir."],
     };
     await open();
@@ -332,6 +340,14 @@ describe("computer inventory (read-only discovery)", () => {
     expect(rows["atm-v2-20261001T000000Z.sqlite"]).toMatch(/Gözlem tablosu: incelenemedi/);
     expect(rows["atm-v5-20261007T000000Z.sqlite"]).toMatch(/İncelenen içerikte ihlal bulunmadı \(kişisel veri içermediği anlamına GELMEZ\)/);
     expect(rows["atm-v5-20261005T000000Z.sqlite"]).toMatch(/BİLİNMİYOR/);
+    expect(rows["atm-v5-20261005T000000Z.sqlite"]).toMatch(/-wal dosyası: OKUNAMADI \(bağlantı\/yönlendirme reddedildi\)/);
+    // a partial scan never reads as complete
+    expect(rows["atm-v5-20261008T000000Z.sqlite"]).toMatch(/KISMEN tarandı, taranan bölümde bir şey bulunmadı \(tamamı incelenmedi\)/);
+    expect(rows["atm-v5-20261008T000000Z.sqlite"]).toMatch(/KISMİ tarama/);
+    expect(rows["atm-v5-20261008T000000Z.sqlite"]).toMatch(/tüm metin değerleri: KISMİ \(hücre sınırı\)/);
+    expect(rows["atm-v5-20261008T000000Z.sqlite"]).not.toMatch(/Tüm katmanlar tamamlandı/);
+    expect(screen.getByText(/en çok 500\.000 metin hücresi/)).toBeInTheDocument();
+    expect(screen.getByText(/Sınır aşılırsa sonuç “kısmi” olur/)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/güvenle silinebilir|temiz yedek|kişisel veri içermiyor|\bsafe\b/i);
     expect(screen.getByText(/hiçbir yedek silinmedi/)).toBeInTheDocument();
     expect(screen.getByText(/fiziksel olarak yok edildiğini garanti etmez/)).toBeInTheDocument();
@@ -357,4 +373,80 @@ describe("computer inventory (read-only discovery)", () => {
     expect(document.body.textContent).not.toMatch(/Kimlik doğrulandı: evet/);
   });
 
+
+  it("keeps a local hash, a self-declared reference and an authenticated reference as three different things, and never goes green for a hash", async () => {
+    const digest = "a".repeat(64);
+    scanned([
+      obs({ id: 1, subject: "gitleaks", ladder: ladder({ artifact: art({ fingerprint: "computed", sha256: digest, bytes: 10 }) }) }),
+      obs({
+        id: 2, subject: "strix",
+        ladder: ladder({ artifact: art({ fingerprint: "computed", sha256: "b".repeat(64), reference: "unauthenticated", referenceKind: "executable", matchResult: "matches_unauthenticated" }) }),
+      }),
+      obs({
+        id: 3, subject: "graphify", identityVerified: true, version: "0.0.1", versionSource: "yetkili referans özeti",
+        ladder: ladder({
+          identity: "validated", version: "known", versionTrust: "validated", artifactAuth: "digest_match",
+          artifact: art({ fingerprint: "computed", sha256: "c".repeat(64), reference: "authenticated", referenceKind: "executable", matchResult: "matches_authenticated", referenceEpoch: "d".repeat(64) }),
+        }),
+      }),
+    ]);
+    await open();
+    const lines = async (name: string) => within((await screen.findByRole("heading", { name })).closest("section")!).getByRole("list", { name: "Kanıt basamakları" });
+    const local = await lines("gitleaks");
+    expect(within(local).getByText(/Yerel parmak izi hesaplandı \(SHA-256 aaaaaaaaaaaa…; yalnızca baytları tanımlar, kaynağı kanıtlamaz\)/)).toBeInTheDocument();
+    expect(within(local).getByText(/Doğrulanmış referans özeti yok/)).toBeInTheDocument();
+    expect(within(local).getByText(/^Kimlik doğrulanmadı/)).toBeInTheDocument();
+    const declared = await lines("strix");
+    expect(within(declared).getByText(/Referans özeti var ama doğrulanmamış \(kendi beyanı; güven dayanağı değil\)/)).toBeInTheDocument();
+    expect(within(declared).getByText(/doğrulanmamış bir referansla eşleşiyor \(kanıt değil\)/)).toBeInTheDocument();
+    expect(within(declared).getByText(/^Kimlik doğrulanmadı/)).toBeInTheDocument();
+    expect(within(declared).queryByText(/^Kimlik doğrulandı \(/)).not.toBeInTheDocument();
+    const verified = await lines("graphify");
+    expect(within(verified).getByText(/Referans özeti var ve bağımsız olarak doğrulanmış/)).toBeInTheDocument();
+    expect(within(verified).getByText(/Kurulu dosya doğrulanmış referansla eşleşiyor/)).toBeInTheDocument();
+    expect(within(verified).getByText(/Kimlik doğrulandı \(doğrulanmış referans \+ kurulu dosya eşleşmesi\)/)).toBeInTheDocument();
+    // even a verified identity says nothing about whether the tool works
+    expect(within(verified).getByText(/İşlev test edilmedi/)).toBeInTheDocument();
+    expect(document.querySelector(".badge-passed")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/[A-Za-z]:\\Users|\/Users\//);
+    expect(document.body.textContent).not.toContain(digest.repeat(2)); // only a short prefix is shown, never a path
+  });
+
+  it("shows mismatches, unknown fingerprints, invalidated verdicts, archive digests and record links honestly", async () => {
+    scanned([
+      obs({ id: 1, subject: "gitleaks", ladder: ladder({ identity: "conflicted", artifact: art({ fingerprint: "computed", sha256: "e".repeat(64), reference: "authenticated", referenceKind: "executable", matchResult: "mismatches_authenticated" }) }) }),
+      obs({ id: 2, subject: "strix", ladder: ladder({ artifact: art({ fingerprint: "unknown", unknownReason: "redirected" }) }) }),
+      obs({ id: 3, subject: "graphify", ladder: ladder({ reclassified: true, artifact: art({ fingerprint: "computed", sha256: "f".repeat(64), invalidated: true }) }) }),
+      obs({ id: 4, subject: "markitdown", ladder: ladder({ artifact: art({ fingerprint: "computed", sha256: "1".repeat(64), reference: "authenticated", referenceKind: "archive", matchResult: "incomparable" }) }) }),
+      obs({ id: 5, subject: "agent-browser", ladder: ladder({ installRecord: true, publisher: "self_declared", identity: "evidence_available", artifact: art({ recordLink: "unverifiable" }) }) }),
+      obs({ id: 6, subject: "superpowers", method: "claude-plugin-declaration", ladder: ladder({ installRecord: true, identity: "record_corroborated", installedFilesSeen: true, publisher: "marketplace", artifact: art({ recordLink: "folder_by_name" }) }) }),
+    ]);
+    await open();
+    const get = async (n: string) => within((await screen.findByRole("heading", { name: n })).closest("section")!);
+    expect((await get("gitleaks")).getByText(/Kurulu dosya doğrulanmış referanstan FARKLI/)).toBeInTheDocument();
+    expect((await get("gitleaks")).getByText(/Çelişkili gözlemler var/)).toBeInTheDocument();
+    expect((await get("strix")).getByText(/Parmak izi hesaplanamadı \(bağlantı\/yönlendirme olduğu için okunmadı\); sonuç bilinmiyor/)).toBeInTheDocument();
+    expect((await get("graphify")).getByText(/Önceki doğrulama geçersiz: ilke veya referans kümesi değişti/)).toBeInTheDocument();
+    expect((await get("markitdown")).getByText(/arşiv\/yükleyici\/paket özeti; çıkarılmış dosyayla karşılaştırılamaz/)).toBeInTheDocument();
+    expect((await get("agent-browser")).getByText(/Kayıt ile dosya arasındaki bağ doğrulanamadı/)).toBeInTheDocument();
+    expect((await get("superpowers")).getByText(/klasör adıyla eşleşiyor \(dosya içeriğiyle değil\)/)).toBeInTheDocument();
+    for (const n of ["gitleaks", "strix", "graphify", "markitdown", "agent-browser", "superpowers"]) {
+      expect((await get(n)).queryByText(/^Kimlik doğrulandı \(/)).not.toBeInTheDocument();
+    }
+  });
+
+  it("offers fingerprinting only after the PATH permission, explains that file content is read but nothing is run, and sends the choice", async () => {
+    await open();
+    const fp = await screen.findByRole("checkbox", { name: /parmak izini \(SHA-256\) hesapla/ });
+    expect(fp).toBeDisabled();
+    expect(fp).not.toBeChecked();
+    expect(screen.getByText(/içeriği okunur/)).toBeInTheDocument();
+    expect(screen.getByText(/dosya çalıştırılmaz/)).toBeInTheDocument();
+    expect(screen.getByText(/kaynağını kanıtlamaz/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("checkbox", { name: /Bilinen program adlarını ara/ }));
+    expect(fp).toBeEnabled();
+    await userEvent.click(fp);
+    await userEvent.click(screen.getByRole("button", { name: "Bu bilgisayarı tara" }));
+    expect(calls("run_discovery_scan")[0].args).toEqual({ request: { pathExecutables: true, userConfig: false, project: null, fingerprintArtifacts: true } });
+  });
 });

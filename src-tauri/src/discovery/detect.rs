@@ -69,6 +69,8 @@ pub struct Roots {
     /// Catalog-pinned provenance: the source repository each catalog entry names. Loaded from the catalog by the
     /// caller; the detectors never reach the database themselves.
     pub pins: Vec<CatalogPin>,
+    /// Reference digests (authenticated = compiled in; unauthenticated = stored / declared). See `reference.rs`.
+    pub references: super::reference::ReferenceSet,
 }
 
 /// What the catalog pins about an entry's origin: `owner/repo` of its repository, lower-case.
@@ -126,7 +128,7 @@ impl Roots {
         } else {
             ["/usr", "/bin", "/sbin", "/opt", "/System", "/Library", "/Applications"].iter().map(PathBuf::from).collect()
         };
-        Roots { platform: platform.to_string(), home, path_entries, system_dirs, pins: Vec::new() }
+        Roots { platform: platform.to_string(), home, path_entries, system_dirs, pins: Vec::new(), references: Default::default() }
     }
 
     /// A label for a PATH folder that carries no private folder name: its position in PATH and a coarse category.
@@ -169,6 +171,8 @@ pub struct Authorization {
     pub user_config: bool,
     /// Read three named files below one project folder the user chose.
     pub project: Option<ProjectScan>,
+    /// Read the CONTENT of program files found by name, only to compute SHA-256 fingerprints (nothing is run).
+    pub fingerprint_artifacts: bool,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -211,6 +215,8 @@ struct Hit {
 }
 
 struct PathScan {
+    /// The user allowed reading file content to compute SHA-256 fingerprints.
+    fingerprint: bool,
     usable: usize,
     skipped: usize,
     hits: BTreeMap<String, Vec<Hit>>,
@@ -226,8 +232,8 @@ fn candidates(base: &str, roots: &Roots) -> Vec<String> {
 
 /// Checks only whether specific file NAMES exist in PATH folders. It never lists a folder, never crawls,
 /// skips network and relative entries, and never follows links out of a folder.
-fn scan_path(roots: &Roots, bases: &[&str]) -> PathScan {
-    let mut scan = PathScan { usable: 0, skipped: 0, hits: BTreeMap::new() };
+fn scan_path(roots: &Roots, bases: &[&str], fingerprint: bool) -> PathScan {
+    let mut scan = PathScan { fingerprint, usable: 0, skipped: 0, hits: BTreeMap::new() };
     for (index, dir) in roots.path_entries.iter().take(MAX_PATH_ENTRIES).enumerate() {
         if dir.as_os_str().is_empty() || !dir.is_absolute() || fsx::is_network_or_device_path(dir) {
             scan.skipped += 1;
@@ -372,7 +378,102 @@ fn with_signature(mut obs: Observation, roots: &Roots, sig: SignatureBlock) -> O
 /// Builds the evidence ladder for a program found on PATH from the metadata that sits next to it. Several copies with
 /// differing records, a package whose own name or source disagrees with the catalog, or conflicting versions are
 /// reported as conflicts, not resolved.
-fn path_provenance(mut obs: Observation, subject: &str, roots: &Roots, hits: &[Hit]) -> Observation {
+fn path_provenance(obs: Observation, subject: &str, roots: &Roots, hits: &[Hit], fingerprint: bool) -> Observation {
+    let first = &hits[0];
+    let obs = path_provenance_records(obs, subject, roots, hits);
+    fingerprint_step(obs, subject, roots, &first.dir, &[first.file.as_str()], first.link, fingerprint)
+}
+
+/// Artifact evidence for ONE exact file (the one that would run): a SHA-256 of the opened handle, judged against the
+/// reference set under the validation policy. Nothing is executed and nothing is derived from the file except the digest.
+/// Only an AUTHENTICATED reference of an exact-file kind can verify; everything else stays unknown / evidence.
+fn fingerprint_step(
+    mut obs: Observation,
+    subject: &str,
+    roots: &Roots,
+    root: &Path,
+    rel: &[&str],
+    link: bool,
+    requested: bool,
+) -> Observation {
+    use super::reference::{self, MatchResult, ReferenceState};
+    let link_state = if obs.provenance.install_record { RecordLink::Unverifiable } else { RecordLink::None };
+    let mut art = ArtifactEvidence {
+        policy_version: reference::POLICY_VERSION,
+        record_link: link_state,
+        reference_epoch: Some(roots.references.epoch()),
+        ..Default::default()
+    };
+    if !requested {
+        obs =
+            obs.not_performed(NotPerformed::ArtifactFingerprint).limit("Dosya içeriği okunmadı: parmak izi (SHA-256) için izin verilmedi.");
+        return obs.artifact(art);
+    }
+    if link {
+        art.fingerprint = FingerprintState::Unknown;
+        art.unknown_reason = Some(fsx::HashUnknown::Redirected.code().to_string());
+        art.record_link = RecordLink::Unverifiable;
+        return obs
+            .artifact(art)
+            .not_performed(NotPerformed::ArtifactFingerprint)
+            .limit("Dosya bir bağlantı/yönlendirme olduğu için içeriği okunmadı; parmak izi alınamadı.");
+    }
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    match fsx::hash_file(root, rel, fsx::HashLimits::default(), &cancel) {
+        fsx::HashOutcome::Unknown(why) => {
+            art.fingerprint = FingerprintState::Unknown;
+            art.unknown_reason = Some(why.code().to_string());
+            obs.artifact(art)
+                .not_performed(NotPerformed::ArtifactFingerprint)
+                .limit(format!("Parmak izi hesaplanamadı ({}); sonuç BİLİNMİYOR.", why.code()))
+        }
+        fsx::HashOutcome::Computed { sha256, bytes } => {
+            let verdict = reference::evaluate(subject, &roots.platform, &sha256, &roots.references);
+            art.fingerprint = FingerprintState::Computed;
+            art.sha256 = Some(sha256);
+            art.bytes = Some(bytes);
+            art.reference = verdict.reference;
+            art.reference_kind = verdict.kind;
+            art.match_result = verdict.result;
+            obs = obs.limit(
+                "Yerel parmak izi (SHA-256) hesaplandı; bu yalnızca dosyanın baytlarını tanımlar, kaynağını veya meşruiyetini kanıtlamaz.",
+            );
+            match verdict.result {
+                MatchResult::MatchesAuthenticated => {
+                    if let Some(v) = verdict.version {
+                        obs = obs.version(Some(v), "yetkili referans özeti").version_state(VersionState::Known, VersionTrust::Validated);
+                    }
+                    obs = obs
+                        .identity_state(IdentityState::Validated)
+                        .limit("Parmak izi, bağımsız olarak doğrulanmış bir referans özetiyle (tam dosya) uyuşuyor. İşlev test edilmedi.");
+                }
+                MatchResult::MismatchesAuthenticated => {
+                    obs = obs
+                        .identity_state(IdentityState::Conflicted)
+                        .limit("Aynı ada sahip dosyanın parmak izi, doğrulanmış hiçbir referans özetiyle uyuşmuyor.");
+                }
+                MatchResult::MatchesUnauthenticated => {
+                    obs = obs.limit("Parmak izi, DOĞRULANMAMIŞ (kendi beyan eden) bir referansla uyuşuyor; bu kimlik kanıtı değildir.");
+                }
+                MatchResult::MismatchesUnauthenticated => {
+                    obs = obs.limit(
+                        "Parmak izi doğrulanmamış bir referansla uyuşmuyor; referansın kendisi doğrulanmadığı için sonuç çıkarılmadı.",
+                    );
+                }
+                MatchResult::Incomparable => {
+                    obs = obs.limit(
+                        "Yalnızca arşiv/yükleyici/paket özeti var; bir arşivin özeti çıkarılmış dosyanın özetiyle karşılaştırılamaz.",
+                    );
+                }
+                MatchResult::NotApplicable => {}
+            }
+            let _ = ReferenceState::None;
+            obs.artifact(art)
+        }
+    }
+}
+
+fn path_provenance_records(mut obs: Observation, subject: &str, roots: &Roots, hits: &[Hit]) -> Observation {
     let first = &hits[0];
     let sig = if first.link { SignatureBlock::NotAssessed } else { signature_of(roots, &first.dir, &[first.file.as_str()]) };
     obs = with_signature(obs, roots, sig);
@@ -447,7 +548,7 @@ fn path_observation(subject: &str, surface: &str, base: &str, roots: &Roots, sca
                     "PATH klasörlerinden birinde '{base}' adlı bir dosya bulundu. Bu yalnızca bir ad eşleşmesidir; dosyanın gerçekten bu araç olduğu doğrulanmadı."
                 ))
                 .limit("Ad eşleşmesi: aynı adlı başka bir program olabilir.");
-            obs = path_provenance(obs, subject, roots, hits);
+            obs = path_provenance(obs, subject, roots, hits, scan.fingerprint);
             if first.link {
                 obs = obs.limit("Dosya bir sembolik bağlantı/yönlendirme; hedefi izlenmedi ve doğrulanmadı.");
             }
@@ -499,6 +600,7 @@ fn claude_install_observations(roots: &Roots, scan: &PathScan) -> Vec<Observatio
                 .not_performed(NotPerformed::NoPackageDetectorForTool);
             let sig = if is_link { SignatureBlock::NotAssessed } else { signature_of(roots, home, &[".local", "bin", exe]) };
             o = with_signature(o, roots, sig);
+            o = fingerprint_step(o, AGENT_CLAUDE, roots, home, &[".local", "bin", exe], is_link, scan.fingerprint);
             if is_link {
                 o = o.limit("Bu dosya bir sembolik bağlantı (resmî kurulum aracı bunu böyle oluşturur); hedefi izlenmedi.");
             }
@@ -780,6 +882,12 @@ fn plugin_observation(
         .identity_state(identity_state)
         .install_record(has_record)
         .installed_files_seen(files_seen)
+        .artifact(ArtifactEvidence {
+            policy_version: super::reference::POLICY_VERSION,
+            record_link: if files_seen { RecordLink::FolderByName } else { RecordLink::None },
+            ..Default::default()
+        })
+        .not_performed(NotPerformed::PluginDirectoryDigest)
         .publisher(if has_record && pinned {
             Publisher::Marketplace
         } else if has_record {
@@ -997,7 +1105,7 @@ pub fn detect_all(roots: &Roots, auth: &Authorization) -> Vec<Observation> {
     if auth.path_executables {
         let mut bases: Vec<&str> = CLI_TOOLS.iter().map(|(_, b)| *b).collect();
         bases.push("claude");
-        let scan = scan_path(roots, &bases);
+        let scan = scan_path(roots, &bases, auth.fingerprint_artifacts);
         out.extend(claude_install_observations(roots, &scan));
         for (entry, base) in CLI_TOOLS {
             out.push(path_observation(entry, SURFACE_CLI, base, roots, &scan));
