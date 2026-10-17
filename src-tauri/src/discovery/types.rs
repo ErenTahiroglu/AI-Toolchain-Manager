@@ -141,7 +141,12 @@ pub enum IdentityState {
     Unknown,
     /// A record or declaration exists, but nothing that proves it belongs to the catalogued tool.
     EvidenceAvailable,
-    /// An installation record from a trusted installer names the catalog-pinned source. Not a statement about safety or function.
+    /// A locally readable installer record names the catalog-pinned source AND the installed files are present at the
+    /// expected place. This is CORROBORATED METADATA: the registry and the folder are user-writable and can be forged,
+    /// and nothing binds them to the content of the installed files. It is not authenticated identity.
+    RecordCorroborated,
+    /// RESERVED. Independently authenticated evidence bound to the exact installed artifact (a pinned digest of the
+    /// installed file or a trusted signature chain over it). No detector can produce it in this phase.
     Validated,
     /// Sources disagree (different publisher, name, or duplicate copies with differing records).
     Conflicted,
@@ -153,6 +158,7 @@ impl IdentityState {
             IdentityState::NotAssessed => "not_assessed",
             IdentityState::Unknown => "unknown",
             IdentityState::EvidenceAvailable => "evidence_available",
+            IdentityState::RecordCorroborated => "record_corroborated",
             IdentityState::Validated => "validated",
             IdentityState::Conflicted => "conflicted",
         }
@@ -186,8 +192,22 @@ pub enum VersionTrust {
     None,
     /// Written by a package's own metadata (the package author controls it).
     Declared,
-    /// Written by the agent's own installer record (Claude Code plugin registry).
-    Trusted,
+    /// Stated by a local installer record (Claude Code plugin registry). The record is user-writable; this is a
+    /// declaration by the installer's file, not a verified fact. (Stored as "trusted" by the first Phase 2B build.)
+    #[serde(alias = "trusted")]
+    InstallerRecorded,
+    /// RESERVED: confirmed against authenticated evidence bound to the installed artifact.
+    Validated,
+}
+
+/// What authenticated the INSTALLED ARTIFACT itself. Reserved: no detector sets anything but `None` in this phase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactAuth {
+    #[default]
+    None,
+    DigestMatch,
+    SignatureChain,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -225,6 +245,8 @@ pub enum NotPerformed {
     PackageMetadataNotFound,
     NoPackageDetectorForTool,
     RecordToFileLinkage,
+    /// No digest or signature chain bound to the installed files was checked.
+    ArtifactAuthentication,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -239,6 +261,11 @@ pub struct Provenance {
     pub version: VersionState,
     pub version_trust: VersionTrust,
     pub signature_block: SignatureBlock,
+    /// The expected installed files/folder were seen on disk (existence only; their content was not authenticated).
+    pub installed_files_seen: bool,
+    pub artifact_auth: ArtifactAuth,
+    /// An earlier build stored a higher trust level than the evidence supports; it was lowered, not hidden.
+    pub reclassified: bool,
     pub not_performed: Vec<NotPerformed>,
 }
 
@@ -332,6 +359,10 @@ impl Observation {
         self.provenance.install_record = found;
         self
     }
+    pub fn installed_files_seen(mut self, seen: bool) -> Self {
+        self.provenance.installed_files_seen = seen;
+        self
+    }
     pub fn publisher(mut self, p: Publisher) -> Self {
         self.provenance.publisher = p;
         self
@@ -382,11 +413,20 @@ impl Observation {
         p.assessed = true;
         p.filename_detected = self.presence == Presence::Present
             && matches!(self.method, Method::PathExecutable | Method::NativeInstallLocation | Method::LegacyLocalInstall);
-        if p.identity == IdentityState::Validated && !(p.install_record && p.publisher == Publisher::Marketplace) {
+        // Trust can only be lowered here, never raised. `Validated` needs authenticated evidence bound to the installed
+        // artifact; `RecordCorroborated` needs a record, an installer-recorded marketplace and the files on disk.
+        let corroborated_ok = p.install_record && p.publisher == Publisher::Marketplace && p.installed_files_seen;
+        if p.identity == IdentityState::Validated && !(p.artifact_auth != ArtifactAuth::None && p.install_record) {
+            p.identity = IdentityState::RecordCorroborated;
+        }
+        if p.identity == IdentityState::RecordCorroborated && !corroborated_ok {
             p.identity = if p.install_record { IdentityState::EvidenceAvailable } else { IdentityState::Unknown };
         }
         if p.identity == IdentityState::EvidenceAvailable && !p.install_record && p.publisher == Publisher::None {
             p.identity = IdentityState::Unknown;
+        }
+        if p.version_trust == VersionTrust::Validated && p.artifact_auth == ArtifactAuth::None {
+            p.version_trust = VersionTrust::InstallerRecorded;
         }
         match (self.version.is_some(), p.version) {
             (true, VersionState::Conflicted) => {
@@ -410,6 +450,12 @@ impl Observation {
         }
         if p.filename_detected && p.version == VersionState::Unknown && !p.not_performed.contains(&NotPerformed::ActiveVersionProbe) {
             p.not_performed.push(NotPerformed::ActiveVersionProbe);
+        }
+        if (p.install_record || p.filename_detected)
+            && p.artifact_auth == ArtifactAuth::None
+            && !p.not_performed.contains(&NotPerformed::ArtifactAuthentication)
+        {
+            p.not_performed.push(NotPerformed::ArtifactAuthentication);
         }
         if p.filename_detected && !p.not_performed.contains(&NotPerformed::InstalledFileDigest) {
             p.not_performed.push(NotPerformed::InstalledFileDigest);

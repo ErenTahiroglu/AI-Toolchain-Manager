@@ -42,7 +42,7 @@ export const obs = (over: Partial<StoredObservation> = {}): StoredObservation =>
   observedAt: new Date().toISOString(), stale: false, ageHours: 0, legacy: false, scanFinishedAt: new Date().toISOString(),
   scanAuthorizedPath: true, scanAuthorizedUserConfig: false, scanAuthorizedProject: false, provenance: "latest_scan", latestScanChecked: true,
   current: true, notCurrentReason: null,
-  ladder: { assessed: true, filenameDetected: true, installRecord: false, publisher: "none", identity: "unknown", version: "unknown", versionTrust: "none", signatureBlock: "not_assessed", notPerformed: ["active_version_probe", "installed_file_digest", "no_package_detector_for_tool"] },
+  ladder: { assessed: true, filenameDetected: true, installRecord: false, publisher: "none", identity: "unknown", version: "unknown", versionTrust: "none", signatureBlock: "not_assessed", installedFilesSeen: false, artifactAuth: "none", reclassified: false, notPerformed: ["active_version_probe", "installed_file_digest", "no_package_detector_for_tool"] },
   ...over,
 });
 
@@ -91,7 +91,7 @@ export function createBackend(): Backend {
     ],
     nextEvaluation: { taskId: "t", phase: "start", recommendations: [], suppressed: [], disclaimer: "Hiçbir şey kurulmadı." },
     inventory: emptyInventory(),
-    backupPlan: { entries: [], preconditions: [], candidates: [], keep: [], deletionAvailable: false, executed: false, notes: ["Bu bir ÖNİZLEMEDİR: hiçbir yedek silinmedi, taşınmadı veya değiştirilmedi."] },
+    backupPlan: { entries: [], preconditions: [], examined: ["Tüm tablolardaki metin değerleri (örüntü taraması)"], notExamined: ["Hiçbir örüntüye uymayan kişisel metin taranamaz"], reviewCandidates: [], noViolationDetected: [], notAssessable: [], unrecognisedFiles: 0, deletionAvailable: false, executed: false, notes: ["Bu bir ÖNİZLEMEDİR: hiçbir yedek silinmedi, taşınmadı veya değiştirilmedi."] },
     async handle(cmd, args) {
       b.calls.push({ cmd, args });
       if (b.failures[cmd]) throw b.failures[cmd];

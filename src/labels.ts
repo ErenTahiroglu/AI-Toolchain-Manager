@@ -155,5 +155,14 @@ const NOT_PERFORMED: Record<string, string> = {
   package_metadata_not_found: "Programın yanında beklenen paket kaydı bulunamadı.",
   no_package_detector_for_tool: "Bu program için desteklenen bir paket yöneticisi kaydı okuyucusu yok (şu an yalnızca npm genel paketleri okunur).",
   record_to_file_linkage: "Paket kaydının PATH'teki dosyayla aynı kurulumdan geldiği doğrulanmadı.",
+  artifact_authentication: "Kurulu dosyanın içeriği (özet/imza) hiçbir bağımsız kanıtla doğrulanmadı; kayıtlar ve klasörler yerel olarak düzenlenebilir.",
 };
 export const notPerformedLabel = (s: string) => NOT_PERFORMED[s] ?? s;
+
+const BACKUP_STATUS: Record<string, string> = {
+  violations_observed: "İhlal gözlendi: incelenen içerikte özel yol veya gizli bilgi biçimi bulundu",
+  potentially_sensitive: "Eski kişisel bilgi taşıyabilir (şema 5'ten eski; gizlilik kuralları yokken yazıldı)",
+  none_detected_in_examined_content: "İncelenen içerikte ihlal bulunmadı (kişisel veri içermediği anlamına GELMEZ)",
+  not_assessable: "BİLİNMİYOR: açılamadı veya bozuk",
+};
+export const backupStatusLabel = (s: string) => BACKUP_STATUS[s] ?? s;

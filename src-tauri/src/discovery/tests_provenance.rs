@@ -5,7 +5,7 @@
 use super::*;
 use crate::discovery::{
     detect::{normalise_repo, pe_signature, CatalogPin},
-    types::{IdentityState, NotPerformed, Provenance, Publisher, SignatureBlock, VersionState, VersionTrust},
+    types::{ArtifactAuth, IdentityState, NotPerformed, Provenance, Publisher, SignatureBlock, VersionState, VersionTrust},
 };
 
 fn pins() -> Vec<CatalogPin> {
@@ -68,21 +68,84 @@ fn a_matching_file_name_is_detected_but_never_identity_or_version_or_function() 
 // ---- 2. Claude Code plugin records -------------------------------------------------------------------------------
 
 #[test]
-fn a_pinned_marketplace_plus_the_installers_own_record_validates_identity_and_gives_a_trusted_version() {
+fn a_matching_record_with_files_present_is_corroborated_metadata_never_validated_identity() {
     let env = Env::new();
     env.home_write(".claude/settings.json", &settings(&[(FD_KEY, true)]));
     env.home_write(".claude/plugins/installed_plugins.json", &registry(&[(FD_KEY, "user", "1.0.0")]));
     cache(&env, "claude-plugins-official", "frontend-design", "1.0.0");
     let obs = detect::detect_all(&env.roots(), &all_auth(None));
     let p = plugin(&obs, FD, Scope::Global);
-    assert_eq!(p.provenance.identity, IdentityState::Validated);
-    assert!(p.provenance.install_record && p.identity_verified);
+    assert_eq!(p.provenance.identity, IdentityState::RecordCorroborated);
+    assert!(!p.identity_verified, "identity_verified is reserved for authenticated artifact evidence");
+    assert!(p.provenance.install_record && p.provenance.installed_files_seen);
+    assert_eq!(p.provenance.artifact_auth, ArtifactAuth::None);
+    assert!(p.provenance.not_performed.contains(&NotPerformed::ArtifactAuthentication));
     assert_eq!(
         (p.provenance.publisher, p.provenance.version, p.provenance.version_trust),
-        (Publisher::Marketplace, VersionState::Known, VersionTrust::Trusted)
+        (Publisher::Marketplace, VersionState::Known, VersionTrust::InstallerRecorded)
     );
-    assert_eq!(p.version.as_deref(), Some("1.0.0"));
-    assert!(!p.functionality_tested, "validated identity says nothing about whether it works");
+    assert_eq!(p.version.as_deref(), Some("1.0.0"), "the installer-recorded version stays visible, labelled as a record's declaration");
+    assert!(p.limitations.iter().any(|l| l.contains("yerel olarak düzenlenebilir") && l.contains("doğrulanmadı")));
+    assert!(!p.functionality_tested);
+}
+
+#[test]
+fn a_forged_registry_record_without_any_installed_files_is_only_evidence() {
+    let env = Env::new();
+    env.home_write(".claude/settings.json", &settings(&[(FD_KEY, true)]));
+    env.home_write(".claude/plugins/installed_plugins.json", &registry(&[(FD_KEY, "user", "1.0.0")]));
+    // no cache folder at all: anyone can write this JSON
+    let obs = detect::detect_all(&env.roots(), &all_auth(None));
+    let p = plugin(&obs, FD, Scope::Global);
+    assert_eq!(p.provenance.identity, IdentityState::EvidenceAvailable);
+    assert!(!p.provenance.installed_files_seen && !p.identity_verified);
+    assert_ne!(p.presence, Presence::Present);
+    assert!(p.limitations.iter().any(|l| l.contains("dosyalar önbellekte görünmüyor")));
+}
+
+#[test]
+fn a_replaced_or_non_directory_cache_entry_never_raises_identity_and_nothing_reaches_validated() {
+    // The expected version folder replaced by a plain file.
+    let env = Env::new();
+    env.home_write(".claude/settings.json", &settings(&[(FD_KEY, true)]));
+    env.home_write(".claude/plugins/installed_plugins.json", &registry(&[(FD_KEY, "user", "1.0.0")]));
+    env.home_write(".claude/plugins/cache/claude-plugins-official/frontend-design/1.0.0", "i am a file, not an install");
+    let obs = detect::detect_all(&env.roots(), &all_auth(None));
+    let p = plugin(&obs, FD, Scope::Global);
+    assert_eq!(p.provenance.identity, IdentityState::EvidenceAvailable);
+    // Forged cache CONTENT: an arbitrary payload in the expected folder is still only corroborated metadata.
+    let env2 = Env::new();
+    env2.home_write(".claude/settings.json", &settings(&[(FD_KEY, true)]));
+    env2.home_write(".claude/plugins/installed_plugins.json", &registry(&[(FD_KEY, "user", "1.0.0")]));
+    env2.home_write(".claude/plugins/cache/claude-plugins-official/frontend-design/1.0.0/payload.js", "// attacker-controlled content");
+    let obs2 = detect::detect_all(&env2.roots(), &all_auth(None));
+    let p2 = plugin(&obs2, FD, Scope::Global);
+    assert_eq!(p2.provenance.identity, IdentityState::RecordCorroborated);
+    assert!(!p2.identity_verified && p2.provenance.artifact_auth == ArtifactAuth::None);
+    // Content swapped after the record was written: the next scan sees the same metadata and still claims nothing more.
+    fs::write(env2.home.join(".claude/plugins/cache/claude-plugins-official/frontend-design/1.0.0/payload.js"), "// swapped").unwrap();
+    let obs3 = detect::detect_all(&env2.roots(), &all_auth(None));
+    assert_eq!(plugin(&obs3, FD, Scope::Global).provenance.identity, IdentityState::RecordCorroborated);
+    for o in obs.iter().chain(obs2.iter()).chain(obs3.iter()) {
+        assert_ne!(o.provenance.identity, IdentityState::Validated, "{}", o.subject);
+        assert!(!o.identity_verified, "{}", o.subject);
+    }
+}
+
+#[test]
+fn duplicate_marketplace_names_and_look_alike_marketplaces_cannot_corroborate() {
+    let env = Env::new();
+    // "claude-plugins-official" appears twice with different cases / look-alike spellings; only the exact string counts.
+    for market in ["Claude-Plugins-Official", "claude-plugins-official-", "claude_plugins_official", "claude-plugins-officiaI"] {
+        let key = format!("frontend-design@{market}");
+        env.home_write(".claude/settings.json", &settings(&[(key.as_str(), true)]));
+        env.home_write(".claude/plugins/installed_plugins.json", &registry(&[(key.as_str(), "user", "1.0.0")]));
+        cache(&env, market, "frontend-design", "1.0.0");
+        let obs = detect::detect_all(&env.roots(), &all_auth(None));
+        let p = plugin(&obs, FD, Scope::Global);
+        assert_ne!(p.provenance.identity, IdentityState::RecordCorroborated, "{market}");
+        assert!(!p.identity_verified, "{market}");
+    }
 }
 
 #[test]
@@ -368,28 +431,46 @@ fn a_signature_block_is_metadata_only_and_never_raises_identity_or_adds_a_versio
 fn the_ladder_invariants_hold_whatever_a_detector_asks_for() {
     let base =
         || Observation::new("x-entry", platform(), "claude-code-terminal", Method::ClaudePluginDeclaration).presence(Presence::Present);
-    // validated without a record is downgraded
+    // "validated" without authenticated artifact evidence is lowered, even with a record and a marketplace publisher
     let a = base().identity_state(IdentityState::Validated).finalize();
     assert_eq!((a.provenance.identity, a.identity_verified), (IdentityState::Unknown, false));
-    // validated with a record but a self-declared publisher is downgraded
-    let b = base().identity_state(IdentityState::Validated).install_record(true).publisher(Publisher::SelfDeclared).finalize();
-    assert_eq!((b.provenance.identity, b.identity_verified), (IdentityState::EvidenceAvailable, false));
-    // record + marketplace keeps it
-    let c = base().identity_state(IdentityState::Validated).install_record(true).publisher(Publisher::Marketplace).finalize();
-    assert!(c.identity_verified && c.provenance.identity == IdentityState::Validated);
-    // evidence without any record or publisher is just unknown
-    let d = base().identity_state(IdentityState::EvidenceAvailable).finalize();
-    assert_eq!(d.provenance.identity, IdentityState::Unknown);
-    // a token-shaped version is dropped by the privacy gate, and the ladder follows
-    let e = base()
-        .version(Some("ghp_SENTINELSENTINELSENTINELSENTINEL12".into()), "Claude Code kurulum kaydı")
-        .version_state(VersionState::Known, VersionTrust::Trusted)
+    let b = base()
+        .identity_state(IdentityState::Validated)
+        .install_record(true)
+        .publisher(Publisher::Marketplace)
+        .installed_files_seen(true)
         .finalize();
-    assert_eq!((e.version.clone(), e.provenance.version, e.provenance.version_trust), (None, VersionState::Unknown, VersionTrust::None));
-    // a known version without a stated trust is only "declared"
-    let f = base().version(Some("1.2.3".into()), "npm paket kaydı").finalize();
-    assert_eq!((f.provenance.version, f.provenance.version_trust), (VersionState::Known, VersionTrust::Declared));
-    assert!(!f.functionality_tested);
+    assert_eq!(
+        (b.provenance.identity, b.identity_verified),
+        (IdentityState::RecordCorroborated, false),
+        "record + marketplace + files is still not authenticated"
+    );
+    // corroboration needs ALL of: record, installer-recorded marketplace, files on disk
+    let c = base().identity_state(IdentityState::RecordCorroborated).install_record(true).publisher(Publisher::Marketplace).finalize();
+    assert_eq!(c.provenance.identity, IdentityState::EvidenceAvailable, "no files seen");
+    let d = base()
+        .identity_state(IdentityState::RecordCorroborated)
+        .install_record(true)
+        .publisher(Publisher::SelfDeclared)
+        .installed_files_seen(true)
+        .finalize();
+    assert_eq!(d.provenance.identity, IdentityState::EvidenceAvailable, "self-declared publisher");
+    let e = base().identity_state(IdentityState::RecordCorroborated).finalize();
+    assert_eq!(e.provenance.identity, IdentityState::Unknown);
+    // evidence without any record or publisher is just unknown
+    assert_eq!(base().identity_state(IdentityState::EvidenceAvailable).finalize().provenance.identity, IdentityState::Unknown);
+    // a token-shaped version is dropped by the privacy gate, and the ladder follows
+    let f = base()
+        .version(Some("ghp_SENTINELSENTINELSENTINELSENTINEL12".into()), "Claude Code kurulum kaydı")
+        .version_state(VersionState::Known, VersionTrust::InstallerRecorded)
+        .finalize();
+    assert_eq!((f.version.clone(), f.provenance.version, f.provenance.version_trust), (None, VersionState::Unknown, VersionTrust::None));
+    // a known version without a stated trust is only "declared"; "validated" trust needs artifact authentication
+    let g = base().version(Some("1.2.3".into()), "npm paket kaydı").finalize();
+    assert_eq!((g.provenance.version, g.provenance.version_trust), (VersionState::Known, VersionTrust::Declared));
+    let h = base().version(Some("1.2.3".into()), "npm paket kaydı").version_state(VersionState::Known, VersionTrust::Validated).finalize();
+    assert_eq!(h.provenance.version_trust, VersionTrust::InstallerRecorded);
+    assert!(!h.functionality_tested);
 }
 
 #[test]
@@ -414,17 +495,19 @@ fn the_ladder_is_persisted_and_survives_staleness_and_a_restart() {
     assert!(p.stale && !p.current, "stale is a separate fact");
     assert_eq!(
         (p.ladder.identity, p.ladder.install_record, p.ladder.assessed),
-        (IdentityState::Validated, true, true),
+        (IdentityState::RecordCorroborated, true, true),
         "the ladder is kept, only its currentness is lost"
     );
     assert!(!p.functionality_tested);
     let identity_state: String =
         conn.query_row("SELECT identity_state FROM discovery_observations WHERE id = ?1", [p.id], |r| r.get(0)).unwrap();
-    assert_eq!(identity_state, "validated");
+    assert_eq!(identity_state, "record_corroborated");
+    let verified: i64 = conn.query_row("SELECT identity_verified FROM discovery_observations WHERE id = ?1", [p.id], |r| r.get(0)).unwrap();
+    assert_eq!(verified, 0);
 }
 
 #[test]
-fn migration_6_preserves_everything_marks_legacy_ladders_as_not_assessed_and_keeps_accepted_identities() {
+fn migrations_6_and_7_preserve_every_fact_mark_legacy_ladders_not_assessed_and_lower_old_high_trust() {
     let mut conn = Connection::open_in_memory().unwrap();
     super::privacy_gate::legacy_v4_database(&mut conn);
     // Step to v5 exactly as shipped, then plant a row the Phase 2A rules had accepted as an identity.
@@ -446,7 +529,7 @@ fn migration_6_preserves_everything_marks_legacy_ladders_as_not_assessed_and_kee
     conn.execute("UPDATE discovery_observations SET identity_verified = 1 WHERE subject = 'anthropic-frontend-design'", []).unwrap();
     let facts = |c: &Connection| -> Vec<String> {
         let mut s = c
-            .prepare("SELECT id, scan_id, subject, presence, configuration, version, scope, project_alias, identity_verified, observed_at, evidence, location FROM discovery_observations ORDER BY id")
+            .prepare("SELECT id, scan_id, subject, presence, configuration, version, scope, project_alias, observed_at, evidence, location FROM discovery_observations ORDER BY id")
             .unwrap();
         let n = s.column_count();
         s.query_map([], |r| (0..n).map(|i| r.get::<_, rusqlite::types::Value>(i).map(|v| format!("{v:?}"))).collect::<Result<Vec<_>, _>>())
@@ -466,9 +549,17 @@ fn migration_6_preserves_everything_marks_legacy_ladders_as_not_assessed_and_kee
     assert!(inv.observations.iter().all(|o| !o.ladder.assessed), "legacy rows were never assessed under Phase 2B rules");
     let fd = inv.observations.iter().find(|o| o.subject == "anthropic-frontend-design").unwrap();
     assert_eq!(
-        (fd.ladder.identity, fd.ladder.version),
-        (IdentityState::Validated, VersionState::Known),
-        "an identity and a version Phase 2A showed stay represented"
+        (fd.ladder.identity, fd.ladder.version, fd.ladder.reclassified),
+        (IdentityState::NotAssessed, VersionState::Known, true),
+        "a Phase 2A boolean is lowered and flagged, never silently upcast; the shown version stays"
+    );
+    assert!(!fd.identity_verified);
+    assert_eq!(
+        table_text(
+            &conn,
+            "SELECT identity_verified, identity_state FROM discovery_observations WHERE subject = 'anthropic-frontend-design'"
+        )[0],
+        "Integer(0)|Text(\"not_assessed\")"
     );
     let g = inv.observations.iter().find(|o| o.subject == "gitleaks").unwrap();
     assert_eq!((g.ladder.identity, g.ladder.version), (IdentityState::NotAssessed, VersionState::Unknown));
@@ -537,4 +628,125 @@ fn discovery_never_runs_anything_to_learn_a_version() {
     assert_eq!(path_obs(&obs, "gitleaks").presence, Presence::Present);
     assert!(!marker.exists(), "a discovered program must never be started");
     assert!(obs.iter().all(|o| o.version.is_none() || o.version_source.is_some()));
+}
+
+/// The first six migrations exactly as shipped (used to build a database as an earlier build left it).
+fn migrations_up_to_6() -> Vec<db::Migration> {
+    vec![
+        db::Migration::Sql(include_str!("../../migrations/0001_init.sql")),
+        db::Migration::Rust(|tx| {
+            tx.execute_batch(include_str!("../../migrations/0002_catalog_registry.sql"))?;
+            crate::catalog::migrate_phase1a_data(tx)
+        }),
+        db::Migration::Sql(include_str!("../../migrations/0003_scoped_suggestion_log.sql")),
+        db::Migration::Sql(include_str!("../../migrations/0004_discovery.sql")),
+        db::Migration::Rust(|tx| {
+            tx.execute_batch(include_str!("../../migrations/0005_discovery_privacy.sql"))?;
+            crate::discovery::store::scrub_legacy_observations(tx)
+        }),
+        db::Migration::Sql(include_str!("../../migrations/0006_passive_provenance.sql")),
+    ]
+}
+
+#[test]
+fn migration_7_lowers_what_the_first_phase_2b_build_stored_and_keeps_ids_history_and_the_audit_chain() {
+    let mut conn = Connection::open_in_memory().unwrap();
+    super::privacy_gate::legacy_v4_database(&mut conn);
+    db::migrate_with(&mut conn, &migrations_up_to_6()).unwrap();
+    assert_eq!(db::user_version(&conn).unwrap(), 6);
+    // Rows exactly as the first Phase 2B build wrote them: "validated" from a registry record alone, trust "trusted".
+    let old_ladder = |identity: &str, trust: &str| {
+        format!("{{\"assessed\":true,\"filenameDetected\":false,\"installRecord\":true,\"publisher\":\"marketplace\",\"identity\":\"{identity}\",\"version\":\"known\",\"versionTrust\":\"{trust}\",\"signatureBlock\":\"not_assessed\",\"notPerformed\":[]}}")
+    };
+    conn.execute("INSERT INTO discovery_scans VALUES ('s-2b', '2026-10-17T10:00:00Z', '2026-10-17T10:00:00Z', 'windows-x64', 0, 1, 0, 'completed', 3)", []).unwrap();
+    for (subject, verified, state, json) in [
+        ("anthropic-frontend-design", 1, "validated", old_ladder("validated", "trusted")),
+        ("superpowers", 0, "evidence_available", old_ladder("evidence_available", "trusted")),
+        ("caveman", 1, "validated", old_ladder("validated", "trusted")),
+    ] {
+        conn.execute(
+            "INSERT INTO discovery_observations (scan_id, subject, platform_target, agent_surface, method, presence, configuration, version, version_source, scope,
+              confidence, evidence, limitations_json, identity_verified, functionality_tested, observed_at, record_version, identity_state, version_state, provenance_json)
+             VALUES ('s-2b', ?1, 'windows-x64', 'claude-code-terminal', 'claude-plugin-declaration', 'present', 'configured', '1.0.0', 'Claude Code kurulum kaydı', 'global',
+              'high', 'Eklenti kayıt defterinde.', '[]', ?2, 0, '2026-10-17T10:00:00Z', 2, ?3, 'known', ?4)",
+            rusqlite::params![subject, verified, state, json],
+        )
+        .unwrap();
+    }
+    let top: i64 = conn.query_row("SELECT max(id) FROM discovery_observations", [], |r| r.get(0)).unwrap();
+    conn.execute("DELETE FROM discovery_observations WHERE id = ?1", [top]).unwrap(); // AUTOINCREMENT high-water mark is now above max(id)
+    let facts = "SELECT id, scan_id, subject, presence, configuration, version, version_source, scope, confidence, evidence, observed_at FROM discovery_observations ORDER BY id";
+    let before = table_text(&conn, facts);
+    let prefs = table_text(&conn, "SELECT * FROM project_preferences ORDER BY 1,2,3,4");
+    let audit_count: i64 = conn.query_row("SELECT count(*) FROM audit_events", [], |r| r.get(0)).unwrap();
+
+    db::migrate(&mut conn).unwrap();
+    assert_eq!(db::user_version(&conn).unwrap(), db::LATEST_VERSION);
+    assert_eq!(table_text(&conn, facts), before, "ids and every observed fact are preserved by the table rebuild");
+    assert_eq!(table_text(&conn, "SELECT * FROM project_preferences ORDER BY 1,2,3,4"), prefs);
+    assert_eq!(conn.query_row("SELECT count(*) FROM audit_events", [], |r| r.get::<_, i64>(0)).unwrap(), audit_count);
+    assert!(audit::verify(&conn).unwrap().ok);
+    assert_eq!(
+        table_text(&conn, "SELECT count(*) FROM discovery_observations WHERE identity_state = 'validated' OR identity_verified = 1"),
+        vec!["Integer(0)".to_string()],
+        "nothing is stored as validated / verified any more"
+    );
+    let fd = table_text(&conn, "SELECT identity_state, identity_verified, provenance_json FROM discovery_observations WHERE subject = 'anthropic-frontend-design' AND scan_id = 's-2b'");
+    assert!(
+        fd[0].contains("evidence_available")
+            && fd[0].contains("reclassified")
+            && fd[0].contains("installer_recorded")
+            && !fd[0].contains("trusted"),
+        "{fd:?}"
+    );
+    let sp = table_text(
+        &conn,
+        "SELECT identity_state, provenance_json FROM discovery_observations WHERE subject = 'superpowers' AND scan_id = 's-2b'",
+    );
+    assert!(
+        sp[0].contains("evidence_available") && sp[0].contains("installer_recorded") && !sp[0].contains("reclassified"),
+        "an already-modest state is only renamed: {sp:?}"
+    );
+    let inv = store::inventory(&conn).unwrap();
+    assert!(inv.observations.iter().all(|o| !o.identity_verified && o.ladder.identity != IdentityState::Validated));
+    let lowered = inv.observations.iter().find(|o| o.subject == "anthropic-frontend-design" && o.scan_id == "s-2b").unwrap();
+    assert!(lowered.ladder.reclassified && lowered.ladder.version_trust == VersionTrust::InstallerRecorded);
+    let note: String = conn.query_row("SELECT detail FROM diagnostics WHERE code = 'DISCOVERY_TRUST_LOWERED'", [], |r| r.get(0)).unwrap();
+    assert!(!note.contains("OtherUser"));
+    // the AUTOINCREMENT high-water mark survived: a new row never reuses the deleted id
+    let env = Env::new();
+    crate::discovery::run_scan(&conn, &env.roots(), &all_auth(None)).unwrap();
+    let new_min: i64 = conn
+        .query_row("SELECT min(id) FROM discovery_observations WHERE scan_id NOT IN ('s-2b', 'legacy-scan-1', 'legacy-scan-2')", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert!(new_min > top, "{new_min} must exceed the old high-water mark {top}");
+    db::migrate(&mut conn).unwrap(); // idempotent
+    assert_eq!(
+        table_text(&conn, "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'discovery_observations_key'"),
+        vec!["Integer(1)".to_string()],
+        "the index was recreated"
+    );
+}
+
+#[test]
+fn a_failed_migration_7_rolls_back_to_the_untouched_v6_database() {
+    fn broken(tx: &rusqlite::Transaction) -> crate::error::AppResult<()> {
+        tx.execute_batch(include_str!("../../migrations/0007_identity_taxonomy.sql"))?;
+        Err(crate::error::AppError::new("INJECTED_FAILURE", "crash after the rebuild"))
+    }
+    let mut v6 = Connection::open_in_memory().unwrap();
+    super::privacy_gate::legacy_v4_database(&mut v6);
+    let mut list = migrations_up_to_6();
+    db::migrate_with(&mut v6, &list).unwrap();
+    let before = table_text(&v6, "SELECT * FROM discovery_observations ORDER BY id");
+    list.push(db::Migration::Rust(broken));
+    assert_eq!(db::migrate_with(&mut v6, &list).unwrap_err().code, "INJECTED_FAILURE");
+    assert_eq!(db::user_version(&v6).unwrap(), 6);
+    assert_eq!(table_text(&v6, "SELECT * FROM discovery_observations ORDER BY id"), before);
+    assert_eq!(
+        table_text(&v6, "SELECT count(*) FROM sqlite_master WHERE name = 'discovery_observations_v7'"),
+        vec!["Integer(0)".to_string()]
+    );
 }

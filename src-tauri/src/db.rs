@@ -21,12 +21,25 @@ fn migrate_5(tx: &Transaction) -> AppResult<()> {
     crate::discovery::store::scrub_legacy_observations(tx)
 }
 
+fn migrate_7(tx: &Transaction) -> AppResult<()> {
+    // AUTOINCREMENT's high-water mark must survive the rebuild so that an id is never reused.
+    let seq: Option<i64> = tx.query_row("SELECT seq FROM sqlite_sequence WHERE name = 'discovery_observations'", [], |r| r.get(0)).ok();
+    tx.execute_batch(include_str!("../migrations/0007_identity_taxonomy.sql"))?;
+    if let Some(seq) = seq {
+        tx.execute("DELETE FROM sqlite_sequence WHERE name = 'discovery_observations'", [])?;
+        tx.execute("INSERT INTO sqlite_sequence (name, seq) VALUES ('discovery_observations', ?1)", [seq])?;
+    }
+    crate::discovery::store::reclassify_legacy_trust(tx)
+}
+
 /// Ordered, append-only list of migrations. Index + 1 == `PRAGMA user_version` after applying it.
 /// 1 = Phase 1A foundation. 2 = Phase 1B registry (additive; copies Phase 1A data, then freezes the legacy tables).
 /// 3 = Phase 1B closure: project-scoped suggestion log, immutable classification of user-added entries.
 /// 4 = Phase 2A: local read-only discovery scans and observations (additive).
 /// 5 = Phase 2A closure: `record_version` column and in-place privacy scrub of legacy observation rows.
 /// 6 = Phase 2B: passive provenance ladder columns on discovery observations (additive).
+/// 7 = Phase 2B closure: identity taxonomy (`record_corroborated`; `validated` reserved) and in-place lowering of
+///     high-trust values stored by earlier builds. Table rebuild; every row and id is preserved.
 const MIGRATIONS: &[Migration] = &[
     Migration::Sql(include_str!("../migrations/0001_init.sql")),
     Migration::Rust(migrate_2),
@@ -34,6 +47,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Sql(include_str!("../migrations/0004_discovery.sql")),
     Migration::Rust(migrate_5),
     Migration::Sql(include_str!("../migrations/0006_passive_provenance.sql")),
+    Migration::Rust(migrate_7),
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

@@ -59,7 +59,7 @@ export default function App() {
             </li>
           ))}
         </ul>
-        <p className="phase small">Faz 2A · salt okunur envanter (kurulum yok)</p>
+        <p className="phase small">Faz 2B · salt okunur envanter ve pasif kanıt (kurulum yok)</p>
       </nav>
       <main id="main" className="content">
         {info.data?.degraded && (

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { api, toAppError } from "../api";
 import { ErrorNotice, useLoad } from "../components/common";
 import {
-  configurationLabel, confidenceLabel, formatTime, methodLabel, notPerformedLabel, obsScopeLabel, observedLabel, platformLabel, presenceLabel, subjectLabel, surfaceLabel,
+  backupStatusLabel, configurationLabel, confidenceLabel, formatTime, methodLabel, notPerformedLabel, obsScopeLabel, observedLabel, platformLabel, presenceLabel, subjectLabel, surfaceLabel,
 } from "../labels";
 import type { AppError, CleanupPlan, ScanRef, StoredObservation } from "../types";
 
@@ -34,19 +34,31 @@ type Step = { key: string; yes: boolean | null; text: string };
 /** Each conclusion is one line; none of them is green, and "functionality" is always untested. */
 function ladderSteps(o: StoredObservation): Step[] {
   const l = o.ladder;
+  // A version is always labelled with WHO says so; nothing here is an independently validated version.
   const versionText =
     l.version === "known"
-      ? `Sürüm biliniyor (${l.versionTrust === "trusted" ? "kurulum kaydından" : "paketin kendi beyanından"})`
+      ? l.versionTrust === "validated"
+        ? "Sürüm bağımsız olarak doğrulandı"
+        : `Sürüm biliniyor (${l.versionTrust === "installer_recorded" ? "yerel kurulum kaydının beyanı" : "paketin kendi beyanı"}; doğrulanmadı)`
       : l.version === "conflicted" ? "Sürüm çelişkili" : "Sürüm bilinmiyor";
   return [
     { key: "detected", yes: o.presence === "present", text: o.presence === "present" ? "Tespit edildi" : "Tespit edilmedi" },
     { key: "configured", yes: o.configuration === "configured", text: o.configuration === "configured" ? "Yapılandırılmış" : "Yapılandırma kanıtı yok" },
     {
       key: "evidence",
-      yes: l.identity === "evidence_available" || l.identity === "validated",
-      text: l.identity === "evidence_available" || l.identity === "validated" ? "Kimlik kanıtı mevcut" : "Kimlik kanıtı yok",
+      yes: l.identity === "evidence_available" || l.identity === "record_corroborated" || l.identity === "validated",
+      text: l.identity === "evidence_available" || l.identity === "record_corroborated" || l.identity === "validated" ? "Kimlik kanıtı mevcut" : "Kimlik kanıtı yok",
     },
-    { key: "validated", yes: l.identity === "validated", text: l.identity === "validated" ? "Kimlik doğrulandı (kayıt + sabitlenmiş kaynak)" : "Kimlik doğrulanmadı" },
+    // Partial corroboration is shown as exactly that: a local record that matches, not an authenticated identity.
+    ...(l.identity === "record_corroborated"
+      ? [{ key: "corroborated", yes: null, text: "Kurulum kaydı katalogla uyuşuyor ve dosyalar görünüyor (yerel, düzenlenebilir kayıt; kurulu içerik doğrulanmadı)" } as Step]
+      : []),
+    {
+      key: "validated",
+      yes: l.identity === "validated",
+      text: l.identity === "validated" ? "Kimlik doğrulandı (kurulu dosyaya bağlı bağımsız kanıt)" : "Kimlik doğrulanmadı",
+    },
+    ...(l.reclassified ? [{ key: "reclassified", yes: null, text: "Önceki sürümde daha yüksek güvenle kaydedilmişti; kanıtı yetersiz olduğu için düşürüldü" } as Step] : []),
     { key: "version", yes: l.version === "known", text: versionText },
     { key: "function", yes: false, text: "İşlev test edilmedi" },
     ...(l.identity === "conflicted" || l.version === "conflicted" ? [{ key: "conflict", yes: null, text: "Çelişkili gözlemler var" } as Step] : []),
@@ -158,25 +170,36 @@ function BackupPanel() {
       <h2 id="h-backups">Yedekler ve gizlilik</h2>
       <p className="small">
         Veritabanı güncellenmeden önce geri dönüş için bir yedek alınır. Yedek, o andaki verinin birebir kopyasıdır; eski sürümler tam klasör yollarını veya sunucu adlarını
-        saklamış olabilir ve bu kopyalar gizlilik düzeltmesinden sonra da <strong>olduğu gibi kalır</strong>. Aşağıdaki düğme yalnızca bakar: hiçbir şeyi silmez, taşımaz veya değiştirmez.
+        saklamış olabilir ve bu kopyalar gizlilik düzeltmesinden sonra da <strong>olduğu gibi kalır</strong>. Aşağıdaki düğme yalnızca bakar: hiçbir şeyi silmez, taşımaz, değiştirmez veya göndermez.
       </p>
       <p><button type="button" onClick={look} disabled={busy}>Yedekleri incele</button></p>
       {error && <ErrorNotice error={error} />}
       {plan && (
         <div aria-live="polite">
+          <p className="small"><strong>Bu tarama bir örüntü taramasıdır.</strong> “İhlal bulunmadı”, yedeğin kişisel veri içermediği veya silinmesinin güvenli olduğu anlamına gelmez.</p>
+          <details>
+            <summary className="small">Neler incelendi, neler incelenmedi?</summary>
+            <p className="small"><strong>İncelenen:</strong></p>
+            <ul className="small">{plan.examined.map((x) => <li key={x}>{x}</li>)}</ul>
+            <p className="small"><strong>İncelenmeyen:</strong></p>
+            <ul className="small">{plan.notExamined.map((x) => <li key={x}>{x}</li>)}</ul>
+          </details>
           {plan.entries.length === 0 ? <p>Kayıtlı yedek yok.</p> : (
             <div className="table-wrap">
               <table>
                 <caption className="sr-only">Veritabanı yedekleri</caption>
-                <thead><tr><th scope="col">Yedek</th><th scope="col">Şema</th><th scope="col">Boyut</th><th scope="col">Eski kişisel bilgi taşıyabilir mi?</th></tr></thead>
+                <thead><tr><th scope="col">Yedek</th><th scope="col">Şema</th><th scope="col">Boyut</th><th scope="col">Gizlilik durumu</th><th scope="col">Bulgular (yalnızca sayı)</th></tr></thead>
                 <tbody>
                   {plan.entries.map((e) => (
                     <tr key={e.fileName}>
                       <th scope="row" className="small">{e.fileName}</th>
                       <td className="small">v{e.schemaVersion ?? "?"}</td>
                       <td className="small">{Math.max(1, Math.round(e.sizeBytes / 1024))} KB</td>
+                      <td className="small">{backupStatusLabel(e.privacyStatus)}</td>
                       <td className="small">
-                        {e.mayHoldOldPersonalData === "yes" ? `Evet (${e.rowsFailingPrivacyGate} kayıt)` : e.mayHoldOldPersonalData === "no" ? "Bulunmadı" : "Bilinmiyor (açılamadı)"}
+                        Gözlem tablosu: {e.observationRowsFailingGate === null ? "incelenemedi" : e.observationRowsFailingGate} · Diğer metin bulgusu: {e.otherTextFindings}
+                        {e.tablesWithFindings.length > 0 && <> (tablo: {e.tablesWithFindings.join(", ")})</>} · Ham dosyada yol biçimi: {e.rawPathLikeMatches}
+                        {e.hasWalSidecar && <> · -wal dosyası var</>}
                       </td>
                     </tr>
                   ))}

@@ -720,14 +720,17 @@ fn plugin_observation(
             Declared::NotListed => Configuration::NotConfigured,
         },
     };
-    // Provenance: a settings declaration is configuration, not provenance. Identity is "validated" only when the
-    // installer's own record exists AND the marketplace is the one the catalog pins; sources that disagree are a conflict.
+    // Provenance: a settings declaration is configuration, not provenance. The registry and the cache folder are
+    // user-writable, so even a matching record WITH files on disk is only "record corroborated" — never "validated",
+    // which is reserved for authenticated evidence bound to the installed artifact (none exists in this phase). A
+    // record without installed files is only evidence; sources that disagree are a conflict.
     let has_record = matches!(fetch, Fetch::Fetched { .. } | Fetch::RecordOnly);
+    let files_seen = matches!(fetch, Fetch::Fetched { .. });
     let pinned = t.marketplace.is_some();
     let identity_state = if info.other_marketplace && (has_record || info.exact != Declared::NotListed) {
         IdentityState::Conflicted
-    } else if pinned && has_record {
-        IdentityState::Validated
+    } else if pinned && files_seen {
+        IdentityState::RecordCorroborated
     } else if has_record {
         IdentityState::EvidenceAvailable
     } else if matches!(registry, Registry::NotLoaded) {
@@ -735,7 +738,7 @@ fn plugin_observation(
     } else {
         IdentityState::Unknown
     };
-    let identity = identity_state == IdentityState::Validated;
+    let identity = identity_state == IdentityState::RecordCorroborated;
     let (version, version_conflict) = match &fetch {
         Fetch::Fetched { version, conflict } => (version.clone(), *conflict),
         _ => (None, false),
@@ -776,6 +779,7 @@ fn plugin_observation(
         .project(project_alias)
         .identity_state(identity_state)
         .install_record(has_record)
+        .installed_files_seen(files_seen)
         .publisher(if has_record && pinned {
             Publisher::Marketplace
         } else if has_record {
@@ -784,7 +788,7 @@ fn plugin_observation(
             Publisher::None
         })
         .version(version, "Claude Code kurulum kaydı")
-        .version_state(if version_conflict { VersionState::Conflicted } else { VersionState::Unknown }, VersionTrust::Trusted)
+        .version_state(if version_conflict { VersionState::Conflicted } else { VersionState::Unknown }, VersionTrust::InstallerRecorded)
         .evidence(evidence)
         .limit("Çalışan bir Claude Code oturumunda yüklü olup olmadığı bilinmiyor; işlev test edilmedi.");
     if t.marketplace.is_none() {
@@ -792,6 +796,11 @@ fn plugin_observation(
     }
     if version_conflict {
         obs = obs.limit("Kurulum kayıtları birbiriyle çelişen sürümler bildiriyor; sürüm gösterilmedi.");
+    }
+    if identity_state == IdentityState::RecordCorroborated {
+        obs = obs.limit("Kurulum kaydı katalogdaki pazar yeriyle uyuşuyor ve dosyalar önbellekte görünüyor; kayıt ve klasör yerel olarak düzenlenebilir ve kurulu içeriğin kimliği (özet/imza) doğrulanmadı.");
+    } else if has_record && !files_seen {
+        obs = obs.limit("Kurulum kaydı var ama kurulu dosyalar önbellekte görünmüyor; kayıt tek başına kimlik kanıtı sayılmaz.");
     }
     if identity_state == IdentityState::Conflicted {
         obs = obs.limit("Aynı eklenti adı için birbiriyle uyuşmayan kaynaklar var; kimlik çelişkili sayıldı.");

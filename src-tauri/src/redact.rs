@@ -28,6 +28,12 @@ fn rules() -> &'static Vec<(Regex, &'static str)> {
     })
 }
 
+/// Does the text contain anything the redactor would remove (a token, credential, e-mail address or private path)?
+/// Detection only: nothing is changed or returned. Best effort, not proof that no private text is present.
+pub fn has_sensitive_shape(text: &str) -> bool {
+    rules().iter().any(|(re, _)| re.is_match(text))
+}
+
 /// Redact, strip control characters and cap the length (in characters).
 pub fn sanitize(input: &str, max_chars: usize) -> String {
     let mut text: String = input.chars().map(|c| if c.is_control() && c != ' ' { ' ' } else { c }).collect();

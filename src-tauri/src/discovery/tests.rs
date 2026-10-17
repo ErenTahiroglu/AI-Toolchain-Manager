@@ -224,7 +224,8 @@ fn an_official_plugin_that_is_declared_recorded_and_cached_is_present_and_config
     assert_eq!((p.presence, p.configuration, p.confidence), (Presence::Present, Configuration::Configured, Confidence::High));
     assert_eq!(p.version.as_deref(), Some("1.2.3"));
     assert_eq!(p.version_source.as_deref(), Some("Claude Code kurulum kaydı"));
-    assert!(p.identity_verified, "exact plugin@marketplace identity matched");
+    assert!(!p.identity_verified, "a matching local record is corroborated metadata, not authenticated identity (Phase 2B closure)");
+    assert_eq!(p.provenance.identity, crate::discovery::types::IdentityState::RecordCorroborated);
     assert!(!p.functionality_tested);
     assert!(p.limitations.iter().any(|l| l.contains("Çalışan bir Claude Code oturumunda")), "the loaded stage is never claimed");
 }

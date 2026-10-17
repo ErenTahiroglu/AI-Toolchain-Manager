@@ -192,6 +192,56 @@ pub fn scrub_legacy_observations(tx: &Connection) -> AppResult<()> {
     Ok(())
 }
 
+/// Migration 7: lowers every high-trust value an earlier build stored. Observation facts, scans and ids are untouched.
+/// * A Phase 2A row that was `identity_verified = 1` (no provenance ladder) becomes `not_assessed` + `reclassified`.
+/// * A Phase 2B row recorded as `validated` becomes `evidence_available` + `reclassified` (whether the installed
+///   files were present cannot be known from the stored data, so the corroborated state is not guessed).
+/// * `versionTrust: "trusted"` is renamed `installer_recorded` (a local record's declaration, not a verified fact).
+pub fn reclassify_legacy_trust(tx: &Connection) -> AppResult<()> {
+    let rows: Vec<(i64, i64, String, String)> = {
+        let mut stmt = tx.prepare(
+            "SELECT id, identity_verified, identity_state, provenance_json FROM discovery_observations
+             WHERE identity_verified = 1 OR identity_state = 'validated' OR provenance_json LIKE '%\"trusted\"%'",
+        )?;
+        let mapped = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+        mapped.collect::<Result<Vec<_>, _>>()?
+    };
+    let mut lowered = 0usize;
+    for (id, verified, state, json) in rows {
+        let mut doc: serde_json::Value = serde_json::from_str(&json).unwrap_or(serde_json::json!({}));
+        let assessed = doc.get("assessed").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        let mut new_state = state.clone();
+        if state == "validated" || verified == 1 {
+            lowered += 1;
+            if assessed {
+                new_state = "evidence_available".to_string();
+                doc["identity"] = serde_json::json!("evidence_available");
+            } else {
+                new_state = "not_assessed".to_string();
+            }
+            doc["reclassified"] = serde_json::json!(true);
+        }
+        if doc.get("versionTrust").and_then(serde_json::Value::as_str) == Some("trusted") {
+            doc["versionTrust"] = serde_json::json!("installer_recorded");
+        }
+        let new_json = if doc.as_object().map(|o| o.is_empty()).unwrap_or(true) { "{}".to_string() } else { serde_json::to_string(&doc)? };
+        tx.execute(
+            "UPDATE discovery_observations SET identity_state = ?2, identity_verified = 0, provenance_json = ?3 WHERE id = ?1",
+            rusqlite::params![id, new_state, new_json],
+        )?;
+    }
+    if lowered > 0 {
+        diagnostics::log(
+            tx,
+            "info",
+            "discovery",
+            "DISCOVERY_TRUST_LOWERED",
+            &format!("{lowered} gözlemin kimlik güven düzeyi, doğrulanmış kanıta dayanmadığı için düşürüldü."),
+        )?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredObservation {
@@ -301,17 +351,24 @@ fn last_scan(conn: &Connection) -> AppResult<Option<ScanSummary>> {
         .optional()?)
 }
 
-/// Parses the stored ladder. Unreadable or legacy (`{}`) content is "not assessed"; the identity and version columns
-/// (which migration 6 filled from Phase 2A facts) still show through. Unknown enum text never survives parsing.
+/// Parses the stored ladder and applies today's trust rules to it. A higher state written by an earlier build
+/// (`validated` without authenticated evidence bound to the installed artifact) is lowered and flagged
+/// `reclassified`, never silently kept. Unreadable or pre-2B (`{}`) content is "not assessed".
 fn stored_provenance(json: &str, identity: &str, version: &str) -> Provenance {
     let mut p = serde_json::from_str::<Provenance>(json).unwrap_or_default();
     if !p.assessed {
+        let was = p.reclassified;
         p = Provenance::default();
-        p.identity = match identity {
-            "validated" => IdentityState::Validated,
-            _ => IdentityState::NotAssessed,
-        };
+        p.reclassified = was || identity == "validated";
         p.version = if version == "known" { VersionState::Known } else { VersionState::Unknown };
+        return p;
+    }
+    if p.identity == IdentityState::Validated && p.artifact_auth == super::types::ArtifactAuth::None {
+        p.identity = if p.install_record { IdentityState::EvidenceAvailable } else { IdentityState::Unknown };
+        p.reclassified = true;
+    }
+    if p.version_trust == super::types::VersionTrust::Validated && p.artifact_auth == super::types::ArtifactAuth::None {
+        p.version_trust = super::types::VersionTrust::InstallerRecorded;
     }
     p
 }
@@ -440,7 +497,7 @@ pub fn latest_observations(conn: &Connection) -> AppResult<Vec<StoredObservation
             evidence: r.get(13)?,
             location: r.get(14)?,
             limitations: serde_json::from_str(&limitations).unwrap_or_default(),
-            identity_verified: r.get::<_, i64>(16)? == 1,
+            identity_verified: false, // derived from the ladder below, never trusted from the column
             functionality_tested: r.get::<_, i64>(17)? == 1,
             observed_at,
             stale: age >= STALE_AFTER_HOURS,
@@ -459,6 +516,7 @@ pub fn latest_observations(conn: &Connection) -> AppResult<Vec<StoredObservation
     })?;
     let mut out = rows.collect::<Result<Vec<_>, _>>()?;
     for o in &mut out {
+        o.identity_verified = o.ladder.identity == IdentityState::Validated;
         sanitize_on_read(o);
         match &last {
             Some(l) => {

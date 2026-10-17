@@ -294,10 +294,11 @@ export interface StoredObservation {
   ladder: Ladder;
 }
 
-export type IdentityState = "not_assessed" | "unknown" | "evidence_available" | "validated" | "conflicted";
+// "validated" is RESERVED for authenticated evidence bound to the installed artifact; no detector produces it yet.
+export type IdentityState = "not_assessed" | "unknown" | "evidence_available" | "record_corroborated" | "validated" | "conflicted";
 export type NotPerformed =
   | "active_version_probe" | "signature_chain_validation" | "signature_parsing_unsupported" | "installed_file_digest"
-  | "package_metadata_not_found" | "no_package_detector_for_tool" | "record_to_file_linkage";
+  | "package_metadata_not_found" | "no_package_detector_for_tool" | "record_to_file_linkage" | "artifact_authentication";
 
 /** The Phase 2B evidence ladder. `assessed` is false for rows written before it existed. */
 export interface Ladder {
@@ -307,25 +308,41 @@ export interface Ladder {
   publisher: "none" | "self_declared" | "marketplace";
   identity: IdentityState;
   version: "unknown" | "known" | "conflicted";
-  versionTrust: "none" | "declared" | "trusted";
+  versionTrust: "none" | "declared" | "installer_recorded" | "validated";
   signatureBlock: "not_assessed" | "absent" | "present_unvalidated" | "unreadable";
+  installedFilesSeen: boolean;
+  artifactAuth: "none" | "digest_match" | "signature_chain";
+  /** An earlier build stored a higher trust level than the evidence supports; it was lowered. */
+  reclassified: boolean;
   notPerformed: NotPerformed[];
 }
+
+export type BackupPrivacyStatus = "violations_observed" | "potentially_sensitive" | "none_detected_in_examined_content" | "not_assessable";
 
 export interface BackupEntry {
   fileName: string;
   schemaVersion: number | null;
   sizeBytes: number;
   modified: string;
-  mayHoldOldPersonalData: "yes" | "no" | "unknown";
-  rowsFailingPrivacyGate: number;
+  privacyStatus: BackupPrivacyStatus;
+  reason: string;
+  /** null = the discovery table is absent or unreadable ("not examined", not "zero"). */
+  observationRowsFailingGate: number | null;
+  otherTextFindings: number;
+  tablesWithFindings: string[];
+  rawPathLikeMatches: number;
+  hasWalSidecar: boolean;
 }
 
 export interface CleanupPlan {
   entries: BackupEntry[];
   preconditions: { id: string; ok: boolean; text: string }[];
-  candidates: string[];
-  keep: string[];
+  examined: string[];
+  notExamined: string[];
+  reviewCandidates: string[];
+  noViolationDetected: string[];
+  notAssessable: string[];
+  unrecognisedFiles: number;
   deletionAvailable: boolean;
   executed: boolean;
   notes: string[];

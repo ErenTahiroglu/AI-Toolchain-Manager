@@ -42,7 +42,7 @@ class DiscoveryContract(unittest.TestCase):
     def test_scan_completed_twice_and_the_schema_version_includes_discovery(self):
         self.assertEqual(self.probe["scan"]["status"], "completed")
         self.assertNotEqual(self.probe["scan"]["scanId"], self.probe["secondScanId"])
-        self.assertGreaterEqual(self.data["dbVersion"], 6)
+        self.assertGreaterEqual(self.data["dbVersion"], 7)
 
     def test_nothing_in_the_scanned_tree_changed(self):
         self.assertTrue(self.probe["treeUnchanged"], "a read-only scan must leave sizes, contents and timestamps untouched")
@@ -56,7 +56,7 @@ class DiscoveryContract(unittest.TestCase):
         o = self.one("anthropic-frontend-design", "claude-plugin-declaration", "global")
         self.assertEqual((o["presence"], o["configuration"], o["confidence"]), ("present", "configured", "high"))
         self.assertEqual(o["version"], "1.0.0")
-        self.assertTrue(o["identityVerified"])
+        self.assertFalse(o["identityVerified"], "a matching local record is corroborated metadata, not authenticated identity")
         self.assertFalse(o["functionalityTested"])
         self.assertTrue(any("oturumunda yüklü olup olmadığı bilinmiyor" in x for x in o["limitations"]))
 
@@ -129,14 +129,14 @@ class DiscoveryContract(unittest.TestCase):
     # ---- Phase 2B: passive provenance ladder, checked independently of the Rust code ----------------------------
     VOCAB = {
         "publisher": {"none", "self_declared", "marketplace"},
-        "identity": {"not_assessed", "unknown", "evidence_available", "validated", "conflicted"},
+        "identity": {"not_assessed", "unknown", "evidence_available", "record_corroborated", "validated", "conflicted"},
         "version": {"unknown", "known", "conflicted"},
-        "versionTrust": {"none", "declared", "trusted"},
+        "versionTrust": {"none", "declared", "installer_recorded", "validated"},
         "signatureBlock": {"not_assessed", "absent", "present_unvalidated", "unreadable"},
     }
     NOT_PERFORMED = {
         "active_version_probe", "signature_chain_validation", "signature_parsing_unsupported", "installed_file_digest",
-        "package_metadata_not_found", "no_package_detector_for_tool", "record_to_file_linkage",
+        "package_metadata_not_found", "no_package_detector_for_tool", "record_to_file_linkage", "artifact_authentication",
     }
 
     def test_every_ladder_uses_closed_vocabulary_and_obeys_the_invariants(self):
@@ -146,8 +146,12 @@ class DiscoveryContract(unittest.TestCase):
             for key, allowed in self.VOCAB.items():
                 self.assertIn(l[key], allowed, f"{o['subject']}.{key}")
             self.assertTrue(set(l["notPerformed"]) <= self.NOT_PERFORMED, l["notPerformed"])
-            if l["identity"] == "validated":
-                self.assertTrue(l["installRecord"] and l["publisher"] == "marketplace", "validated needs a record and a marketplace publisher")
+            # "validated" is reserved for authenticated evidence bound to the installed artifact; nothing produces it yet.
+            self.assertNotEqual(l["identity"], "validated", o["subject"])
+            self.assertEqual(l["artifactAuth"], "none", o["subject"])
+            if l["identity"] == "record_corroborated":
+                self.assertTrue(l["installRecord"] and l["installedFilesSeen"] and l["publisher"] == "marketplace", "corroboration needs record + marketplace + files")
+                self.assertIn("artifact_authentication", l["notPerformed"])
             self.assertEqual(o["identityVerified"], l["identity"] == "validated", o["subject"])
             if o["version"] is not None:
                 self.assertEqual(l["version"], "known")
@@ -158,9 +162,9 @@ class DiscoveryContract(unittest.TestCase):
             if l["signatureBlock"] == "present_unvalidated":
                 self.assertIn("signature_chain_validation", l["notPerformed"])
 
-    def test_a_validated_plugin_and_a_name_only_program_sit_on_different_rungs(self):
+    def test_a_corroborated_plugin_record_and_a_name_only_program_sit_on_different_rungs(self):
         fd = self.one("anthropic-frontend-design", "claude-plugin-declaration", "global")["ladder"]
-        self.assertEqual((fd["identity"], fd["publisher"], fd["installRecord"], fd["versionTrust"]), ("validated", "marketplace", True, "trusted"))
+        self.assertEqual((fd["identity"], fd["publisher"], fd["installRecord"], fd["versionTrust"]), ("record_corroborated", "marketplace", True, "installer_recorded"))
         g = self.one("gitleaks", "path-executable", "global")["ladder"]
         self.assertEqual((g["filenameDetected"], g["installRecord"], g["identity"], g["version"]), (True, False, "unknown", "unknown"))
         self.assertIn("active_version_probe", g["notPerformed"])
