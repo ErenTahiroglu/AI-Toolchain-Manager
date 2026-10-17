@@ -482,7 +482,8 @@ fn rollback_that_cannot_undo_something_says_so_keeps_the_lock_and_can_be_finishe
     // the truth on disk matches the report: the pointer still points at 2.0.0, whose folder is gone
     assert_eq!(l.active().as_deref(), Some("2.0.0"));
     assert!(l.artifact_of("2.0.0").is_none());
-    assert_eq!(l.journals().last().unwrap().state, TxnState::RollbackFailed);
+    let update_journal = l.journals().into_iter().find(|j| j.action == Action::Update).unwrap();
+    assert_eq!(update_journal.state, TxnState::RollbackFailed);
     assert_eq!(l.files("locks"), vec!["synthetic-tool.lock".to_string()], "the lock stays: a person or the next start has to finish this");
     // nothing new can start on this tool meanwhile
     assert!(matches!(l.update(&l.v2, "1.0.0", None), Err(TxnError::Busy)));
