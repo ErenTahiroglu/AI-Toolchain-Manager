@@ -351,6 +351,7 @@ mod fstype_seam {
                 path_executables: false,
                 user_config: false,
                 project: Some(ProjectScan { alias: "proje".into(), dir: project.clone() }),
+                ..Default::default()
             },
         );
         fsx::hook::clear();
