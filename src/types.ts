@@ -105,7 +105,7 @@ export interface UrlPreview {
   ok: boolean;
   parsed: { owner: string; repo: string; canonicalUrl: string; sourceKey: string } | null;
   error: AppError | null;
-  duplicateOf: { entryId: string; displayName: string; removed: boolean } | null;
+  duplicateOf: { entryId: string; displayName: string; kind: EntryKind; removed: boolean } | null;
   notes: string[];
 }
 

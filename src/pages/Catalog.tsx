@@ -28,15 +28,19 @@ function AddForm({ onAdded }: { onAdded: (e: CatalogEntry) => void }) {
     }
   };
 
-  const canAdd = !!preview?.ok && previewedUrl === url && kind !== "" && !busy;
+  // A removed link comes back with the type it had: the classification is part of what every earlier decision means.
+  const lockedKind = preview?.duplicateOf?.removed && previewedUrl === url ? preview.duplicateOf.kind : null;
+  const effectiveKind: EntryKind | "" = lockedKind ?? kind;
+  const canAdd = !!preview?.ok && previewedUrl === url && effectiveKind !== "" && !busy;
 
   const submit = async (ev: FormEvent) => {
     ev.preventDefault();
     if (!canAdd) return;
+    const chosen = effectiveKind;
     setBusy(true);
     setError(null);
     try {
-      const entry = await api.addCatalogEntry(url, kind, purpose);
+      const entry = await api.addCatalogEntry(url, chosen, purpose);
       setUrl(""); setKind(""); setPurpose(""); setPreview(null); setPreviewedUrl("");
       onAdded(entry);
     } catch (e) {
@@ -59,11 +63,14 @@ function AddForm({ onAdded }: { onAdded: (e: CatalogEntry) => void }) {
       </div>
       <div className="field">
         <label htmlFor="repo-kind">Bu bir… (tür)</label>
-        <select id="repo-kind" value={kind} onChange={(e) => setKind(e.target.value as EntryKind | "")}>
+        <select id="repo-kind" value={effectiveKind} disabled={lockedKind !== null} onChange={(e) => setKind(e.target.value as EntryKind | "")}>
           <option value="">Tür seçin</option>
           {KINDS.map((k) => <option key={k} value={k}>{kindLabel(k)}</option>)}
         </select>
-        {kind !== "" && <div className="muted small">{KIND_HELP[kind]}</div>}
+        {effectiveKind !== "" && <div className="muted small">{KIND_HELP[effectiveKind]}</div>}
+        {lockedKind !== null && (
+          <div className="small" role="note">Bu depo daha önce "{kindLabel(lockedKind)}" olarak kayıtlıydı; tür geri eklerken değiştirilemez (eski kararlarınız farklı bir işleve yeniden uygulanmasın diye).</div>
+        )}
       </div>
       <div className="field">
         <label htmlFor="repo-purpose">Ne işe yarıyor? (isteğe bağlı, yalnızca sizin notunuz)</label>

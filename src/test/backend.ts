@@ -91,14 +91,21 @@ export function createBackend(): Backend {
           }
           const [, owner, repo] = url.trim().match(/github\.com\/([\w-]+)\/([\w.-]+)/i)!;
           const key = `${owner}/${repo}`.toLowerCase();
-          const dup = b.entries.find((e) => e.sourceKey === key && e.removedAt === null);
+          const any = b.entries.find((e) => e.sourceKey === key);
+          const live = !!any && any.removedAt === null;
           return {
-            ok: !dup, parsed: { owner, repo, canonicalUrl: `https://github.com/${owner}/${repo}`, sourceKey: key }, error: null,
-            duplicateOf: dup ? { entryId: dup.entryId, displayName: dup.displayName, removed: false } : null, notes: ["Çevrimdışı ön izleme."],
+            ok: !live, parsed: { owner, repo, canonicalUrl: `https://github.com/${owner}/${repo}`, sourceKey: key }, error: null,
+            duplicateOf: any ? { entryId: any.entryId, displayName: any.displayName, kind: any.kind, removed: !live } : null, notes: ["Çevrimdışı ön izleme."],
           };
         }
         case "add_catalog_entry": {
           const m = String(args?.url).match(/github\.com\/([\w-]+)\/([\w.-]+)/i)!;
+          const removed = b.entries.find((e) => e.sourceKey === `${m[1]}/${m[2]}`.toLowerCase() && e.removedAt !== null);
+          if (removed) {
+            if (removed.kind !== args?.kind) throw { code: "KIND_CHANGE_NOT_ALLOWED", message: "Tür geri eklerken değiştirilemez." };
+            removed.removedAt = null; removed.enabled = false;
+            return { ...removed };
+          }
           const e = makeEntry(`${m[1]}-${m[2]}`.toLowerCase(), {
             origin: "user", kind: args?.kind as CatalogEntry["kind"], purpose: String(args?.purpose || "Amacı henüz yazılmadı."), displayName: `${m[1]}/${m[2]}`,
             sourceKey: `${m[1]}/${m[2]}`.toLowerCase(), enabled: false, metadataState: "not-fetched", licenseState: "unknown", licenseSpdx: null, record: { userAdded: true },

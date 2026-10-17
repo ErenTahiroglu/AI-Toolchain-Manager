@@ -122,8 +122,8 @@ fn migrated_database_gets_the_four_new_entries_and_startup_is_repeatable() {
             conn.execute("DELETE FROM project_preferences WHERE entry_id = 'graphify'", []).unwrap();
         }
     }
-    assert_eq!(shapes[0], (13, 3, 6, 6, 1, 2));
-    assert_eq!(shapes[1], (13, 3, 5, 6, 1, 2), "a reset decision stays reset; nothing is re-seeded or re-migrated");
+    assert_eq!(shapes[0], (13, 3, 6, 6, 1, LATEST_VERSION));
+    assert_eq!(shapes[1], (13, 3, 5, 6, 1, LATEST_VERSION), "a reset decision stays reset; nothing is re-seeded or re-migrated");
     assert_eq!(shapes[1], shapes[2]);
     assert_eq!(std::fs::read_dir(dir.path().join("backups")).unwrap().count(), 1, "only the first (real) migration made a backup");
 

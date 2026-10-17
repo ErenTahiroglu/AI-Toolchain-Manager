@@ -371,7 +371,14 @@ fn gate(conn: &Connection, input: &TaskInput, entry_id: &str) -> AppResult<Resul
 
     if let Some(pref) = projects::stored_preference(conn, &input.project_alias, entry_id, &input.agent_surface, &input.platform_target)? {
         match pref.decision.as_str() {
-            "accepted" => return Ok(Err(suppressed(entry_id, "already-enabled", "Bu proje için zaten etkinleştirmeyi seçtiniz."))),
+            "accepted" => {
+                // An earlier approval only covers the functionality it was given for. If capabilities changed
+                // materially since, it is not silently reused: the user is asked again.
+                if pref.capability_fingerprint == entry.capability_fingerprint {
+                    return Ok(Err(suppressed(entry_id, "already-enabled", "Bu proje için zaten etkinleştirmeyi seçtiniz.")));
+                }
+                notes.push("Daha önce etkinleştirmeyi seçmiştiniz, ancak aracın yetenekleri veya uyumluluğu o zamandan beri önemli ölçüde değişti; kararınız yeniden incelenmeli.".to_string());
+            }
             "disabled" => return Ok(Err(suppressed(entry_id, "disabled-by-user", "Bu proje için kapattınız."))),
             "rejected" => {
                 // A new version alone never re-prompts. Only a material change in what the tool can do does.
@@ -412,28 +419,41 @@ fn gate(conn: &Connection, input: &TaskInput, entry_id: &str) -> AppResult<Resul
     Ok(Ok(Passed { entry, level, notes }))
 }
 
-fn already_shown(conn: &Connection, task_id: &str, entry_id: &str) -> AppResult<bool> {
+/// All log reads and writes are scoped by project: the same task id used in two projects is two
+/// independent tasks (RT-1B-01).
+fn already_shown(conn: &Connection, project_id: &str, task_id: &str, entry_id: &str) -> AppResult<bool> {
     let found: Option<i64> = conn
-        .query_row("SELECT 1 FROM suggestion_log WHERE task_id = ?1 AND entry_id = ?2", rusqlite::params![task_id, entry_id], |r| r.get(0))
+        .query_row(
+            "SELECT 1 FROM suggestion_log WHERE project_id = ?1 AND task_id = ?2 AND entry_id = ?3",
+            rusqlite::params![project_id, task_id, entry_id],
+            |r| r.get(0),
+        )
         .optional()?;
     Ok(found.is_some())
 }
 
-fn shown_count(conn: &Connection, task_id: &str, phase: Option<&str>) -> AppResult<usize> {
+fn shown_count(conn: &Connection, project_id: &str, task_id: &str, phase: Option<&str>) -> AppResult<usize> {
     let n: i64 = match phase {
-        Some(p) => {
-            conn.query_row("SELECT count(*) FROM suggestion_log WHERE task_id = ?1 AND phase = ?2", rusqlite::params![task_id, p], |r| {
-                r.get(0)
-            })?
-        }
-        None => conn.query_row("SELECT count(*) FROM suggestion_log WHERE task_id = ?1", [task_id], |r| r.get(0))?,
+        Some(p) => conn.query_row(
+            "SELECT count(*) FROM suggestion_log WHERE project_id = ?1 AND task_id = ?2 AND phase = ?3",
+            rusqlite::params![project_id, task_id, p],
+            |r| r.get(0),
+        )?,
+        None => conn.query_row(
+            "SELECT count(*) FROM suggestion_log WHERE project_id = ?1 AND task_id = ?2",
+            rusqlite::params![project_id, task_id],
+            |r| r.get(0),
+        )?,
     };
     Ok(n as usize)
 }
 
-/// Keeps the log small: only the most recent tasks are remembered.
-fn prune_log(conn: &Connection) -> AppResult<()> {
-    conn.execute("DELETE FROM suggestion_log WHERE rowid <= (SELECT max(rowid) FROM suggestion_log) - 500", [])?;
+/// Keeps the log small per project, so one busy project can never evict another project's state.
+fn prune_log(conn: &Connection, project_id: &str) -> AppResult<()> {
+    conn.execute(
+        "DELETE FROM suggestion_log WHERE project_id = ?1 AND rowid <= (SELECT max(rowid) FROM suggestion_log WHERE project_id = ?1) - 500",
+        [project_id],
+    )?;
     Ok(())
 }
 
@@ -441,7 +461,17 @@ fn prune_log(conn: &Connection) -> AppResult<()> {
 // Evaluation
 // ---------------------------------------------------------------------------------------------
 
+/// The whole evaluation (reads, cap checks and log writes) runs in one IMMEDIATE transaction, so two
+/// evaluations of the same project and task, even from different connections, are serialized and the
+/// per-task cap and once-per-task rule cannot be raced.
 pub fn evaluate(conn: &Connection, input: &TaskInput) -> AppResult<Evaluation> {
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    let result = evaluate_in(&tx, input)?;
+    tx.commit()?;
+    Ok(result)
+}
+
+fn evaluate_in(conn: &Connection, input: &TaskInput) -> AppResult<Evaluation> {
     let (text, files, phase) = validate(input)?;
     let project_id: String = conn
         .query_row("SELECT project_id FROM project_registry WHERE alias = ?1 AND removed_at IS NULL", [&input.project_alias], |r| r.get(0))
@@ -500,8 +530,8 @@ pub fn evaluate(conn: &Connection, input: &TaskInput) -> AppResult<Evaluation> {
     let mut recommendations: Vec<Recommendation> = Vec::new();
     let mut suppressed_out = explained;
     let mut shown_now = 0usize;
-    let already_in_task = shown_count(conn, &input.task_id, None)?;
-    let late_in_task = shown_count(conn, &input.task_id, Some("late"))?;
+    let already_in_task = shown_count(conn, &project_id, &input.task_id, None)?;
+    let late_in_task = shown_count(conn, &project_id, &input.task_id, Some("late"))?;
 
     for hit in hits {
         let passed = match gate(conn, input, hit.entry_id)? {
@@ -511,7 +541,7 @@ pub fn evaluate(conn: &Connection, input: &TaskInput) -> AppResult<Evaluation> {
                 continue;
             }
         };
-        if already_shown(conn, &input.task_id, hit.entry_id)? {
+        if already_shown(conn, &project_id, &input.task_id, hit.entry_id)? {
             suppressed_out.push(suppressed(hit.entry_id, "already-shown-this-task", "Bu görev için zaten gösterildi; tekrar sorulmaz."));
             continue;
         }
@@ -540,10 +570,15 @@ pub fn evaluate(conn: &Connection, input: &TaskInput) -> AppResult<Evaluation> {
         } else {
             Vec::new()
         };
-        conn.execute(
-            "INSERT INTO suggestion_log (task_id, entry_id, project_id, phase, shown_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![input.task_id, hit.entry_id, project_id, phase, now_utc()],
+        let inserted = conn.execute(
+            "INSERT OR IGNORE INTO suggestion_log (project_id, task_id, entry_id, phase, shown_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![project_id, input.task_id, hit.entry_id, phase, now_utc()],
         )?;
+        if inserted == 0 {
+            // Another evaluation of the same project and task logged it first: never show it twice.
+            suppressed_out.push(suppressed(hit.entry_id, "already-shown-this-task", "Bu görev için zaten gösterildi; tekrar sorulmaz."));
+            continue;
+        }
         shown_now += 1;
         recommendations.push(Recommendation {
             entry_id: passed.entry.entry_id.clone(),
@@ -557,7 +592,7 @@ pub fn evaluate(conn: &Connection, input: &TaskInput) -> AppResult<Evaluation> {
             skill_candidates,
         });
     }
-    prune_log(conn)?;
+    prune_log(conn, &project_id)?;
     Ok(Evaluation {
         task_id: input.task_id.clone(),
         phase: phase.to_string(),

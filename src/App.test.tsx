@@ -480,3 +480,59 @@ describe("error boundary", () => {
     await waitFor(() => expect(calls("report_ui_error").some((c) => String(c.args?.message).includes("kaboom"))).toBe(true));
   });
 });
+
+describe("closure: project-scoped tasks and immutable classification", () => {
+  it("switching the project, agent or platform starts a new task and clears the previous result", async () => {
+    backend.projects.push({ projectId: "p2", alias: "benim-sitem", displayName: "Benim sitem", kind: "reference", localNote: "", createdAt: "2026-10-17T00:00:00Z", preferences: [] });
+    backend.nextEvaluation = { taskId: "t", phase: "start", recommendations: [rec()], suppressed: [], disclaimer: "Hiçbir şey kurulmadı." };
+    render(<App />);
+    await go("Öneriler");
+    await screen.findByRole("option", { name: "Benim sitem" });
+    await userEvent.type(screen.getByLabelText("Görev metni"), "React bileşeni tasarla");
+    await userEvent.click(screen.getByRole("button", { name: "Değerlendir" }));
+    expect(await screen.findByText("Öneri", { selector: ".badge" })).toBeInTheDocument();
+    const firstId = String((calls("evaluate_task")[0].args!.input as Record<string, unknown>).taskId);
+
+    await userEvent.selectOptions(screen.getByLabelText("Proje"), "benim-sitem");
+    expect(screen.queryByText("Öneri", { selector: ".badge" })).not.toBeInTheDocument(); // nothing inherited from the other project
+    expect(screen.getByText(/Görev kimliği:/)).not.toHaveTextContent(firstId);
+    await userEvent.click(screen.getByRole("button", { name: "Değerlendir" }));
+    const second = calls("evaluate_task")[1].args!.input as Record<string, unknown>;
+    expect(second.projectAlias).toBe("benim-sitem");
+    expect(second.taskId).not.toBe(firstId);
+
+    const secondId = String(second.taskId);
+    await userEvent.selectOptions(screen.getByLabelText("Ajan yüzeyi"), "antigravity-ide");
+    expect(screen.getByText(/Görev kimliği:/)).not.toHaveTextContent(secondId);
+    const thirdId = screen.getByText(/Görev kimliği:/).textContent!;
+    await userEvent.selectOptions(screen.getByLabelText("İşletim sistemi"), "macos-arm64");
+    expect(screen.getByText(/Görev kimliği:/).textContent).not.toBe(thirdId);
+  });
+
+  it("a removed link comes back with its old type; the type is locked and explained", async () => {
+    backend.entries.push(makeEntry("acme-widget", { origin: "user", kind: "skill_collection", displayName: "acme/widget", sourceKey: "acme/widget", removedAt: "2026-10-17T10:00:00Z", enabled: false }));
+    render(<App />);
+    await go("Araç Kütüphanesi");
+    await userEvent.type(await screen.findByLabelText("GitHub bağlantısı"), "https://github.com/acme/widget");
+    await userEvent.selectOptions(screen.getByLabelText("Bu bir… (tür)"), "agent_plugin"); // the user first picks another type
+    await userEvent.click(screen.getByRole("button", { name: "Bağlantıyı denetle" }));
+    const kind = (await screen.findByLabelText("Bu bir… (tür)")) as HTMLSelectElement;
+    await waitFor(() => expect(kind).toBeDisabled());
+    expect(kind.value).toBe("skill_collection");
+    expect(screen.getByRole("note")).toHaveTextContent(/tür geri eklerken değiştirilemez/);
+    await userEvent.click(screen.getByRole("button", { name: "Aday olarak ekle" }));
+    expect(calls("add_catalog_entry")).toEqual([{ cmd: "add_catalog_entry", args: { url: "https://github.com/acme/widget", kind: "skill_collection", purpose: "" } }]);
+  });
+
+  it("a backend refusal to change the type is shown, not swallowed", async () => {
+    backend.failures.add_catalog_entry = { code: "KIND_CHANGE_NOT_ALLOWED", message: "Tür geri eklerken değiştirilemez." };
+    render(<App />);
+    await go("Araç Kütüphanesi");
+    await userEvent.type(await screen.findByLabelText("GitHub bağlantısı"), "https://github.com/acme/other");
+    await userEvent.click(screen.getByRole("button", { name: "Bağlantıyı denetle" }));
+    await screen.findByText(/Bağlantı geçerli/);
+    await userEvent.selectOptions(screen.getByLabelText("Bu bir… (tür)"), "executable_tool");
+    await userEvent.click(screen.getByRole("button", { name: "Aday olarak ekle" }));
+    expect(await screen.findByText(/KIND_CHANGE_NOT_ALLOWED/)).toBeInTheDocument();
+  });
+});

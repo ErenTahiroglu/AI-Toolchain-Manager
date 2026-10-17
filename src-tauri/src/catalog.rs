@@ -600,6 +600,8 @@ pub fn compatibility(entry: &CatalogEntry, platform: &str, surface: &str) -> Str
 pub struct Duplicate {
     pub entry_id: String,
     pub display_name: String,
+    /// The classification the existing (possibly removed) entry has. It cannot be changed by re-adding.
+    pub kind: String,
     pub removed: bool,
 }
 
@@ -616,10 +618,10 @@ pub struct UrlPreview {
 fn find_by_source(conn: &Connection, source_key: &str) -> AppResult<Option<Duplicate>> {
     Ok(conn
         .query_row(
-            "SELECT entry_id, display_name, removed_at IS NOT NULL FROM catalog_entries WHERE source_key = ?1
+            "SELECT entry_id, display_name, kind, removed_at IS NOT NULL FROM catalog_entries WHERE source_key = ?1
              ORDER BY removed_at IS NOT NULL LIMIT 1",
             [source_key],
-            |r| Ok(Duplicate { entry_id: r.get(0)?, display_name: r.get(1)?, removed: r.get::<_, i64>(2)? == 1 }),
+            |r| Ok(Duplicate { entry_id: r.get(0)?, display_name: r.get(1)?, kind: r.get(2)?, removed: r.get::<_, i64>(3)? == 1 }),
         )
         .optional()?)
 }
@@ -672,12 +674,24 @@ pub fn add_entry(conn: &Connection, url: &str, kind: &str, purpose: &str) -> App
         if !dup.removed {
             return Err(AppError::new("ENTRY_DUPLICATE", format!("Bu depo zaten katalogda: {}.", dup.display_name)));
         }
-        // Re-adding a removed source restores that entry (its decision history stays attached).
+        // Re-adding a removed source restores that entry with its decision history attached. The
+        // classification is part of the capability fingerprint that every earlier decision refers to, so
+        // it can NOT change on the way back in: an old rejection or approval must never be reused for
+        // materially different functionality. (A different classification would need its own reviewed change.)
+        if dup.kind != kind {
+            return Err(AppError::new(
+                "KIND_CHANGE_NOT_ALLOWED",
+                format!(
+                    "Bu depo daha önce '{}' türünde kayıtlıydı. Tür, geri eklerken değiştirilemez (eski kararlarınız farklı bir işleve yeniden uygulanmasın diye); aynı türle geri ekleyin.",
+                    dup.kind
+                ),
+            ));
+        }
         let tx = conn.unchecked_transaction()?;
         tx.execute(
-            "UPDATE catalog_entries SET removed_at = NULL, kind = CASE WHEN origin = 'user' THEN ?2 ELSE kind END,
-               purpose = CASE WHEN origin = 'user' THEN ?3 ELSE purpose END, enabled = 0, updated_at = ?4 WHERE entry_id = ?1",
-            rusqlite::params![dup.entry_id, kind, purpose, now_utc()],
+            "UPDATE catalog_entries SET removed_at = NULL, purpose = CASE WHEN origin = 'user' THEN ?2 ELSE purpose END,
+               enabled = 0, updated_at = ?3 WHERE entry_id = ?1",
+            rusqlite::params![dup.entry_id, purpose, now_utc()],
         )?;
         diagnostics::log(&tx, "info", "catalog", "CATALOG_ENTRY_RESTORED", &dup.entry_id)?;
         tx.commit()?;

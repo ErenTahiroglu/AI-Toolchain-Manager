@@ -33,6 +33,7 @@ fn run(out: PathBuf) -> i32 {
         };
         let scenario_results = run_scenarios(&conn).map_err(|e| e.to_string())?;
         let probe = preference_probe(&conn).map_err(|e| e.to_string())?;
+        let closure = closure_probe(&conn).map_err(|e| e.to_string())?;
         let report = health::run_and_record(&conn, &ctx).map_err(|e| e.to_string())?;
         let chain = audit::verify(&conn).map_err(|e| e.to_string())?;
         Ok(json!({
@@ -42,6 +43,7 @@ fn run(out: PathBuf) -> i32 {
             "dbVersion": db::user_version(&conn).map_err(|e| e.to_string())?,
             "scenarioResults": scenario_results,
             "preferenceProbe": probe,
+            "closureProbe": closure,
             "report": report,
             "auditChain": chain,
             "auditEvents": audit::list_ascending(&conn).map_err(|e| e.to_string())?,
@@ -111,4 +113,36 @@ fn preference_probe(conn: &rusqlite::Connection) -> crate::error::AppResult<serd
         key("gitleaks", "local-cli", "installed").err().map(|e| e.code),
     ];
     Ok(json!({ "refused": refused }))
+}
+
+/// RT-1B-01 / RT-1B-02 in the built binary: the same task id in two projects is two tasks, and a removed
+/// entry cannot come back under another classification.
+fn closure_probe(conn: &rusqlite::Connection) -> crate::error::AppResult<serde_json::Value> {
+    let mut shown = Vec::new();
+    for alias in ["self-check-scope-a", "self-check-scope-b"] {
+        projects::add_reference(conn, alias, alias, "")?;
+        let input = recommend::TaskInput {
+            project_alias: alias.into(),
+            task_id: "shared-task-id".into(),
+            task_text: "Design a React component".into(),
+            evidence_files: vec![],
+            agent_surface: "claude-code-terminal".into(),
+            platform_target: "windows-x64".into(),
+            phase: None,
+            availability: vec![],
+        };
+        shown.push(recommend::evaluate(conn, &input)?.recommendations.len());
+    }
+    let url = "https://github.com/self-check/restore-probe";
+    let entry = catalog::add_entry(conn, url, "agent_plugin", "")?;
+    let fingerprint_before = entry.capability_fingerprint.clone();
+    catalog::remove_entry(conn, &entry.entry_id)?;
+    let refused = catalog::add_entry(conn, url, "executable_tool", "").err().map(|e| e.code);
+    let restored = catalog::add_entry(conn, url, "agent_plugin", "")?;
+    Ok(json!({
+        "sameTaskIdShownPerProject": shown,
+        "restoreWithOtherKindRefusedWith": refused,
+        "restoredKind": restored.kind,
+        "fingerprintUnchanged": restored.capability_fingerprint == fingerprint_before,
+    }))
 }

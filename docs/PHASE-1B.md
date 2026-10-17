@@ -69,11 +69,11 @@ Additive and transactional (`src-tauri/migrations/0002_catalog_registry.sql` + `
 
 | Evidence | Result |
 | --- | --- |
-| Rust unit/integration tests (`cargo test`) | 92 passed, including 12 database tests |
+| Rust unit/integration tests (`cargo test`) | 111 passed after the closure fixes (92 before), including 12 database tests |
 | Migration from a **real Phase 1A database** written by commit `9918e9e` (`src-tauri/tests/fixtures/phase1a-9918e9e.sqlite.fixture`: v1, 9 tools, 3 projects, 6 decisions, 22-event chain) | Passed: all records preserved, chain verifies, backup usable, repeat starts idempotent, user reset not resurrected |
 | Injected migration failure / later-step failure / corrupted legacy JSON / truncated or overwritten files | Passed: rolled back, version unchanged, no panic |
-| Frontend tests, type check, build | 36 passed |
-| Python contract tests | 41 passed with the built binary's self-check output (11 skip honestly without it): new candidates validate against the Phase 0 schema; Rust-produced `reject/defer/reset_rejection/catalog_remove` events validate against the Phase 0 audit schema; the built binary reproduces every synthetic scenario expectation |
+| Frontend tests, type check, build | 39 passed after the closure fixes (36 before) |
+| Python contract tests | 42 passed after the closure fixes (41 before) with the built binary's self-check output (12 skip honestly without it): new candidates validate against the Phase 0 schema; Rust-produced `reject/defer/reset_rejection/catalog_remove` events validate against the Phase 0 audit schema; the built binary reproduces every synthetic scenario expectation |
 | Windows debug GUI run, applying the real Phase 1A database | Passed: app migrated it itself; add/duplicate/misleading-link/remove/restore, project reference, decision save/refusals, once-per-task, no-suggestion and Strix-information flows were driven through the real WebView |
 | Local Windows release runtime | **Unverified** (Smart App Control; see [WINDOWS-SMART-APP-CONTROL](WINDOWS-SMART-APP-CONTROL.md)). It also blocked a freshly rebuilt build script once during this phase; `cargo clean -p ai-toolchain-manager` and rebuilding was allowed. Release builds are verified in CI only. |
 
@@ -85,3 +85,13 @@ Additive and transactional (`src-tauri/migrations/0002_catalog_registry.sql` + `
 * No skill import UI; the skill index is empty in the running app.
 * No Claude Code task-start integration (Phase 4); the preview is manual.
 * macOS: only CI compilation, tests and the headless self-check exist; no macOS GUI run.
+
+## Closure of the independent Red Team findings (Issue #3)
+
+Two confirmed behavioural-consistency findings were closed without adding features. Migration 3 is additive and transactional (`migrations/0003_scoped_suggestion_log.sql`); user decisions and history are never deleted or reset.
+
+**RT-1B-01 — de-duplication was global, not per project.** Root cause: `suggestion_log` carried `project_id` but its key was `(task_id, entry_id)` and every read (`already_shown`, `shown_count`, `prune_log`) ignored it, so one project's state could suppress another project that reused the task id, and the cap and late-suggestion rule were shared. Fix: the key is now `(project_id, task_id, entry_id)` (existing rows copied unchanged); every read, count and prune is project-scoped; the evaluation (reads, cap checks, log writes) runs in one `IMMEDIATE` transaction with `INSERT OR IGNORE`, so two evaluations of the same project and task cannot race past the cap or double-log; the UI starts a new task id (and clears the result) whenever the project, agent surface or platform changes.
+
+**RT-1B-02 — restore could change the classification but not the fingerprint.** Root cause: restoring a removed user entry through "add" updated `kind` (and purpose) without recomputing `capability_fingerprint`, so an old rejection or approval could be reused for different functionality. Chosen contract (the safest): **the classification is immutable on restore**. Re-adding a removed link with another type is refused (`KIND_CHANGE_NOT_ALLOWED`, nothing changes, no restore trace); the UI shows the stored type and locks the selector; a database trigger refuses in-place `kind` changes of user entries; the self-audit now recomputes every entry's fingerprint and fails (`INVARIANT_VIOLATION`) if the stored one no longer matches. Additionally an earlier *approval* is no longer reused after a material capability change: the user is asked again, with the reason (previously only rejections were re-evaluated). A different classification would need a separately reviewed change, which does not exist in this phase.
+
+Test evidence: 19 new Rust tests (`closure_tests.rs`), 3 new UI tests, 1 new cross-language probe in `--self-check`; migration tested on a **real schema-v2 database written by commit `c921932`** (`src-tauri/tests/fixtures/phase1b-c921932.sqlite.fixture`, private test note scrubbed) including injected failure/rollback. Mutation checks: removing migration 3 makes 8 of the new tests fail; re-allowing a kind change on restore makes 3 fail.

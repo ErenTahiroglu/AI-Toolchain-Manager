@@ -95,6 +95,14 @@ class RustAuditContract(unittest.TestCase):
     def test_refused_actions_in_the_probe_are_refused_for_the_right_reasons(self):
         self.assertEqual(self.data["preferenceProbe"]["refused"], ["ACTIVATION_BLOCKED", "PREFERENCE_NOT_ACTIVATABLE", "DECISION_INVALID"])
 
+    def test_closure_probe_same_task_id_is_independent_per_project_and_kind_is_immutable(self):
+        probe = self.data["closureProbe"]
+        self.assertEqual(probe["sameTaskIdShownPerProject"], [1, 1], "project B must not inherit project A's suggestion state")
+        self.assertEqual(probe["restoreWithOtherKindRefusedWith"], "KIND_CHANGE_NOT_ALLOWED")
+        self.assertEqual(probe["restoredKind"], "agent_plugin")
+        self.assertTrue(probe["fingerprintUnchanged"])
+        self.assertEqual(self.data["dbVersion"], 3)
+
     def test_built_binary_reproduces_every_synthetic_scenario_expectation(self):
         scenarios = json.loads((ROOT / "data" / "recommendation-scenarios.json").read_text(encoding="utf-8"))["scenarios"]
         results = {r["id"]: r for r in self.data["scenarioResults"]}

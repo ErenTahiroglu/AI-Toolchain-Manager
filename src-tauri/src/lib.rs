@@ -1,5 +1,7 @@
 mod audit;
 mod catalog;
+#[cfg(test)]
+mod closure_tests;
 mod commands;
 mod crash;
 mod db;

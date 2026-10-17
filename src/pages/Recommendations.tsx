@@ -87,6 +87,15 @@ export function RecommendationsPage() {
     if (!alias && projects.data && projects.data.length > 0) setAlias(projects.data[0].alias);
   }, [projects.data, alias]);
 
+  // A task belongs to ONE project, agent and platform. Changing any of them starts a new task, so one
+  // project's "already suggested" state is never carried into another (RT-1B-01).
+  const restartTask = () => {
+    setTaskId(newTaskId());
+    setResult(null);
+    setNotice("");
+    setError(null);
+  };
+
   const pickScenario = (id: string) => {
     const s = scenarios.data?.find((x) => x.id === id);
     if (s) {
@@ -148,17 +157,17 @@ export function RecommendationsPage() {
         <div className="row">
           <div className="field">
             <label htmlFor="rec-project">Proje</label>
-            <select id="rec-project" value={alias} onChange={(e) => setAlias(e.target.value)}>
+            <select id="rec-project" value={alias} onChange={(e) => { setAlias(e.target.value); restartTask(); }}>
               {projects.data?.map((p) => <option key={p.alias} value={p.alias}>{p.displayName}{p.kind === "synthetic" ? " (örnek)" : ""}</option>)}
             </select>
           </div>
           <div className="field">
             <label htmlFor="rec-surface">Ajan yüzeyi</label>
-            <select id="rec-surface" value={surface} onChange={(e) => setSurface(e.target.value)}>{SURFACES.map((s) => <option key={s} value={s}>{surfaceLabel(s)}</option>)}</select>
+            <select id="rec-surface" value={surface} onChange={(e) => { setSurface(e.target.value); restartTask(); }}>{SURFACES.map((s) => <option key={s} value={s}>{surfaceLabel(s)}</option>)}</select>
           </div>
           <div className="field">
             <label htmlFor="rec-platform">İşletim sistemi</label>
-            <select id="rec-platform" value={platform} onChange={(e) => setPlatform(e.target.value)}>{PLATFORMS.map((s) => <option key={s} value={s}>{platformLabel(s)}</option>)}</select>
+            <select id="rec-platform" value={platform} onChange={(e) => { setPlatform(e.target.value); restartTask(); }}>{PLATFORMS.map((s) => <option key={s} value={s}>{platformLabel(s)}</option>)}</select>
           </div>
         </div>
         <div className="field">
@@ -176,7 +185,7 @@ export function RecommendationsPage() {
         </label>
         <p>
           <button type="button" onClick={evaluate} disabled={alias === "" || taskText.trim() === ""}>Değerlendir</button>{" "}
-          <button type="button" className="secondary" onClick={() => { setTaskId(newTaskId()); setResult(null); setNotice(""); }}>Yeni görev başlat</button>
+          <button type="button" className="secondary" onClick={restartTask}>Yeni görev başlat</button>
           <span className="small muted"> Görev kimliği: {taskId}</span>
         </p>
       </div>

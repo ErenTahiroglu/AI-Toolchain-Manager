@@ -128,7 +128,15 @@ fn check_invariants(conn: &Connection) -> CheckResult {
     let samples = scalar(conn, "SELECT count(*) FROM project_registry WHERE kind = 'synthetic'");
     let sources = scalar(conn, "SELECT count(*) FROM prompt_sources WHERE status = 'planned' AND read_only = 1");
     let frozen = scalar(conn, "SELECT count(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE '%_frozen_%'");
-    let ok = seeded == Some(crate::catalog::SEED_ENTRY_COUNT as i64)
+    // The stored capability fingerprint must still match what the entry actually is. A changed classification
+    // (or any other in-place edit) that left the old fingerprint behind would let an old decision be reused.
+    let fingerprints_ok = crate::catalog::list_catalog(conn)
+        .map(|all| {
+            all.iter().all(|e| crate::catalog::capability_fingerprint(&e.record, &e.kind, &e.execution_policy) == e.capability_fingerprint)
+        })
+        .unwrap_or(false);
+    let ok = fingerprints_ok
+        && seeded == Some(crate::catalog::SEED_ENTRY_COUNT as i64)
         && claims == Some(0)
         && bad_prefs == Some(0)
         && bad_kind == Some(0)
