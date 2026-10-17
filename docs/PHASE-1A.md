@@ -19,7 +19,7 @@ This document records what Phase 1A does, what it deliberately does not do, and 
 | Audit chain | Append-only hash-chained events that conform to `schemas/audit-event.schema.json` v2 (verified independently by Python). Detects accidental edits, deletion, truncation, reordering; **not** proof against rewriting by the same OS user. |
 | Diagnostics | Redacted (paths, tokens, e-mail, URL credentials), length-capped, row-bounded local records. |
 | Lifecycle | Single instance (second launch focuses the first), tray (open/quit), close-to-tray only when the tray exists, user-controlled startup (default **off**, OS state read back and verified after every change, mismatch surfaced), unclean-shutdown detection, panic marker ingested on next start, React error boundary + global handlers reported to the local log. |
-| Least privilege | No plugin permission is granted to the WebView; only 14 typed app commands, each an explicit `allow-*` permission generated from `build.rs`. A health check and unit tests reject shell/fs/sql/http/opener/core permissions. Strict CSP. |
+| Least privilege | No plugin permission is granted to the WebView; only 14 typed app commands, each an explicit `allow-*` permission generated from `build.rs`. A health check enforces an **explicit allowlist** (`ALLOWED_PERMISSIONS`, deny by default; extra manifest keys, scoped permission objects, duplicates and any unlisted name are rejected) and unit tests cover the negative cases. Strict CSP. |
 
 ## Explicitly not implemented (by design)
 
@@ -34,8 +34,7 @@ Real tool installation, agent-configuration edits, GitHub fetching or sync, priv
 
 ## Windows developer notes
 
-* Windows **Smart App Control** (enforcement mode) blocked one unsigned release-profile build-script executable (`os error 4551`) during a local `tauri build`. The debug-profile build and tests are unaffected. SAC was **not** disabled. CI runners do not use SAC and build the release profile.
-* A stale `cargo check` cache once produced `can't find crate for time_macros`; `cargo clean -p time -p time-macros` fixed it. Not a code problem.
+* Windows **Smart App Control** (enforcement mode) blocks some unsigned, locally compiled build artifacts (`os error 4551`; a release build script and, intermittently, debug proc-macro DLLs). Root cause, evidence and classification: [WINDOWS-SMART-APP-CONTROL.md](WINDOWS-SMART-APP-CONTROL.md). SAC was **not** disabled; local release runtime is **unverified**, release builds are verified in CI only.
 
 ## Run locally (Windows)
 

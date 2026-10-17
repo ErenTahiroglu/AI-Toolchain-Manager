@@ -25,3 +25,5 @@ The GitHub connector currently does not provide repository-default-branch change
 
 ## Local safety
 Never change an agent's working branch or delete a local worktree without inspecting its current uncommitted files. Keep generated, private and sensitive data out of public Git history.
+## Legacy branch cleanup — completed 2026-10-17
+Verified before deletion: remote default branch is `main`; `main` = `68eda3f`; `phase0/architecture` (`68eda3f`) is `main`; `phase1a/desktop-shell` (`6e427d1`) is an ancestor of `development`; zero commits unique to either branch; no open PRs, tags, protection, local worktrees, stashes or unpushed commits depend on them. Both branches were then deleted from `origin` with a normal (non-force) delete. Their tips remain reachable from `main`/`development`.

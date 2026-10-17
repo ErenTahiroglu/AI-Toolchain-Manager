@@ -148,21 +148,56 @@ fn check_chain(report: &AppResult<ChainReport>) -> CheckResult {
 }
 
 const CAPABILITIES_JSON: &str = include_str!("../capabilities/default.json");
-const FORBIDDEN_PERMISSION_PARTS: &[&str] = &["shell", "fs", "sql", "http", "opener", "process", "dialog", "updater", "os:", "core:"];
+/// The only permissions the WebView may ever hold: one `allow-*` per typed app command (see build.rs).
+/// Anything else, including broad plugin/core permissions, fails the check. Adding a command means
+/// editing build.rs, this list and capabilities/default.json together; a unit test keeps them equal.
+pub const ALLOWED_PERMISSIONS: &[&str] = &[
+    "allow-get-app-info",
+    "allow-get-dashboard",
+    "allow-list-tools",
+    "allow-list-projects",
+    "allow-list-prompt-sources",
+    "allow-run-health-checks",
+    "allow-list-audit-events",
+    "allow-verify-audit-chain",
+    "allow-list-diagnostics",
+    "allow-get-settings",
+    "allow-set-setting",
+    "allow-get-startup-state",
+    "allow-set-startup-enabled",
+    "allow-report-ui-error",
+];
 
-/// Evaluate a capability manifest against the least-privilege policy.
+/// Top-level manifest keys that carry no extra authority. Keys such as `webviews`, `remote`,
+/// `platforms` or `local` change who gets the permissions, so they are rejected.
+const ALLOWED_MANIFEST_KEYS: &[&str] = &["$schema", "identifier", "description", "windows", "permissions"];
+
+/// Evaluate a capability manifest against the explicit allowlist (deny by default).
 pub fn capability_violations(manifest: &Value) -> Vec<String> {
     let mut problems = Vec::new();
-    if manifest.get("windows") != Some(&serde_json::json!(["main"])) {
+    let Some(object) = manifest.as_object() else {
+        return vec!["manifest".to_string()];
+    };
+    for key in object.keys().filter(|k| !ALLOWED_MANIFEST_KEYS.contains(&k.as_str())) {
+        problems.push(format!("unexpected key {key:?}"));
+    }
+    if object.get("windows") != Some(&serde_json::json!(["main"])) {
         problems.push("windows".to_string());
     }
-    let Some(perms) = manifest.get("permissions").and_then(Value::as_array) else {
-        return vec!["permissions".to_string()];
+    let Some(perms) = object.get("permissions").and_then(Value::as_array) else {
+        problems.push("permissions".to_string());
+        return problems;
     };
+    let mut seen = std::collections::BTreeSet::new();
     for p in perms {
         match p.as_str() {
-            Some(s) if s.starts_with("allow-") && !FORBIDDEN_PERMISSION_PARTS.iter().any(|bad| s.contains(bad)) => {}
-            other => problems.push(format!("{other:?}")),
+            Some(s) if ALLOWED_PERMISSIONS.contains(&s) => {
+                if !seen.insert(s) {
+                    problems.push(format!("duplicate {s:?}"));
+                }
+            }
+            // Non-string entries (scoped permission objects) and unknown names are both rejected.
+            other => problems.push(format!("unexpected permission {other:?}")),
         }
     }
     problems
@@ -410,15 +445,86 @@ mod tests {
         assert!(events.iter().all(|e| e["eventType"] != "verify"));
     }
 
+    fn manifest_with(perms: serde_json::Value) -> Value {
+        json!({"windows": ["main"], "permissions": perms})
+    }
+
     #[test]
-    fn capability_policy_rejects_dangerous_permissions() {
-        assert!(capability_violations(&json!({"windows":["main"],"permissions":["allow-list-tools"]})).is_empty());
-        for bad in
-            ["shell:allow-execute", "fs:default", "sql:allow-execute", "http:default", "opener:default", "core:default", "allow-shell-open"]
-        {
-            assert!(!capability_violations(&json!({"windows":["main"],"permissions":[bad]})).is_empty(), "{bad}");
+    fn shipped_manifest_is_exactly_the_allowlist() {
+        let manifest: Value = serde_json::from_str(CAPABILITIES_JSON).unwrap();
+        assert!(capability_violations(&manifest).is_empty());
+        let mut granted: Vec<&str> = manifest["permissions"].as_array().unwrap().iter().map(|p| p.as_str().unwrap()).collect();
+        granted.sort();
+        let mut allowed = ALLOWED_PERMISSIONS.to_vec();
+        allowed.sort();
+        assert_eq!(granted, allowed, "grant list and allowlist must be identical");
+    }
+
+    #[test]
+    fn unexpected_permissions_are_rejected() {
+        for bad in [
+            // broad / plugin / core permissions
+            "shell:allow-execute",
+            "fs:default",
+            "sql:allow-execute",
+            "http:default",
+            "opener:default",
+            "core:default",
+            "core:window:allow-close",
+            "autostart:default",
+            "autostart:allow-enable",
+            "single-instance:default",
+            "dialog:default",
+            "updater:default",
+            "process:allow-exit",
+            "os:default",
+            // look-alikes that the old prefix/substring rule could have admitted
+            "allow-unknown-command",
+            "allow-get-app-info-extra",
+            "allow-list-tool",
+            "ALLOW-LIST-TOOLS",
+            " allow-list-tools",
+            "allow-list-tools ",
+            "allow-",
+            "allow-*",
+            "*",
+            "",
+            "allow-shell-open",
+        ] {
+            assert!(!capability_violations(&manifest_with(json!([bad]))).is_empty(), "accepted {bad:?}");
         }
-        assert!(!capability_violations(&json!({"windows":["*"],"permissions":[]})).is_empty());
+    }
+
+    #[test]
+    fn non_string_scoped_and_duplicate_permissions_are_rejected() {
+        let scoped = json!([{"identifier": "allow-list-tools", "allow": [{"path": "**"}]}]);
+        assert!(!capability_violations(&manifest_with(scoped)).is_empty());
+        assert!(!capability_violations(&manifest_with(json!([null, 7, ["allow-list-tools"]]))).is_empty());
+        assert!(!capability_violations(&manifest_with(json!(["allow-list-tools", "allow-list-tools"]))).is_empty());
+        assert!(capability_violations(&manifest_with(json!(["allow-list-tools"]))).is_empty());
+    }
+
+    #[test]
+    fn manifest_scope_and_extra_keys_are_rejected() {
+        let ok = json!({"identifier": "default", "windows": ["main"], "permissions": ["allow-list-tools"]});
+        assert!(capability_violations(&ok).is_empty());
+        for (key, value) in [
+            ("webviews", json!(["*"])),
+            ("remote", json!({"urls": ["https://*"]})),
+            ("platforms", json!(["windows"])),
+            ("local", json!(true)),
+        ] {
+            let mut m = ok.clone();
+            m[key] = value;
+            assert!(!capability_violations(&m).is_empty(), "accepted extra key {key}");
+        }
+        for windows in [json!(["*"]), json!(["main", "other"]), json!([]), json!("main")] {
+            let mut m = ok.clone();
+            m["windows"] = windows;
+            assert!(!capability_violations(&m).is_empty());
+        }
+        assert!(!capability_violations(&json!({"windows": ["main"]})).is_empty(), "missing permissions");
+        assert!(!capability_violations(&json!(["allow-list-tools"])).is_empty(), "non-object manifest");
     }
 
     #[test]
