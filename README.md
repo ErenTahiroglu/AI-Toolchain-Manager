@@ -2,7 +2,7 @@
 
 Yapay zekâ kodlama ajanları (Claude Code, Antigravity) için geliştirici araçlarını **ileride** kurmayı, yapılandırmayı, güncellemeyi ve yönetmeyi hedefleyen bir masaüstü uygulaması (Tauri 2 + Rust + React/TypeScript + SQLite).
 
-> **Durum: Phase 2D — geliştirme aşaması. Uygulama yayın için hazır DEĞİLDİR.** Bugün hiçbir araç kurmaz, indirmez, çalıştırmaz veya güncellemez; ajan ayarlarını değiştirmez; ağa kendiliğinden bağlanmaz. Yalnızca **salt okunur** işler yapar. İmzalı bir dağıtım paketi, otomatik güncelleyici veya kurucu henüz yoktur.
+> **Durum: Phase 3A — geliştirme aşaması. Uygulama yayın için hazır DEĞİLDİR.** Bugün hiçbir araç kurmaz, indirmez, çalıştırmaz veya güncellemez; ajan ayarlarını değiştirmez; ağa kendiliğinden bağlanmaz. Yalnızca **salt okunur** işler yapar; kurulum yaşam döngüsünün (kur/güncelle/kaldır/geri al/çökme kurtarma) dürüst biçimde yapılabildiği, **yalnızca sentetik test dizinlerinde** ve **hiçbir düğmeye/komuta bağlı olmadan** kanıtlandı. İmzalı bir dağıtım paketi, otomatik güncelleyici veya kurucu henüz yoktur.
 
 Bu proje bir kullanıcı (programcı olmayan bir kişi) tarafından, bağımsız bir "Red Team" incelemesi eşliğinde adım adım geliştirilir. Her aşama ayrı raporlanır; hiçbir aşama bir önceki aşamanın yetkisini genişletmez.
 
@@ -15,14 +15,14 @@ Bu proje bir kullanıcı (programcı olmayan bir kişi) tarafından, bağımsız
 | Öneriler | Sabit kurallarla çalışan, yapay zekâ çağırmayan öneri önizlemesi | Hiçbir şey kurmaz veya etkinleştirmez |
 | **Bilgisayar Envanteri** | İzin verdiğiniz bölümlerde (PATH, Claude Code kullanıcı dosyaları, tek bir proje klasörü) araçların **varlığını** salt okunur olarak gözlemler; isteğe bağlı SHA-256 parmak izi | Program çalıştırmaz, sürüm sormaz, ağa bağlanmaz; "bulundu ≠ yapılandırıldı ≠ çalışıyor" ayrımını korur; hiçbir gerçek aracı "doğrulanmış" saymaz |
 | Yedek önizlemesi | Eski veritabanı yedeklerinde kişisel veri izi olup olmadığını (kapsamı ve sınırlarıyla) gösterir | Hiçbir yedeği silmez, taşımaz veya değiştirmez |
-| **Kurulum Planı (yeni, Phase 2D)** | Seçtiğiniz araç/platform/ajan için "kurulsaydı neler olurdu" planını gösterir: adımlar, ön koşullar, ağ/telemetri, değişecek yapılandırma, çakışmalar, geri alma durumu, planın neden uygulanamayacağı | **Hiçbir şey kurmaz.** Plan bir izin değildir; "Kur" düğmesi yoktur |
+| **Kurulum Planı** | Seçtiğiniz araç/platform/ajan için "kurulsaydı neler olurdu" taslağını gösterir: adımlar, ön koşullar (yalnızca GÜNCEL ve izinli tarama kanıtıyla), ağ/telemetri, değişecek yapılandırma, çakışmalar, **tarif ve onay durumu**, geri almanın yok/tasarlanmış/benzetilmiş olduğu, planın neden uygulanamayacağı | **Hiçbir şey kurmaz.** Plan bir taslaktır, bir izin veya onay değildir; "Kur/Onayla" düğmesi yoktur. Gerçek araçlar için incelenmiş tarif yoktur |
 | Etkinlik ve denetim | Zincirleme (hash) denetim kaydı, sağlık kontrolleri, tanılama | Gizli değerleri saklamaz |
 | Ayarlar | Tema, sistem tepsisi, kullanıcı kontrollü otomatik başlatma | — |
 
 ## Henüz yapamadıkları
 
 - Araç kurma, kaldırma, güncelleme, sürüm sorgulama, geri alma — **hiçbiri yok**.
-- Onaylanmış tipli kurulum tarifi (`schemas/install-recipe.schema.json`) için saklama/onay mekanizması yok; bu yüzden her plan "uygulanamaz" durumundadır.
+- Gerçek bir araç için **incelenmiş tarif yok** (yerleşik tarif listesi bilerek boştur) ve kullanıcı onayı için bir arayüz/kalıcı depo yok; bu yüzden her gerçek plan "uygulanamaz" durumundadır. Tarif kayıt defteri, onay sözleşmesi ve işlem motoru yalnızca sentetik sahte araçlarla, yalıtılmış geçici dizinlerde sınanır ve hiçbir komuta/düğmeye bağlı değildir.
 - Bağımsız olarak doğrulanmış bir referans özeti (imzalı kaynak) yok; yerleşik yetkili liste **bilerek boştur**. Bu nedenle hiçbir gerçek araç "kimliği doğrulanmış" olamaz.
 - Ajan yapılandırma dosyalarını (ör. `settings.json`, `CLAUDE.md`) düzenleme yok.
 - Cihazlar arası eşitleme, otomatik güncelleyici, imzalı kurulum paketi yok.
@@ -77,7 +77,7 @@ ATM_SELFCHECK_JSON=out.json python -m unittest discover -s tests -v
 ## Test ve CI kanıtı
 
 - Her `development` itme işlemi GitHub Actions'ta Windows x64 ve macOS arm64 üzerinde şunları çalıştırır: Rust biçim/lint (`-D warnings`) ve testler, ön yüz tip denetimi/testi/derlemesi, Python sözleşme testleri, derlenen ikilinin başsız `--self-check` çalıştırması. Kesin SHA ve sonuçlar için [Actions sayfasına](https://github.com/ErenTahiroglu/AI-Toolchain-Manager/actions) bakın; yeşil bir CI yalnızca o koşucunun gerçekten yaptığını kanıtlar.
-- Phase 2D yerel sonuçları (Windows 11 x64): Rust 318 test, ön yüz 68 test, Python sözleşme 69 test, hata ayıklama derlemesi ve WebView2 üzerinde elle arayüz denemesi. Sayılar aşama raporlarında güncellenir; bu satır bir sürüm vaadi değildir.
+- Phase 3A yerel sonuçları (Windows 11 x64): Rust 403 test, ön yüz 72 test, Python sözleşme 78 test, hata ayıklama derlemesi ve WebView2 üzerinde elle arayüz denemesi. Sayılar aşama raporlarında güncellenir; bu satır bir sürüm vaadi değildir.
 - Kanıt sınırı: macOS CI'ı gerçek Mac masaüstü testi değildir; Windows release derlemesinin yerel doğrulaması yoktur.
 
 ## Aşama raporları ve belgeler
@@ -88,6 +88,7 @@ ATM_SELFCHECK_JSON=out.json python -m unittest discover -s tests -v
 - [Phase 2A](docs/PHASE-2A.md), [Phase 2B](docs/PHASE-2B.md) — salt okunur envanter, geçiş ve gizlilik kapısı, kanıt merdiveni
 - [Phase 2C](docs/PHASE-2C.md) — güvenli yedek incelemesi, pasif artefakt kimliği, güven sözleşmesi
 - [Phase 2D](docs/PHASE-2D.md) — kurulum planı önizlemesi, taşınabilirlik, evrensel Mach-O doğrulaması
+- [Phase 3A](docs/PHASE-3A.md) — incelenmiş tarif kayıt defteri, ayrı onay sözleşmesi, sentetik işlem motoru (kur/güncelle/kaldır/geri al/kurtarma); [Gitleaks pilot uygunluk değerlendirmesi](docs/GITLEAKS-PILOT-ASSESSMENT.md) (yalnızca araştırma: uygun değil)
 - [Aktif yoklama ilke önerisi](docs/ACTIVE-PROBE-POLICY-PROPOSAL.md) (uygulanmadı), [Windows Akıllı Uygulama Denetimi notu](docs/WINDOWS-SMART-APP-CONTROL.md), [dal yönetimi](docs/BRANCH-GOVERNANCE.md), [ADR'ler](docs/adr/)
 
 ## Dallar

@@ -36,6 +36,7 @@ fn run(out: PathBuf) -> i32 {
         let closure = closure_probe(&conn).map_err(|e| e.to_string())?;
         let discovery_probe = crate::discovery_probe::synthetic_probe(&conn, &dir).map_err(|e| e.to_string())?;
         let plan_probe = plan_probe(&conn).map_err(|e| e.to_string())?;
+        let lifecycle_probe = lifecycle_probe(&conn, &dir).map_err(|e| e.to_string())?;
         let report = health::run_and_record(&conn, &ctx).map_err(|e| e.to_string())?;
         let chain = audit::verify(&conn).map_err(|e| e.to_string())?;
         Ok(json!({
@@ -48,6 +49,7 @@ fn run(out: PathBuf) -> i32 {
             "closureProbe": closure,
             "discoveryProbe": discovery_probe,
             "planProbe": plan_probe,
+            "lifecycleProbe": lifecycle_probe,
             "report": report,
             "auditChain": chain,
             "auditEvents": audit::list_ascending(&conn).map_err(|e| e.to_string())?,
@@ -98,6 +100,111 @@ fn plan_probe(conn: &rusqlite::Connection) -> crate::error::AppResult<serde_json
         plans.push(serde_json::to_value(crate::plan::plan_for(conn, &request, &host)?)?);
     }
     Ok(serde_json::Value::Array(plans))
+}
+
+/// Runs the SYNTHETIC lifecycle (recipe, plan, approval, install, repeat, update, failed update with rollback, crash and
+/// recovery, uninstall) inside a throw-away sandbox below the self-check's own data directory, with made-up artifacts and
+/// made-up authenticated references. Nothing real is installed, started or downloaded; the contract tests check the report.
+fn lifecycle_probe(conn: &rusqlite::Connection, dir: &std::path::Path) -> Result<serde_json::Value, String> {
+    use crate::{
+        approval::Action,
+        lifecycle::{Authority, Engine, Fault, Outcome, Point, Recovered, SandboxRoot, TxnError},
+        synthetic::{approve_and_verify, Scenario},
+    };
+    let host = crate::plan::HostFacts::detect();
+    if !crate::plan::PLATFORMS.contains(&host.platform.as_str()) {
+        return Ok(json!({ "skipped": "unsupported_platform" }));
+    }
+    let platform = host.platform.as_str();
+    // only a column template for the synthetic catalog entry; it never becomes a recipe
+    let template = catalog::get_entry(conn, "gitleaks").map_err(|e| e.to_string())?;
+    let tool = "synthetic-probe";
+    let v1 = Scenario::new(&template, tool, "1.0.0", platform, b"probe artifact one");
+    let v2 = Scenario::new(&template, tool, "2.0.0", platform, b"probe artifact two");
+    let v3 = Scenario::new(&template, tool, "3.0.0", platform, b"probe artifact three");
+    let mut refs = v1.refs.clone();
+    for sc in [&v2, &v3] {
+        refs.authenticated.extend(sc.refs.authenticated.clone());
+    }
+    let base = dir.join("lifecycle-probe");
+    std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
+    let computer = "synthetic-probe-computer";
+    let root = SandboxRoot::create(&base, computer).map_err(|e| e.to_string())?;
+    let clock = chrono::Utc::now;
+    static FAIL_AFTER_SWITCH: fn(Point) -> Option<Fault> = |p| (p == Point::AfterPointerSwitch).then_some(Fault::Fail);
+    static CRASH_AFTER_SWITCH: fn(Point) -> Option<Fault> = |p| (p == Point::AfterPointerSwitch).then_some(Fault::Crash);
+    let engine = |fault: Option<&'static (dyn Fn(Point) -> Option<Fault> + Sync)>| Engine {
+        root: &root,
+        refs: &refs,
+        host_platform: platform,
+        clock: &clock,
+        fault,
+    };
+    let approval = |sc: &Scenario, action: Action, from: Option<&str>| {
+        let (plan, valid) = (sc.plan(), sc.validated());
+        approve_and_verify(conn, &valid, &plan, platform, action, from, computer, chrono::Utc::now())
+            .map(|a| (a, valid))
+            .map_err(|e| e.code().to_string())
+    };
+    let plans: Vec<serde_json::Value> =
+        [&v1, &v2].iter().map(|sc| serde_json::to_value(sc.plan()).map_err(|e| e.to_string())).collect::<Result<_, _>>()?;
+    let detail = |r: Result<Outcome, TxnError>| match r {
+        Ok(o) => json!({ "ok": true, "alreadyApplied": o.already_applied, "receipt": o.receipt }),
+        Err(TxnError::Failed { code, rollback }) => json!({ "ok": false, "code": code, "rollback": rollback }),
+        Err(TxnError::Interrupted(p)) => json!({ "ok": false, "interrupted": format!("{p:?}") }),
+        Err(TxnError::Refused(c)) => json!({ "ok": false, "refused": c }),
+        Err(TxnError::Busy) => json!({ "ok": false, "refused": "busy" }),
+        Err(TxnError::Pending(_)) => json!({ "ok": false, "refused": "pending" }),
+    };
+    let mut steps: Vec<serde_json::Value> = Vec::new();
+    let active = |e: &Engine| e.active_version(tool).ok().flatten();
+    let mut record =
+        |name: &str, e: &Engine, d: serde_json::Value| steps.push(json!({ "step": name, "activeVersion": active(e), "detail": d }));
+
+    let (a1, r1) = approval(&v1, Action::Install, None)?;
+    let e = engine(None);
+    record("install", &e, detail(e.install(&Authority { recipe: &r1, approval: &a1 }, &v1.bytes)));
+    record("install-again", &e, detail(e.install(&Authority { recipe: &r1, approval: &a1 }, &v1.bytes)));
+    let (a2, r2) = approval(&v2, Action::Update, Some("1.0.0"))?;
+    record("update", &e, detail(e.update(&Authority { recipe: &r2, approval: &a2 }, &v2.bytes)));
+    // a failing update: the pointer was switched, then the step fails; rolled back to 2.0.0
+    let (a3, r3) = approval(&v3, Action::Update, Some("2.0.0"))?;
+    let failing = engine(Some(&FAIL_AFTER_SWITCH));
+    record("failed-update", &e, detail(failing.update(&Authority { recipe: &r3, approval: &a3 }, &v3.bytes)));
+    // a crash in the middle of the same update, then recovery as at the next start
+    let (a3b, r3b) = approval(&v3, Action::Update, Some("2.0.0"))?;
+    let crashing = engine(Some(&CRASH_AFTER_SWITCH));
+    record("crashed-update", &e, detail(crashing.update(&Authority { recipe: &r3b, approval: &a3b }, &v3.bytes)));
+    let recovered: Vec<&str> = e
+        .recover()
+        .map_err(|err| format!("{err:?}"))?
+        .into_iter()
+        .map(|r| match r {
+            Recovered::RolledBack(_) => "rolled_back",
+            Recovered::RolledForward(_) => "rolled_forward",
+            Recovered::NeedsAttention(..) => "needs_attention",
+            Recovered::CorruptJournal(_) => "corrupt_journal",
+            Recovered::OrphanLockRemoved(_) => "orphan_lock_removed",
+        })
+        .collect();
+    record("recovery", &e, json!({ "recovered": recovered }));
+    let (a4, r4) = approval(&v2, Action::Uninstall, None)?;
+    record("uninstall", &e, detail(e.uninstall(&Authority { recipe: &r4, approval: &a4 })));
+    let sandbox_name = root.path().file_name().and_then(|n| n.to_str()).unwrap_or("?").to_string();
+    let entries: Vec<String> = std::fs::read_dir(&base)
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().replace(&sandbox_name, "<sandbox>"))
+        .collect();
+    Ok(json!({
+        "synthetic": true,
+        "platform": platform,
+        "recipe": serde_json::to_value(&v1.reviewed).map_err(|e| e.to_string())?,
+        "recipeDigest": r1.digest(),
+        "plans": plans,
+        "steps": steps,
+        "baseEntries": entries,
+    }))
 }
 
 /// Runs every synthetic scenario through the real engine of the built binary (read-only apart from the

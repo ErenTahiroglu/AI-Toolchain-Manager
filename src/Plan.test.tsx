@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { createBackend, makePlan, type Backend } from "./test/backend";
+import type { InstallPlan } from "./types";
 
 let backend: Backend;
 vi.mock("@tauri-apps/api/core", () => ({
@@ -52,7 +53,8 @@ describe("installation plan preview", () => {
     const reasons = screen.getByRole("list", { name: "Engelleme nedenleri" });
     expect(within(reasons).getByText(/onaylanmış, tipli bir kurulum tarifi yok/)).toBeInTheDocument();
     expect(within(reasons).getByText(/bağımsız olarak incelenmedi/)).toBeInTheDocument();
-    expect(screen.getByText(/Geri alma: yok\./)).toBeInTheDocument();
+    expect(screen.getByText(/Geri alma durumu:/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Geri alma YOK/).length).toBeGreaterThan(0);
   });
 
   it("presents steps as proposals that will not be applied, with what is missing, the network and the targets", async () => {
@@ -124,4 +126,65 @@ describe("installation plan preview", () => {
     await show();
     expect(screen.getByText(/bu bilgisayarınkinden FARKLI/)).toBeInTheDocument();
   });
+
+  describe("recipe, approval and rollback status", () => {
+    const withRecipe = (recipe: Partial<InstallPlan["recipe"]>, over: Partial<InstallPlan> = {}) => {
+      backend.planOverride = (r) => makePlan(r, { recipe: { ...makePlan(r).recipe, ...recipe }, ...over });
+    };
+
+    it("says that no reviewed recipe exists and that the plan is a draft without any approval", async () => {
+      await open();
+      await choose();
+      await show();
+      const status = screen.getByRole("list", { name: "Tarif ve onay durumu" });
+      expect(within(status).getByText(/İncelenmiş bir tarif yok/)).toBeInTheDocument();
+      expect(within(status).getByText(/Bu plan bir TASLAKTIR; kullanıcı onayı yok/)).toBeInTheDocument();
+      expect(within(status).getByText(/Geri alma YOK/)).toBeInTheDocument();
+      expect(screen.queryByText(/SENTETİK DEMO/)).not.toBeInTheDocument();
+    });
+
+    it("marks a plan built from a synthetic recipe as a demonstration, keeps review apart from approval and never calls rollback verified", async () => {
+      withRecipe(
+        { state: "validated", recipeId: "synthetic-tool-1.0.0", revision: 1, recipeDigest: "ab".repeat(32), synthetic: true, rollbackState: "simulated", authentication: "authenticated_reference" },
+        {
+          rollback: { available: false, reliability: "simulated", text: "Geri alma sözleşmesi yalnızca SENTETİK olarak benzetildi." },
+          eligibility: { status: "blocked", canExecute: false, blockers: [{ code: "user_approval_missing", text: "Tarif incelenmiş olsa da bu plan için kullanıcı onayı yok." }], warnings: [] },
+        },
+      );
+      await open();
+      await choose();
+      await show();
+      expect(screen.getByText(/SENTETİK DEMO/)).toBeInTheDocument();
+      expect(screen.getByText(/Gerçek bir kurulum değildir/)).toBeInTheDocument();
+      const status = screen.getByRole("list", { name: "Tarif ve onay durumu" });
+      expect(within(status).getByText(/Tarifin incelenmesi bir ONAY değildir/)).toBeInTheDocument();
+      expect(within(status).getByText(/yalnızca SENTETİK test dizinlerinde benzetildi \(gerçek bir araçta DOĞRULANMADI\)/)).toBeInTheDocument();
+      expect(within(status).getByText(/Bu plan bir TASLAKTIR; kullanıcı onayı yok/)).toBeInTheDocument();
+      expect(screen.getByText(/Bu plan uygulanamaz/)).toBeInTheDocument();
+      expect(within(screen.getByRole("list", { name: "Engelleme nedenleri" })).getByText(/kullanıcı onayı yok/)).toBeInTheDocument();
+      expect(document.body.textContent).not.toMatch(/Geri alma (doğrulandı|çalışıyor|hazır)/);
+      for (const b of screen.getAllByRole("button")) expect(b.textContent ?? "").not.toMatch(/^(Kur|Onayla|Uygula|Güncelle|Kaldır|Başlat)(\s|$)/);
+    });
+
+    it("explains in plain Turkish why a recipe was not accepted", async () => {
+      withRecipe({ state: "invalid", recipeId: "x", revision: 1, recipeDigest: "cd".repeat(32), problems: ["artifact_not_authenticated", "changed_after_review", "digest_scope_not_exact_file"] });
+      await open();
+      await choose();
+      await show();
+      const status = screen.getByRole("list", { name: "Tarif ve onay durumu" });
+      expect(within(status).getByText(/Bir tarif var ama GEÇERSİZ/)).toBeInTheDocument();
+      expect(within(status).getByText(/bağımsız olarak doğrulanmış bir referansla eşleşmiyor/)).toBeInTheDocument();
+      expect(within(status).getByText(/tarif incelemeden sonra değişti/)).toBeInTheDocument();
+      expect(within(status).getByText(/özet bir arşive ait/)).toBeInTheDocument();
+    });
+
+    it("tells apart a designed rollback from a simulated one", async () => {
+      withRecipe({ state: "validated", recipeId: "x", revision: 1, recipeDigest: "ef".repeat(32), rollbackState: "designed" }, { rollback: { available: false, reliability: "designed", text: "tasarım" } });
+      await open();
+      await choose();
+      await show();
+      expect(screen.getAllByText(/Geri alma yalnızca TASARLANDI \(hiçbir yerde denenmedi\)/).length).toBeGreaterThan(0);
+    });
+  });
+
 });

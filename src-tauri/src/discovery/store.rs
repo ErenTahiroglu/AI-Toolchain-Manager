@@ -457,6 +457,14 @@ fn reason_not_current(o: &StoredObservation, last: &ScanSummary, in_latest: bool
     if o.stale {
         return Some(format!("Son tarama {STALE_AFTER_HOURS} saatten eski; yeniden tarayın."));
     }
+    // A row that claims to come from the latest scan for an area that scan was not allowed to look at is inconsistent
+    // (corrupted, migrated or injected). A stored "current" can never stand in for provenance: it is not current.
+    if !checked {
+        return Some(
+            "Bu kayıt son taramadan görünüyor, ancak o tarama bu alana bakma iznine sahip değildi; tutarsız kayıt güvenilmez sayıldı."
+                .to_string(),
+        );
+    }
     None
 }
 

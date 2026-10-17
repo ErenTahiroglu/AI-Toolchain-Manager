@@ -174,6 +174,11 @@ fn live_project(conn: &Connection, alias: &str) -> AppResult<ProjectRef> {
     }
 }
 
+/// Does this alias name a registered, not removed project? (Used before any approval can bind to a project.)
+pub fn is_registered(conn: &Connection, alias: &str) -> bool {
+    live_project(conn, alias).is_ok()
+}
+
 fn clean_text(raw: &str, max: usize) -> String {
     let cleaned: String = raw.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
     cleaned.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(max).collect()

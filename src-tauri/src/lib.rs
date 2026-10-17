@@ -1,3 +1,4 @@
+mod approval;
 mod audit;
 mod backups;
 mod catalog;
@@ -13,14 +14,17 @@ mod error;
 mod gate;
 mod github_url;
 mod health;
+mod lifecycle;
 mod plan;
 mod projects;
+mod recipe;
 mod recommend;
 mod redact;
 mod selfcheck;
 mod settings;
 mod skills;
 mod state;
+mod synthetic;
 
 use audit::NewEvent;
 use health::{PreviousShutdown, TrayState};

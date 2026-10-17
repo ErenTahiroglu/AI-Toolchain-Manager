@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ErenTahiroglu/AI-Toolchain-Manager/blob/development/schemas/lifecycle-receipt.schema.json",
+  "title": "Synthetic lifecycle transaction receipt",
+  "description": "The durable record of one COMMITTED synthetic transaction. Phase 3A only: receipts exist for made-up tools in isolated test directories and are always marked synthetic. A rolled-back transaction has no receipt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "txnId", "action", "toolId", "fromVersion", "toVersion", "artifactSha256", "recipeDigest", "approvalId", "platformTarget", "computerId", "synthetic", "completedAt", "state", "kept", "rollback", "receiptDigest"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "txnId": { "type": "string", "pattern": "^txn-[0-9a-f]{32}$" },
+    "action": { "enum": ["install", "update", "uninstall"] },
+    "toolId": { "type": "string", "pattern": "^synthetic-[a-z0-9._-]{1,56}$" },
+    "fromVersion": { "type": ["string", "null"] },
+    "toVersion": { "type": ["string", "null"] },
+    "artifactSha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+    "recipeDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "approvalId": { "type": "string" },
+    "platformTarget": { "enum": ["windows-x64", "macos-arm64"] },
+    "computerId": { "type": "string" },
+    "synthetic": { "const": true },
+    "completedAt": { "type": "string", "format": "date-time" },
+    "state": { "const": "committed" },
+    "kept": { "type": "array", "items": { "enum": ["user_data"] } },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "undone", "notUndone", "notCovered"],
+      "properties": {
+        "status": { "const": "not_needed" },
+        "undone": { "type": "array", "maxItems": 0 },
+        "notUndone": { "type": "array", "maxItems": 0 },
+        "notCovered": { "type": "array" }
+      }
+    },
+    "receiptDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  },
+  "allOf": [
+    { "if": { "properties": { "action": { "const": "install" } } }, "then": { "properties": { "fromVersion": { "type": "null" }, "toVersion": { "type": "string" } } } },
+    { "if": { "properties": { "action": { "const": "update" } } }, "then": { "properties": { "fromVersion": { "type": "string" }, "toVersion": { "type": "string" } } } },
+    { "if": { "properties": { "action": { "const": "uninstall" } } }, "then": { "properties": { "toVersion": { "type": "null" } } } }
+  ]
+}

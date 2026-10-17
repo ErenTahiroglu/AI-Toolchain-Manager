@@ -89,6 +89,8 @@ export const makePlan = (r: PlanRequest, over: Partial<InstallPlan> = {}): Insta
   uninstall: { state: "manager_owned", text: "Yöneticinin sürümlü klasörü silinebilir; aracın kendi ürettiği dizinler/veriler kullanıcıya ait sayılır ve kalır." },
   rollback: { available: false, reliability: "none_implemented", text: "Geri alma bu sürümde YOK." },
   unknowns: ["Aracın işlevinin bu bilgisayarda çalıştığı doğrulanmadı ve bu planla doğrulanmayacak."],
+  recipe: { state: "none", recipeId: null, revision: null, recipeDigest: null, synthetic: false, problems: [], rollbackState: null, authentication: "none" },
+  approvalState: "not_given",
   ...over,
 });
 
@@ -104,6 +106,8 @@ export interface Backend {
   nextEvaluation: Evaluation;
   inventory: Inventory;
   backupPlan: CleanupPlan;
+  /** Lets a test return a plan with another recipe status. */
+  planOverride: ((r: PlanRequest) => InstallPlan) | null;
   handle: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -133,6 +137,7 @@ export function createBackend(): Backend {
     nextEvaluation: { taskId: "t", phase: "start", recommendations: [], suppressed: [], disclaimer: "Hiçbir şey kurulmadı." },
     inventory: emptyInventory(),
     backupPlan: { entries: [], preconditions: [], examined: ["Tüm tablolardaki metin değerleri (örüntü taraması)"], notExamined: ["Hiçbir örüntüye uymayan kişisel metin taranamaz"], reviewCandidates: [], noViolationDetected: [], partiallyScanned: [], notAssessable: [], directoryStatus: "ok", limits: { maxTextCells: 500000, maxRawBytes: 268435456, maxSqliteImageBytes: 134217728, timeoutSeconds: 30 }, unrecognisedFiles: 0, deletionAvailable: false, executed: false, notes: ["Bu bir ÖNİZLEMEDİR: hiçbir yedek silinmedi, taşınmadı veya değiştirilmedi."] },
+    planOverride: null,
     async handle(cmd, args) {
       b.calls.push({ cmd, args });
       if (b.failures[cmd]) throw b.failures[cmd];
@@ -212,7 +217,7 @@ export function createBackend(): Backend {
         case "plan_install": {
           const r = args?.request as PlanRequest;
           if (!b.entries.some((e) => e.entryId === r.entryId)) throw { code: "CATALOG_ENTRY_NOT_FOUND", message: "Kayıt bulunamadı." };
-          return JSON.parse(JSON.stringify(makePlan(r)));
+          return JSON.parse(JSON.stringify(b.planOverride ? b.planOverride(r) : makePlan(r)));
         }
         case "run_discovery_scan": {
           const r = args?.request as { pathExecutables: boolean; userConfig: boolean; project: unknown };

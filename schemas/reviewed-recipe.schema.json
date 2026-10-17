@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ErenTahiroglu/AI-Toolchain-Manager/blob/development/schemas/reviewed-recipe.schema.json",
+  "title": "Reviewed install recipe (registry record)",
+  "description": "A typed, versioned statement of exactly what installing one tool version on one target would do, together with its review. Review is not authorization: an approval is a separate object bound to this recipe's digest. Untrusted catalog or README text never becomes a recipe. The built-in registry is empty; every record in this phase is synthetic.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["recipe", "review"],
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$" },
+    "hex64": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  },
+  "properties": {
+    "recipe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "recipeId", "revision", "synthetic", "toolId", "version", "target", "source", "artifact", "authentication", "license", "permissions", "filesystemChanges", "network", "lifecycleActions", "steps", "rollback"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "recipeId": { "$ref": "#/$defs/id" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "synthetic": { "type": "boolean" },
+        "toolId": { "$ref": "#/$defs/id" },
+        "version": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$", "not": { "enum": ["latest", "stable", "main", "master", "head"] } },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["platformTarget", "agentSurface", "scope"],
+          "properties": {
+            "platformTarget": { "enum": ["windows-x64", "macos-arm64"] },
+            "agentSurface": { "enum": ["claude-code-terminal", "claude-desktop-code", "antigravity-ide", "antigravity-cli", "antigravity-2", "local-cli"] },
+            "scope": { "enum": ["user", "project"] }
+          }
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository", "immutableCommit", "sourceAttested"],
+          "properties": {
+            "repository": { "type": "string", "pattern": "^[^/\\s]+/[^/\\s]+$" },
+            "immutableCommit": { "type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$" },
+            "sourceAttested": { "type": "boolean" }
+          }
+        },
+        "artifact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["artifactId", "fileName", "sizeBytes", "sha256", "digestScope", "format"],
+          "properties": {
+            "artifactId": { "const": "primary" },
+            "fileName": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+            "sizeBytes": { "type": "integer", "minimum": 1 },
+            "sha256": { "$ref": "#/$defs/hex64" },
+            "digestScope": { "const": "exact_file" },
+            "format": { "enum": ["pe-x64", "pe-arm64", "pe-x86", "macho-arm64", "macho-x64", "macho-universal-arm64", "macho-universal-x64", "macho-universal-arm64-x64", "elf-x64", "elf-arm64", "script-shebang"] }
+          }
+        },
+        "authentication": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "evidenceId"],
+            "properties": {
+              "kind": { "enum": ["authenticated_reference_digest", "synthetic_source_attestation"] },
+              "evidenceId": { "$ref": "#/$defs/id" }
+            }
+          },
+          "contains": { "type": "object", "properties": { "kind": { "const": "authenticated_reference_digest" } }, "required": ["kind"] }
+        },
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "spdxId", "evidenceId"],
+          "properties": {
+            "state": { "const": "accepted" },
+            "spdxId": { "type": "string", "minLength": 1, "maxLength": 40 },
+            "evidenceId": { "type": "string", "pattern": "^R[0-9]{2,3}$" }
+          }
+        },
+        "permissions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["current_user_account", "network_download", "write_manager_folders"] },
+          "contains": { "const": "current_user_account" }
+        },
+        "filesystemChanges": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["area", "kind"],
+            "properties": {
+              "area": { "enum": ["manager_staging", "manager_versions", "manager_state"] },
+              "kind": { "enum": ["create", "replace", "remove"] }
+            }
+          }
+        },
+        "network": { "type": "array", "uniqueItems": true, "items": { "enum": ["github_release_download", "package_registry", "agent_plugin_registry"] } },
+        "lifecycleActions": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["install", "update", "uninstall"] } },
+        "steps": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "description": "fetch, verify, stage, activate: each item is a schema-valid operation of install-recipe.schema.json",
+          "items": { "type": "object" }
+        },
+        "rollback": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "undoes", "doesNotUndo"],
+          "properties": {
+            "state": { "enum": ["designed", "simulated"], "description": "'verified' needs evidence from a real target and is not accepted in this phase" },
+            "undoes": { "type": "array", "minItems": 1, "items": { "enum": ["pointer_restore", "staging_removal", "version_folder_removal", "removed_version_restore"] } },
+            "doesNotUndo": { "type": "array", "items": { "enum": ["tool_user_data", "external_effects", "agent_configuration"] }, "contains": { "const": "tool_user_data" } }
+          }
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reviewerId", "reviewedRecipeDigest", "stagingEvidence"],
+      "properties": {
+        "state": { "enum": ["draft", "reviewed", "rejected"] },
+        "reviewerId": { "type": "string", "minLength": 3, "maxLength": 64 },
+        "reviewedRecipeDigest": { "type": "string", "description": "SHA-256 of the canonical recipe content the reviewer saw; a changed recipe no longer matches" },
+        "stagingEvidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["checkId", "state", "independent", "evidenceDigest"],
+            "properties": {
+              "checkId": { "$ref": "#/$defs/id" },
+              "state": { "enum": ["passed", "failed", "blocked"] },
+              "independent": { "type": "boolean" },
+              "evidenceDigest": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

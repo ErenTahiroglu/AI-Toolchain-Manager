@@ -33,8 +33,26 @@ const BASIS: Record<string, string> = {
   publisher_declared: "yayıncı beyanı", not_checked: "denetlenmedi",
 };
 const PIN: Record<string, string> = {
+  authenticated: "commit, bağımsız kanıtla depoya bağlandı (yalnızca sentetik demoda)",
   none: "katalogda commit bildirilmemiş", malformed: "bildirilen commit geçersiz (yok sayıldı)",
   declared_unverified: "commit yalnızca BEYAN edilmiş; kaynağın bu commit’e ait olduğu doğrulanmadı",
+};
+const ROLLBACK: Record<string, string> = {
+  none_implemented: "Geri alma YOK (bu sürümde uygulanmadı)",
+  designed: "Geri alma yalnızca TASARLANDI (hiçbir yerde denenmedi)",
+  simulated: "Geri alma yalnızca SENTETİK test dizinlerinde benzetildi (gerçek bir araçta DOĞRULANMADI)",
+};
+const PROBLEM: Record<string, string> = {
+  schema_version: "tarif biçim sürümü desteklenmiyor", identity: "tarif kimliği geçersiz", version_not_exact: "sürüm tam değil (aralık veya 'latest')",
+  target: "hedef geçersiz", source_not_immutable: "kaynak değişmez bir commit’e sabitlenmemiş", artifact_identity: "dosya kimliği eksik/geçersiz",
+  digest_scope_not_exact_file: "özet bir arşive ait; kurulacak dosyayı temsil etmez", artifact_format: "dosya biçimi geçersiz veya hedefe uymuyor",
+  artifact_not_authenticated: "dosya özeti bağımsız olarak doğrulanmış bir referansla eşleşmiyor", authenticated_references_conflict: "doğrulanmış referanslar birbiriyle çelişiyor",
+  source_attestation_unverifiable: "kaynak kanıtı doğrulanamıyor", authentication_kind: "kanıt türü tanınmıyor", license_not_accepted: "lisans kabul edilmedi",
+  permissions: "izinler geçersiz", filesystem_changes: "dosya sistemi değişiklikleri geçersiz", network: "ağ bildirimi geçersiz",
+  lifecycle_actions: "yaşam döngüsü eylemleri geçersiz", steps: "adımlar şemadaki şablona uymuyor", rollback_contract: "geri alma sözleşmesi geçersiz",
+  not_reviewed: "tarif incelenmedi", changed_after_review: "tarif incelemeden sonra değişti", reviewer: "inceleyen geçersiz",
+  staging_evidence: "bağımsız hazırlama kanıtı yok veya başarısız", synthetic_flag: "sentetik işareti tutarsız",
+  recipe_does_not_match_the_question: "tarif bu araç/platform/yüzey/kapsam için değil", ambiguous_recipes: "aynı soru için birden çok tarif var",
 };
 const SOURCE: Record<string, string> = {
   observed_scan: "son tarama kaydından", publisher_declared: "yayıncının beyanı (doğrulanmadı)", not_checked: "denetlenmedi",
@@ -159,9 +177,30 @@ function PlanView({ plan }: { plan: InstallPlan }) {
       <h2 id="h-plan-result">{plan.entry.displayName} için kurulum planı (ön izleme)</h2>
       <p role="note" className="banner banner-synthetic">{plan.statement}</p>
 
+      {plan.recipe.synthetic && (
+        <div role="note" className="banner banner-synthetic">
+          <strong>SENTETİK DEMO</strong> — Bu plan gerçek bir araca ait değildir; yalnızca yalıtılmış test dizinlerinde denenen uydurma bir tarife dayanır. Gerçek bir kurulum değildir.
+        </div>
+      )}
+
+      <h3>Tarif ve onay durumu</h3>
+      <ul aria-label="Tarif ve onay durumu">
+        <li>
+          {plan.recipe.state === "none" && "İncelenmiş bir tarif yok: bu araç için hiçbir kurulum tarifi onaylanmamış."}
+          {plan.recipe.state === "invalid" && (
+            <>Bir tarif var ama GEÇERSİZ: {plan.recipe.problems.map((p) => PROBLEM[p] ?? p).join("; ")}.</>
+          )}
+          {plan.recipe.state === "validated" && (
+            <>İncelenmiş tarif doğrulandı (özet <code>{(plan.recipe.recipeDigest ?? "").slice(0, 12)}…</code>, sürüm {plan.recipe.revision}). Tarifin incelenmesi bir ONAY değildir.</>
+          )}
+        </li>
+        <li><strong>Bu plan bir TASLAKTIR; kullanıcı onayı yok.</strong> Plan kimliği bir onay değildir. Onay, tarife ve bu tam plana bağlı ayrı bir işlem olacaktır ve bu sürümde onay verecek bir düğme yoktur.</li>
+        <li>{ROLLBACK[plan.rollback.reliability] ?? plan.rollback.reliability}</li>
+      </ul>
+
       <h3>Uygunluk</h3>
       <p>
-        <strong role="status">⛔ Bu plan uygulanamaz.</strong> Bu sürümde hiçbir araç kurulamaz; ayrıca aşağıdaki nedenler de geçerlidir:
+        <strong role="status">⛔ Bu plan uygulanamaz.</strong> Bu sürümde hiçbir araç kurulamaz; ayrıca aşağıdaki gereksinimler eksiktir:
       </p>
       <ul aria-label="Engelleme nedenleri">
         {plan.eligibility.blockers.map((b) => <li key={b.code}>{b.text} <code className="small">{b.code}</code></li>)}
@@ -240,7 +279,7 @@ function PlanView({ plan }: { plan: InstallPlan }) {
       <h3>Kaldırma ve geri alma</h3>
       <ul aria-label="Kaldırma ve geri alma">
         <li>Kaldırma: {plan.uninstall.text}</li>
-        <li><strong>Geri alma: yok.</strong> {plan.rollback.text}</li>
+        <li><strong>Geri alma durumu:</strong> {ROLLBACK[plan.rollback.reliability] ?? plan.rollback.reliability}. {plan.rollback.text}</li>
       </ul>
 
       {plan.declaredDependencies.length > 0 && (

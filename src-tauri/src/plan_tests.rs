@@ -103,6 +103,7 @@ fn this_platform() -> &'static str {
 #[test]
 fn every_entry_platform_surface_scope_and_method_gives_a_blocked_preview_only_plan() {
     let conn = seeded();
+    crate::projects::add_reference(&conn, "proje-a", "Proje A", "").unwrap();
     let mut count = 0;
     for e in catalog::list_catalog(&conn).unwrap() {
         for platform in PLATFORMS {
@@ -1055,7 +1056,7 @@ fn the_plan_id_of_a_fixed_input_is_the_same_on_every_platform() {
     assert_eq!(p.plan_id, GOLDEN_PLAN_ID, "the canonical plan content changed; if intended, update the pinned id");
 }
 
-const GOLDEN_PLAN_ID: &str = "1663cdd8f8f720a662aa87db41d51430ae06b0f20e990f6142e8d980bc70690d";
+const GOLDEN_PLAN_ID: &str = "0c1d15754c7808d1259e161d5227c9239b7fd0ed74b3a7a1eaa550e669ed9fb5";
 
 #[test]
 fn modifying_the_plan_id_or_any_content_field_without_the_matching_id_is_rejected() {
@@ -1250,7 +1251,130 @@ fn a_hash_is_not_an_authorization_and_a_recomputed_id_still_cannot_make_a_plan_e
     }
     // the plan type carries no approval, user or recipe-digest field at all
     let text = serde_json::to_string(&p).unwrap();
-    for field in ["approval", "approvedAt", "authorizedRecipeDigest", "authorizationState"] {
+    for field in ["\"approval\"", "approvedAt", "authorizedRecipeDigest", "authorizationState", "approvalId"] {
         assert!(!text.contains(field), "{field}");
     }
+}
+
+// =====================================================================================================================
+// Phase 3A: Issue #12 — positive evidence needs the same provenance as negative evidence
+// =====================================================================================================================
+
+fn met(p: &InstallPlan) -> String {
+    state_of(p, "agent_present").0
+}
+
+fn plan_with(o: StoredObservation) -> InstallPlan {
+    let platform = this_platform();
+    let conn = seeded();
+    build_plan(&entry(&conn, "superpowers"), &claude_request(platform), &host(platform), &[o]).unwrap()
+}
+
+#[test]
+fn a_present_record_that_contradicts_its_own_scan_permissions_is_never_evidence() {
+    let platform = this_platform();
+    let good = claude_observation(platform);
+    assert_eq!(met(&plan_with(good.clone())), "met", "control: a normal record from a real scan");
+    type Forge = fn(&mut StoredObservation);
+    let forgeries: Vec<(&str, Forge)> = vec![
+        ("path scan was not authorised", |o| o.scan_authorized_path = false),
+        ("the latest scan did not check this area", |o| o.latest_scan_checked = false),
+        ("not from the latest scan, only flagged current", |o| o.provenance = "earlier_scan".to_string()),
+        ("both permission and checked flags missing", |o| {
+            o.scan_authorized_path = false;
+            o.latest_scan_checked = false;
+        }),
+    ];
+    for (name, forge) in forgeries {
+        let mut o = good.clone();
+        forge(&mut o);
+        assert!(o.current, "the forged row still claims to be current");
+        let p = plan_with(o);
+        assert_eq!(state_of(&p, "agent_present"), ("unknown".into(), "no_current_evidence".into()), "{name}");
+        assert!(warning_codes(&p).contains(&"inconsistent_observation_ignored"), "{name}: {:?}", warning_codes(&p));
+        assert!(codes(&p.eligibility.blockers).contains(&"agent_not_confirmed"), "{name}");
+    }
+    // wrong scope / wrong surface / wrong platform for an otherwise perfect row
+    let mut project_scoped = good.clone();
+    project_scoped.scope = "project".to_string();
+    project_scoped.project_alias = Some("proje-a".to_string());
+    assert_eq!(met(&plan_with(project_scoped)), "unknown");
+    let mut other_surface = good.clone();
+    other_surface.agent_surface = "antigravity-ide".to_string();
+    assert_eq!(met(&plan_with(other_surface)), "unknown");
+    let mut other_platform = good.clone();
+    other_platform.platform_target = if platform == WIN { MAC } else { WIN }.to_string();
+    assert_eq!(met(&plan_with(other_platform)), "unknown");
+}
+
+#[test]
+fn a_user_config_record_needs_the_user_config_permission_and_a_project_record_the_project_permission() {
+    let platform = this_platform();
+    let mut settings = claude_observation(platform);
+    settings.method = "claude-settings-file".to_string();
+    settings.presence = "unknown".to_string();
+    settings.configuration = "configured".to_string();
+    settings.scan_authorized_user_config = true;
+    let conn = seeded();
+    let cfg = |o: StoredObservation| {
+        let p = build_plan(&entry(&conn, "superpowers"), &claude_request(platform), &host(platform), &[o]).unwrap();
+        state_of(&p, "agent_config_readable").0
+    };
+    assert_eq!(cfg(settings.clone()), "met");
+    let mut no_permission = settings.clone();
+    no_permission.scan_authorized_user_config = false;
+    assert_eq!(cfg(no_permission), "unknown");
+    let mut unchecked = settings.clone();
+    unchecked.latest_scan_checked = false;
+    assert_eq!(cfg(unchecked), "unknown");
+}
+
+#[test]
+fn the_store_itself_does_not_call_a_latest_scan_row_current_when_the_scan_had_no_permission() {
+    let platform = this_platform();
+    let conn = seeded();
+    let m = Machine::new("forge", "r");
+    m.program("claude", platform);
+    m.scan(&conn, platform);
+    let find = |c: &Connection| {
+        discovery::store::latest_observations(c)
+            .unwrap()
+            .into_iter()
+            .find(|o| o.subject == "agent:claude-code" && o.method == "path-executable")
+            .unwrap()
+    };
+    assert!(find(&conn).current, "control");
+    // history stays intact, but the latest scan's own record of its permissions now contradicts the PATH row
+    conn.execute("UPDATE discovery_scans SET authorized_path = 0", []).unwrap();
+    let after = find(&conn);
+    assert!(!after.current && !after.latest_scan_checked, "{after:?}");
+    assert!(after.not_current_reason.as_deref().unwrap_or("").contains("iznine sahip değildi"));
+    assert_eq!(after.presence, "present", "the record is kept, not rewritten");
+    let p = build_plan(
+        &entry(&conn, "superpowers"),
+        &claude_request(platform),
+        &host(platform),
+        &discovery::store::latest_observations(&conn).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(met(&p), "unknown");
+}
+
+#[test]
+fn a_project_alias_must_name_a_registered_project() {
+    let platform = this_platform();
+    let conn = seeded();
+    let ask = |alias: &str| {
+        let r = PlanRequest { scope: "project".to_string(), project_alias: Some(alias.to_string()), ..claude_request(platform) };
+        plan_for(&conn, &r, &host(platform))
+    };
+    // well-formed but unregistered
+    assert_eq!(ask("proje-yok").unwrap_err().code, "PLAN_REQUEST_INVALID");
+    crate::projects::add_reference(&conn, "benim-projem", "Benim projem", "").unwrap();
+    assert!(ask("benim-projem").is_ok());
+    // removed projects no longer count
+    crate::projects::remove_reference(&conn, "benim-projem").unwrap();
+    assert_eq!(ask("benim-projem").unwrap_err().code, "PLAN_REQUEST_INVALID");
+    assert!(crate::projects::is_registered(&conn, "ornek-web-sitesi"));
+    assert!(!crate::projects::is_registered(&conn, "ornek-web-sitesi-yok"));
 }

@@ -56,7 +56,7 @@ pub fn get_app_info(state: State<'_, AppState>) -> AppResult<AppInfo> {
     let db_version = state.with_db(db::user_version).ok();
     Ok(AppInfo {
         version: env!("CARGO_PKG_VERSION"),
-        phase: "2D",
+        phase: "3A",
         platform: std::env::consts::OS,
         arch: std::env::consts::ARCH,
         db_version,

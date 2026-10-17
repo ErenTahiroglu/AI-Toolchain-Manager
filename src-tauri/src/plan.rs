@@ -12,8 +12,10 @@
 use crate::{
     audit::{canonical_json, sha256_hex},
     catalog::{self, CatalogEntry},
+    discovery::reference::ReferenceSet,
     discovery::store::{self, StoredObservation},
     error::{AppError, AppResult},
+    recipe::{self, RecipeRegistry, ReviewedRecipe, ValidatedRecipe},
     redact,
 };
 use rusqlite::Connection;
@@ -147,6 +149,7 @@ impl OperationKind {
 pub enum WriteArea {
     ManagerStaging,
     ManagerVersionedFolder,
+    ManagerState,
     PackageManagerEnvironment,
     AgentPluginRegistryClaude,
     AgentPluginRegistryAntigravity,
@@ -158,6 +161,7 @@ impl WriteArea {
         match self {
             WriteArea::ManagerStaging => "Yöneticinin kendi hazırlık klasörü",
             WriteArea::ManagerVersionedFolder => "Yöneticinin sürümlü program klasörü",
+            WriteArea::ManagerState => "Yöneticinin kendi durum, günce ve makbuz klasörleri",
             WriteArea::PackageManagerEnvironment => "Paket yöneticisinin kendi ortamı (aracın kendi kurulum adımı ek dosya yazabilir)",
             WriteArea::AgentPluginRegistryClaude => {
                 "Claude Code eklenti kaydı (~/.claude/settings.json ve ~/.claude/plugins/installed_plugins.json)"
@@ -385,6 +389,24 @@ pub struct ConfigChange {
     pub text: String,
 }
 
+/// What the plan knows about a reviewed recipe for this exact question. Recipe review is not authorization.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RecipeStatus {
+    /// `none` (no recipe exists for this question) | `invalid` (a recipe exists but fails validation) | `validated`
+    pub state: String,
+    pub recipe_id: Option<String>,
+    pub revision: Option<u32>,
+    pub recipe_digest: Option<String>,
+    pub synthetic: bool,
+    /// Closed problem codes of `recipe::problems` (empty when validated).
+    pub problems: Vec<String>,
+    /// `designed` | `simulated` (never `verified` in this phase), only for a validated recipe.
+    pub rollback_state: Option<String>,
+    /// `none` | `authenticated_reference`
+    pub authentication: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RollbackInfo {
@@ -427,6 +449,9 @@ pub struct InstallPlan {
     pub uninstall: Disclosure,
     pub rollback: RollbackInfo,
     pub unknowns: Vec<String>,
+    pub recipe: RecipeStatus,
+    /// Always `not_given`. A plan is a draft; an approval is a separate, bound object (`approval.rs`) and is never part of a plan.
+    pub approval_state: String,
 }
 
 impl InstallPlan {
@@ -438,6 +463,9 @@ impl InstallPlan {
         }
         if self.planner_version != PLANNER_VERSION {
             return Err("unsupported_planner_version");
+        }
+        if self.approval_state != "not_given" {
+            return Err("plan_claims_approval");
         }
         if self.state != "preview_only" || self.executable || self.executed || self.modifies_anything {
             return Err("plan_claims_execution");
@@ -475,7 +503,7 @@ fn is_package_name(s: &str) -> bool {
 }
 
 /// A typed operation must be exactly the schema's shape for its kind: the declared key set, closed values, valid patterns.
-fn typed_is_valid(kind: OperationKind, typed: &Value, target_surface: &str) -> bool {
+pub(crate) fn typed_is_valid(kind: OperationKind, typed: &Value, target_surface: &str) -> bool {
     let Some(obj) = typed.as_object() else { return false };
     let keys: std::collections::BTreeSet<&str> = obj.keys().map(String::as_str).collect();
     let want = |names: &[&str]| keys == names.iter().copied().collect::<std::collections::BTreeSet<&str>>();
@@ -545,15 +573,34 @@ impl InstallPlan {
         {
             return Err("target_inconsistent");
         }
-        if !matches!(self.entry.source_pin.as_str(), "none" | "malformed" | "declared_unverified") {
+        if !matches!(self.entry.source_pin.as_str(), "none" | "malformed" | "declared_unverified" | "authenticated") {
             return Err("source_pin_not_in_vocabulary");
+        }
+        let validated = self.recipe.state == "validated";
+        if !matches!(self.recipe.state.as_str(), "none" | "invalid" | "validated")
+            || (validated && !(self.recipe.recipe_digest.is_some() && self.recipe.recipe_id.is_some()))
+            || (self.entry.source_pin == "authenticated" && !validated)
+            || (validated && !self.recipe.problems.is_empty())
+            || (!validated && self.recipe.rollback_state.is_some())
+            || !matches!(self.recipe.authentication.as_str(), "none" | "authenticated_reference")
+        {
+            return Err("recipe_status_inconsistent");
         }
         let codes: Vec<&str> = self.eligibility.blockers.iter().map(|b| b.code.as_str()).collect();
         let unique = |v: &[&str]| v.iter().collect::<std::collections::BTreeSet<_>>().len() == v.len();
-        if !codes.contains(&"no_approved_recipe") || !unique(&codes) {
+        let recipe_blockers_ok = if validated {
+            codes.contains(&"user_approval_missing") && !codes.contains(&"no_approved_recipe")
+        } else {
+            codes.contains(&"no_approved_recipe") && !codes.contains(&"user_approval_missing")
+        };
+        if !recipe_blockers_ok || !unique(&codes) {
             return Err("blockers_inconsistent");
         }
-        if self.rollback.reliability != "none_implemented" {
+        let expected_reliability =
+            if validated { self.recipe.rollback_state.as_deref().unwrap_or("none_implemented") } else { "none_implemented" };
+        if self.rollback.reliability != expected_reliability
+            || !matches!(expected_reliability, "none_implemented" | "designed" | "simulated")
+        {
             return Err("rollback_inconsistent");
         }
         // steps: sequential, a known template, typed form consistent with the kind, derived texts unchanged
@@ -575,9 +622,17 @@ impl InstallPlan {
             if s.index != i as u32 + 1 {
                 return Err("step_index_inconsistent");
             }
-            if s.write_labels != s.writes.iter().map(|w| w.label().to_string()).collect::<Vec<_>>()
-                || s.network != step_expects_network(s.kind)
-            {
+            // A catalog-derived plan follows the fixed per-kind network rule; a recipe-backed plan follows what its recipe declares
+            // (the fetch step uses the network only if destinations are declared; nothing else ever does).
+            let network_ok = if validated {
+                match s.kind {
+                    OperationKind::FetchReleaseArtifact => (s.network == NetworkUse::Yes) == !self.network.destinations.is_empty(),
+                    _ => s.network == NetworkUse::No,
+                }
+            } else {
+                s.network == step_expects_network(s.kind)
+            };
+            if s.write_labels != s.writes.iter().map(|w| w.label().to_string()).collect::<Vec<_>>() || !network_ok {
                 return Err("step_effects_inconsistent");
             }
             match &s.typed {
@@ -592,6 +647,13 @@ impl InstallPlan {
                     }
                 }
             }
+        }
+        if validated
+            && (self.steps.len() != 4
+                || self.steps.iter().any(|s| s.typed.is_none())
+                || self.chosen_method.as_deref() != Some("verified-release-archive"))
+        {
+            return Err("validated_recipe_without_complete_steps");
         }
         if self.network.planned_use != self.steps.iter().any(|s| s.network == NetworkUse::Yes) {
             return Err("network_inconsistent");
@@ -792,6 +854,8 @@ struct Evidence<'a> {
     foreign_platform_present: usize,
     /// present on this platform but for another agent surface (never merged with the asked one)
     other_surface_present: usize,
+    /// rows that say `current` but contradict their own provenance (unauthorised area, not from the latest scan)
+    inconsistent: usize,
 }
 
 fn scan_looked(o: &StoredObservation, want: Want) -> bool {
@@ -803,6 +867,12 @@ fn scan_looked(o: &StoredObservation, want: Want) -> bool {
         },
         _ => true,
     }
+}
+
+/// One rule for positive and negative evidence alike: a current row from the latest scan, for an area that scan checked, with
+/// the scan's own permission flags agreeing. A stored `current` flag alone proves nothing.
+fn provenance_ok(o: &StoredObservation, want: Want) -> bool {
+    o.current && o.provenance == "latest_scan" && o.latest_scan_checked && scan_looked(o, want)
 }
 
 fn in_scope(o: &StoredObservation, want: Want) -> bool {
@@ -824,12 +894,18 @@ fn gather<'a>(obs: &'a [StoredObservation], subject: &str, platform: &str, surfa
             e.other_surface_present += present as usize;
             continue;
         }
-        if o.current {
+        // Positive and negative evidence need the SAME provenance: a current row from the latest scan, for an area that
+        // scan checked, with the scan's own permission flags agreeing. A stored `current` flag alone proves nothing.
+        let provenance_ok = provenance_ok(o, want);
+        if provenance_ok {
             if present {
                 e.current_present.push(o);
-            } else if o.presence == "absent" && o.latest_scan_checked && scan_looked(o, want) {
+            } else if o.presence == "absent" {
                 e.current_absent.push(o);
             }
+        } else if o.current {
+            // claims to be current but fails its own provenance: untrusted, kept only as a caveat
+            e.inconsistent += 1;
         } else if present {
             e.historical_present += 1;
         }
@@ -854,6 +930,12 @@ fn evidence_notes(e: &Evidence, what: &str, warnings: &mut Vec<Blocker>) {
             &format!("{what}: eski bir taramada bulunmuştu, ancak son taramada doğrulanmadı. Eski kayıt güncel kanıt sayılmaz."),
         ));
     }
+    if e.inconsistent > 0 {
+        warnings.push(blocker(
+            "inconsistent_observation_ignored",
+            &format!("{what}: kayıt son taramadan görünüyor ancak taramanın izni/kapsamıyla çelişiyor; güvenilmez sayıldı ve kanıt olarak kullanılmadı."),
+        ));
+    }
     if e.foreign_platform_present > 0 {
         warnings.push(blocker(
             "foreign_platform_record",
@@ -868,7 +950,7 @@ fn evidence_notes(e: &Evidence, what: &str, warnings: &mut Vec<Blocker>) {
     }
 }
 
-pub fn build_plan(entry: &CatalogEntry, req: &PlanRequest, host: &HostFacts, observations: &[StoredObservation]) -> AppResult<InstallPlan> {
+fn build_draft(entry: &CatalogEntry, req: &PlanRequest, host: &HostFacts, observations: &[StoredObservation]) -> AppResult<InstallPlan> {
     validate_request(req)?;
     let mut blockers: Vec<Blocker> = Vec::new();
     let mut warnings: Vec<Blocker> = Vec::new();
@@ -1064,7 +1146,7 @@ pub fn build_plan(entry: &CatalogEntry, req: &PlanRequest, host: &HostFacts, obs
                     4,
                     OperationKind::ActivateStagedArtifact,
                     NetworkUse::No,
-                    &[WriteArea::ManagerVersionedFolder],
+                    &[WriteArea::ManagerVersionedFolder, WriteArea::ManagerState],
                     s.admin,
                     Reversibility::VersionSwitch,
                 );
@@ -1157,9 +1239,10 @@ pub fn build_plan(entry: &CatalogEntry, req: &PlanRequest, host: &HostFacts, obs
             let settings_any = observations.iter().find(|o| {
                 o.subject == "agent:claude-code"
                     && o.method == "claude-settings-file"
-                    && o.current
                     && o.platform_target == req.platform_target
+                    && o.agent_surface == req.agent_surface
                     && in_scope(o, project_want)
+                    && provenance_ok(o, project_want)
             });
             let which = if req.project_alias.is_some() { "Projenin" } else { "Kullanıcının" };
             let (state, text, basis) = match settings_any.map(|o| (o.configuration.as_str(), scan_looked(o, project_want))) {
@@ -1415,6 +1498,17 @@ pub fn build_plan(entry: &CatalogEntry, req: &PlanRequest, host: &HostFacts, obs
         uninstall,
         rollback,
         unknowns,
+        recipe: RecipeStatus {
+            state: "none".to_string(),
+            recipe_id: None,
+            revision: None,
+            recipe_digest: None,
+            synthetic: false,
+            problems: Vec::new(),
+            rollback_state: None,
+            authentication: "none".to_string(),
+        },
+        approval_state: "not_given".to_string(),
     };
     let content = serde_json::to_value(&plan).map_err(|_| AppError::new("PLAN_SERIALIZE", "Plan serileştirilemedi."))?;
     plan.plan_id = sha256_hex(&canonical_json(&content));
@@ -1424,11 +1518,220 @@ pub fn build_plan(entry: &CatalogEntry, req: &PlanRequest, host: &HostFacts, obs
 
 /// The read-only entry point: loads the catalog entry and the latest stored observations and builds the preview.
 /// Writes nothing, reads no file and starts no process.
+/// The plan for a question, with no recipe: what the catalog alone can say. Always blocked by `no_approved_recipe`.
+#[allow(dead_code)] // the catalog-only form is what most tests and the draft preview use
+pub fn build_plan(entry: &CatalogEntry, req: &PlanRequest, host: &HostFacts, observations: &[StoredObservation]) -> AppResult<InstallPlan> {
+    build_plan_with(entry, req, host, observations, &[], &ReferenceSet::default())
+}
+
+const RECIPE_REPLACES: &[&str] = &[
+    "no_approved_recipe",
+    "metadata_unreviewed",
+    "license_not_accepted",
+    "source_not_pinned",
+    "source_pin_malformed",
+    "source_origin_unverified",
+    "no_artifact_digest",
+    "package_name_unknown",
+    "version_not_pinned",
+    "target_not_in_recipe_schema",
+    "compatibility_not_verified",
+    "no_supported_method",
+    "method_not_declared",
+    "method_not_for_platform",
+    "method_not_for_surface",
+    "unsupported_install_method",
+];
+
+fn permission_text(id: &str) -> &'static str {
+    match id {
+        "current_user_account" => "Geçerli kullanıcı hesabı (yönetici yetkisi gerekmez)",
+        "network_download" => "İnternet erişimi (yalnızca onaylı bir uygulama aşamasında)",
+        _ => "Yöneticinin kendi klasörlerine yazma",
+    }
+}
+
+fn network_text(id: &str) -> &'static str {
+    match id {
+        "github_release_download" => "GitHub sürüm indirme adresi (tarifte yazılı)",
+        "package_registry" => "Paket yöneticisinin paket kaynağı",
+        _ => "Ajanın eklenti/pazaryeri kaynağı",
+    }
+}
+
+/// The plan for a question, looking at the reviewed recipes offered for it. A recipe changes what the plan says only when it
+/// is *validated* (reviewed at its current content, independently authenticated artifact, accepted license, real rollback
+/// contract, complete typed steps) AND matches the exact question. Even then the plan stays a blocked draft: the only new
+/// blocker is `user_approval_missing`, and nothing in the plan is an approval.
+pub fn build_plan_with(
+    entry: &CatalogEntry,
+    req: &PlanRequest,
+    host: &HostFacts,
+    observations: &[StoredObservation],
+    candidates: &[&ReviewedRecipe],
+    refs: &ReferenceSet,
+) -> AppResult<InstallPlan> {
+    let mut plan = build_draft(entry, req, host, observations)?;
+    // Several candidate recipes for one question are ambiguous: none is used.
+    let candidate = match candidates {
+        [] => return Ok(plan),
+        [one] => *one,
+        _ => {
+            plan.recipe =
+                RecipeStatus { state: "invalid".to_string(), problems: vec!["ambiguous_recipes".to_string()], ..plan.recipe.clone() };
+            return finish(plan);
+        }
+    };
+    match recipe::validate(candidate, refs) {
+        Err(problems) => {
+            plan.recipe = RecipeStatus {
+                state: "invalid".to_string(),
+                recipe_id: Some(candidate.recipe.recipe_id.clone()),
+                revision: Some(candidate.recipe.revision),
+                recipe_digest: Some(recipe::recipe_digest(&candidate.recipe)),
+                synthetic: candidate.recipe.synthetic,
+                problems: problems.iter().map(|p| p.to_string()).collect(),
+                rollback_state: None,
+                authentication: "none".to_string(),
+            };
+            finish(plan)
+        }
+        Ok(valid) => {
+            let r = valid.recipe();
+            let exact = r.tool_id == entry.entry_id
+                && r.target.platform_target == req.platform_target
+                && r.target.agent_surface == req.agent_surface
+                && r.target.scope == req.scope
+                && matches!(req.method_id.as_deref(), None | Some("verified-release-archive"));
+            if !exact {
+                plan.recipe = RecipeStatus {
+                    state: "invalid".to_string(),
+                    recipe_id: Some(r.recipe_id.clone()),
+                    revision: Some(r.revision),
+                    recipe_digest: Some(valid.digest().to_string()),
+                    synthetic: r.synthetic,
+                    problems: vec!["recipe_does_not_match_the_question".to_string()],
+                    rollback_state: None,
+                    authentication: "none".to_string(),
+                };
+                return finish(plan);
+            }
+            overlay(&mut plan, &valid);
+            finish(plan)
+        }
+    }
+}
+
+fn finish(mut plan: InstallPlan) -> AppResult<InstallPlan> {
+    plan.plan_id = content_digest(&plan).map_err(|_| AppError::new("PLAN_SERIALIZE", "Plan serileştirilemedi."))?;
+    plan.check_invariants().map_err(|_| AppError::new("PLAN_INVARIANT", "Plan değişmezleri sağlanamadı."))?;
+    plan.check_semantics().map_err(|e| AppError::new("PLAN_INVARIANT", format!("Plan tutarlılığı sağlanamadı: {e}.")))?;
+    Ok(plan)
+}
+
+fn overlay(plan: &mut InstallPlan, valid: &ValidatedRecipe) {
+    let r = valid.recipe();
+    plan.eligibility.blockers.retain(|b| !RECIPE_REPLACES.contains(&b.code.as_str()));
+    plan.eligibility.blockers.push(blocker(
+        "user_approval_missing",
+        "Tarif incelenmiş olsa da bu plan için kullanıcı onayı yok. Onay, tarife ve bu tam plana bağlı ayrı bir işlemdir; plan kimliği bir onay değildir.",
+    ));
+    // the source: a commit is attested only by independent evidence, which today only a synthetic recipe can carry
+    if r.source.source_attested {
+        plan.entry.source_pin = "authenticated".to_string();
+    } else {
+        plan.entry.source_pin = "declared_unverified".to_string();
+        plan.eligibility.blockers.push(blocker(
+            "source_origin_unverified",
+            "Tarifteki commit numarası bağımsız bir kanıtla depoya bağlanmadı; yalnızca beyandır.",
+        ));
+    }
+    plan.methods = vec![MethodChoice {
+        method_id: "verified-release-archive".to_string(),
+        label: "Doğrulanmış sürüm dosyası (yöneticinin kendi klasörüne)".to_string(),
+        supported: true,
+        note: String::new(),
+    }];
+    plan.chosen_method = Some("verified-release-archive".to_string());
+    let admin = AdminNeed::No;
+    let kinds = [
+        (OperationKind::FetchReleaseArtifact, NetworkUse::Yes, vec![WriteArea::ManagerStaging], Reversibility::NothingToUndo),
+        (OperationKind::VerifyArtifactDigest, NetworkUse::No, vec![], Reversibility::NothingToUndo),
+        (OperationKind::StagePrivateCopy, NetworkUse::No, vec![WriteArea::ManagerStaging], Reversibility::NothingToUndo),
+        (
+            OperationKind::ActivateStagedArtifact,
+            NetworkUse::No,
+            vec![WriteArea::ManagerVersionedFolder, WriteArea::ManagerState],
+            Reversibility::VersionSwitch,
+        ),
+    ];
+    plan.steps = kinds
+        .into_iter()
+        .zip(r.steps.iter())
+        .enumerate()
+        .map(|(i, ((kind, net, writes, rev), typed))| {
+            let mut st = step(i as u32 + 1, kind, net, &writes, admin, rev);
+            st.typed = Some(typed.clone());
+            st
+        })
+        .collect();
+    // the fetch step uses a network only if the recipe declares destinations for it (a synthetic recipe declares none)
+    for st in plan.steps.iter_mut() {
+        st.network = if st.kind == OperationKind::FetchReleaseArtifact && !r.network.is_empty() { NetworkUse::Yes } else { NetworkUse::No };
+    }
+    plan.config_changes = Vec::new();
+    plan.permissions = r.permissions.iter().map(|p| permission_text(p).to_string()).collect();
+    let uses_network = plan.steps.iter().any(|s| s.network == NetworkUse::Yes);
+    plan.network.planned_use = uses_network;
+    plan.network.destinations =
+        if r.network.is_empty() { Vec::new() } else { r.network.iter().map(|n| network_text(n).to_string()).collect() };
+    plan.uninstall = Disclosure {
+        state: "manager_owned".to_string(),
+        text: "Yöneticinin sürümlü klasörü kaldırılır; aracın kendi ürettiği kullanıcı verileri kaldırma ve geri alma kapsamında DEĞİLDİR ve kalır.".to_string(),
+    };
+    let designed = r.rollback.state == "designed";
+    plan.rollback = RollbackInfo {
+        available: false,
+        reliability: r.rollback.state.clone(),
+        text: format!(
+            "Geri alma sözleşmesi {}; bu sürümde gerçek bir araçta DOĞRULANMADI. Geri alınabilenler: {}. Geri alınmayanlar: {}.",
+            if designed { "yalnızca TASARLANMIŞ" } else { "yalnızca SENTETİK olarak benzetildi" },
+            r.rollback.undoes.join(", "),
+            r.rollback.does_not_undo.join(", ")
+        ),
+    };
+    plan.unknowns.push(if r.synthetic {
+        "Bu tarif SENTETİKTİR: gerçek bir araca ait değildir ve hiçbir gerçek kurulumu temsil etmez.".to_string()
+    } else {
+        "Tarif incelenmiş olsa da gerçek bir hedefte denenmedi.".to_string()
+    });
+    plan.recipe = RecipeStatus {
+        state: "validated".to_string(),
+        recipe_id: Some(r.recipe_id.clone()),
+        revision: Some(r.revision),
+        recipe_digest: Some(valid.digest().to_string()),
+        synthetic: r.synthetic,
+        problems: Vec::new(),
+        rollback_state: Some(r.rollback.state.clone()),
+        authentication: "authenticated_reference".to_string(),
+    };
+}
+
 pub fn plan_for(conn: &Connection, req: &PlanRequest, host: &HostFacts) -> AppResult<InstallPlan> {
     validate_request(req)?;
+    // A syntactically valid alias is not a project: it must name a registered one.
+    if let Some(alias) = &req.project_alias {
+        if !crate::projects::is_registered(conn, alias) {
+            return Err(AppError::new("PLAN_REQUEST_INVALID", "Plan isteği geçersiz: böyle bir proje kaydı yok."));
+        }
+    }
     let entry = catalog::get_entry(conn, &req.entry_id)?;
     let observations = store::latest_observations(conn)?;
-    build_plan(&entry, req, host, &observations)
+    // Production: the compiled-in registry, which is empty, and the compiled-in authenticated references, which are empty.
+    let registry = RecipeRegistry::production();
+    let refs = ReferenceSet::production(conn)?;
+    let found = registry.find(&req.entry_id, &req.platform_target, &req.agent_surface, &req.scope);
+    build_plan_with(&entry, req, host, &observations, &found, &refs)
 }
 
 #[cfg(test)]

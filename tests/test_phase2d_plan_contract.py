@@ -100,7 +100,8 @@ class PlanContract(unittest.TestCase):
                 self.assertIn(pre["state"], {"met", "unmet", "unknown"})
                 if pre["basis"] != "current_scan" and pre["source"] == "observed_scan":
                     self.assertEqual(pre["state"], "unknown", "no current evidence can never be met or unmet")
-            self.assertNotIn("approval", json.dumps(p))
+            self.assertNotIn("\"approval\"", json.dumps(p))
+            self.assertEqual(p["approvalState"], "not_given")
 
 
 if __name__ == "__main__":

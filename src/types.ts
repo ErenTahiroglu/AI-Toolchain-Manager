@@ -457,7 +457,7 @@ export interface InstallPlan {
   statement: string;
   entry: {
     entryId: string; displayName: string; kind: string; source: string; reviewState: string; executionPolicy: string;
-    licenseState: string; revision: string; sourcePin: "none" | "malformed" | "declared_unverified";
+    licenseState: string; revision: string; sourcePin: "none" | "malformed" | "declared_unverified" | "authenticated";
   };
   target: {
     platformTarget: string; agentSurface: string; scope: string; thisComputer: string; thisComputerMatches: boolean;
@@ -477,6 +477,19 @@ export interface InstallPlan {
   configChanges: { area: string; change: string; text: string }[];
   conflicts: PlanBlocker[];
   uninstall: PlanDisclosure;
-  rollback: { available: false; reliability: string; text: string };
+  rollback: { available: false; reliability: "none_implemented" | "designed" | "simulated"; text: string };
   unknowns: string[];
+  /** Recipe review is not an approval. */
+  recipe: {
+    state: "none" | "invalid" | "validated";
+    recipeId: string | null;
+    revision: number | null;
+    recipeDigest: string | null;
+    synthetic: boolean;
+    problems: string[];
+    rollbackState: "designed" | "simulated" | null;
+    authentication: "none" | "authenticated_reference";
+  };
+  /** Always "not_given": a plan is a draft; an approval is a separate, bound object. */
+  approvalState: "not_given";
 }
