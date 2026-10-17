@@ -1,12 +1,12 @@
 # ADR-0001 — Prompt Intelligence: Reference Libraries, Comparison & Safe Augmentation
 
-**Status:** PROPOSED — user activation preference pending  
+**Status:** APPROVED PRODUCT DIRECTION — implementation gated to Phase 4P  
 **Date:** 2026-10-17  
-**Branch:** `phase1a/desktop-shell`  
+**Branch policy:** `main` stable / `development` active; no phase-specific branches  
 **Related:** [Issue #1](https://github.com/ErenTahiroglu/AI-Toolchain-Manager/issues/1)
 
 ## Product objective
-Optionally help a coding agent improve a user-authored task prompt with relevant parts of curated prompt references. This feature must preserve the user's original objectives, constraints, safety boundaries and approval requirements. It does **not** promise that a library prompt is better than the original one.
+At the start of each substantial agent assignment, optionally help a coding agent improve a user-authored task prompt with relevant parts of curated prompt references. **Quality first, efficiency second**: aim for at least the same observable task quality with lower token usage where possible, or clearly better quality at acceptable cost. No library guarantees either improvement. Preserve the user's original objectives, constraints, safety boundaries and approval requirements. Record both quality and token/time outcomes when comparable evidence is available.
 
 ## Architectural boundary
 - `ExecutableTool`: installable CLI, agent plugin, skill, MCP runtime, etc. Governed by the existing installation contracts.
@@ -25,10 +25,10 @@ Optionally help a coding agent improve a user-authored task prompt with relevant
 Each imported source must be version-pinned and recorded with repository, path, commit SHA, source license, content digest, timestamp and explicit trust status.
 
 ## Safe workflow
-1. At the start of a **new substantial agent assignment** (for example an implementation phase, design, security audit or complex research task), run at most one local, token-free preflight if the user enables it. Never trigger on every chat message, tool call or agent substep. An explicit manual trigger must also exist. Activation preference is pending user confirmation.
+1. **USER DECISION APPROVED:** At the start of a **new substantial agent assignment** (implementation phase, design, security audit or complex research task), run at most one local, token-free preflight when this project feature is enabled. Never trigger on each chat message, tool call or agent substep. Also offer a manual trigger. Default to no automatically applied change; only show a draft/recommendation until bounded augmentation policy is independently validated.
 2. Retrieve up to a small configurable number of relevant *read-only* candidates using local deterministic search, without calling a hosted LLM by default.
 3. Apply non-negotiable gates: user objective and constraints preserved, no untrusted executable instructions, no new privilege, no secret exfiltration, legally reusable content, compatible output shape.
-4. Compare original vs candidate **as a design heuristic**, not as a factual quality measurement. Suggested weights: constraint preservation 25, task relevance 25, verifiability 20, security/reliability 15, token/time economy 10, clarity 5. The rubric is subject to empirical recalibration; irrelevant candidates are rejected regardless of total.
+4. Compare original vs candidate **as a design heuristic**, not as a factual quality measurement. Suggested weights: constraint preservation 25, task relevance 25, verifiability 20, security/reliability 15, token/time economy 10, clarity 5. Require minimum quality and hard safety gates first; optimize token use **only without an unacceptable quality regression**. Track prompt-size savings separately from actual agent-session input/output tokens and wall-clock/cost. The weights require empirical calibration; irrelevant candidates are rejected regardless of total.
 5. Default to the user's original prompt unless an identifiable, minimal, non-conflicting addition helps. Offer a before/after explanation and source attribution. Never replace the whole original prompt autonomously.
 6. Optional opt-in A/B evaluation runs comparable tasks with original and augmented instructions under the same model/settings and tests actual results against task-specific expectations. These tests consume tokens and require explicit budget approval.
 
@@ -48,9 +48,9 @@ Each imported source must be version-pinned and recorded with repository, path, 
 - **Phase 4P (after agent integration):** Controlled Prompt Intelligence UI, retrieval, candidate comparisons, user review, optional minimal augmentation and evaluation. Do not silently hook every agent conversation.
 - **Final Red Team gate:** Injection and data-exfiltration simulations, unrelated/low-quality prompt regression, source update and license changes, reproducibility, offline behavior, output-quality tests, latency/token accounting.
 
-## Explicitly unresolved
-1. Activation: automatic once at the beginning of each substantial agent assignment (recommended), manual only, or every new user task? Never on each tool call.
-2. Whether the user prefers to review every enhancement or receive automatic minimal augmentation after deterministic gates.
-3. Whether optional LLM-based A/B evaluation is ever allowed, and with what budget.
-
-Do not promote this ADR from PROPOSED to ACCEPTED without resolving user-facing behavior choices.
+## Resolved and future-gated decisions
+1. **Resolved:** Trigger once per new substantial agent assignment (not every chat/tool event) and support manual invocation.
+2. **Safe Phase 4P default:** show the candidate and minimally augmented prompt for user review; no silent prompt replacement. Automated augmentation can be considered only after adversarial evaluation and explicit later authorization.
+3. **Safe default:** optional model-based A/B trials remain disabled unless user separately approves the budget and actual task test plan.
+4. **Goal:** improved observable task quality and/or lower total agent token consumption with non-regression in correctness, safety and scope. A shorter prompt alone is not a pass.
+5. Do not start this module in Phase 1A, which remains only the desktop shell and mocked local workflows.
