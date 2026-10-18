@@ -1,0 +1,42 @@
+# Phase 3C — Isolated production adapter: filesystem safety and offline validation
+
+Baseline `56401d07e4b270dee606812cfca65becad09438b` (accepted Phase 3B). Security gates: Issue #14 (production filesystem ownership / TOCTOU) and Issue #15 (snapshot pointer crash window). **No real tool was downloaded, extracted, installed, started or probed. No real approval exists. The production recipe list and the authenticated-reference set are empty. Nothing in the application calls the new code; there is no new command, no new screen and no filesystem-write IPC.** jq 1.8.2 remains an unapproved *candidate*; nothing about it was fetched.
+
+Detail documents: [phase-3c/FILESYSTEM-GUARANTEES.md](phase-3c/FILESYSTEM-GUARANTEES.md) (what is guaranteed on Windows and macOS, with the kind of evidence for each), [phase-3c/JQ-REVIEW-PACKAGE.md](phase-3c/JQ-REVIEW-PACKAGE.md) (the review package for a future pilot; all gates open).
+
+## 1. Smart App Control (local diagnosis, read-only)
+
+The developer reported a new block "involving `bin/cargo.exe`". The CodeIntegrity log (events 3077 block, 3033 and 3089) shows that **`cargo.exe` was only the process that tried to load the denied image**; the denied image was a **freshly compiled, unsigned test executable** under `target\debug\deps\` (`<crate>_lib-<hash>.exe`). Two enforcement events (3077/3033 pairs) at the time the tests were first launched; the same file was later rebuilt and ran. `cargo.exe` itself (rustup toolchain proxy chain, installed through rustup) is `NotSigned` like every Rust toolchain binary, carries no downloaded-from-internet marker, and was *not* the blocked image. Smart App Control is in enforcement mode (`VerifiedAndReputablePolicyState = 1`). A second, separate occurrence (`os error 4551`) hit a freshly compiled build-script executable when a cross-target type-check was attempted for macOS; it was abandoned (a scratch crate was used instead, see below). Everything else in the log in that period belongs to other programs (a browser, a security product) and is unrelated.
+
+Conclusions stated carefully: the block is the already-known SAC reputation behaviour for **new unsigned local build output** (`docs/WINDOWS-SMART-APP-CONTROL.md`); it does not prove malware and it does not prove a false positive of anything but the freshly built file. Nothing was changed: no policy, no exclusion, no renaming or copying of executables, no downloaded tool; the working tree and toolchain were preserved. All local Rust tests ran (re-runs after the block were allowed by SAC); no test was skipped because of SAC. CI is separate evidence and does not show that anything ran locally.
+
+## 2. Issue #15 — crash-consistent journalling of files a transaction creates (closed for the synthetic engine and implemented in the adapter)
+
+**Finding (RT-3B-01).** The snapshot pointer file was created and written before its identity reached the durable journal, so a crash left a real file with no ownership entry, and "journal-before-effect" was not actually true.
+
+**Fix.** Every file a transaction creates has three durable stages: *intent* (journalled before the file exists) → *exclusive create + identity read from the open handle* (journalled before any data is written) → *finalized content identity* (size and SHA-256, journalled after the flush). The manifest entry carries a `phase`. A file that exists where only an intent is recorded is an **ambiguous orphan**: never deleted, never adopted, reported on every recovery (`NeedsAttention` / `LeftoversRetained`), the tool stays locked; work resumes only after the owner removes it. The irreducible window (between `create_new` and the durable identity record) is documented, not denied; a plain failure in that window still records the in-memory identity so the in-process rollback is complete. The snapshot folder itself is a journalled intent and is undone last, only if nothing else failed (it is what a retry restores from). Recovery now reports leftovers after a recovered rollback instead of dropping them. Applies to the synthetic engine (`lifecycle.rs`, kept path-based and disconnected) and to the adapter.
+
+**Tests.** Fault points before create, after create (the window), during write, after fsync before the final record, after the final record — for the snapshot pointer, the staged artifact, the new pointer and the receipt; both simulated crashes and plain failures; foreign file already at the intended name; partial file replaced after a crash; repeated recovery; clean retry after explicit resolution; mutation checks (orphan rule, create-before-record order) fail tests as expected.
+
+## 3. Issue #14 — production filesystem layer (progress; the gate stays open until it is exercised on real devices)
+
+New, isolated modules — **not** a rename or exposure of the synthetic engine:
+
+* `managed_fs` (+ `managed_fs_windows`, `managed_fs_unix`): handle-relative, no-follow access; Windows via `NtCreateFile` relative to directory handles with `FILE_OPEN_REPARSE_POINT`, macOS via `openat`-family calls with `O_NOFOLLOW`; exclusive creation; identity and link count from the open handle; verified deletion (by handle on Windows); atomic replacement; owner-only root verified by read-back; mount-transition and link refusal; bounded reads, hashes and listings; no recursion; strict ASCII names.
+* `managed_root` + migration 9 (`managed_roots`): the manager's own record (in SQLite) of the identity of the folder it owns; the root is derived only from the application data directory.
+* `device_trust`: interfaces for OS key storage, user presence, single-use / expiring / revocable approvals and durable audit, with **fakes only**; the production policy refuses every fake.
+* `adapter`: the one-artifact adapter in **test mode only** (preflight, install, update, uninstall, rollback, recovery) on `managed_fs`; the production adapter refuses everything (`production_adapter_not_enabled`).
+
+See [FILESYSTEM-GUARANTEES](phase-3c/FILESYSTEM-GUARANTEES.md) for the guarantee table, the residual macOS window and what was only simulated.
+
+## 4. What the adversarial tests cover
+
+Unexpected files; same-name replacement; same-content replacement with a different identity; in-place edit of the same size; hard links; symlinks and junctions (inside the version folder, as the version folder, as the staging folder, as a managed top-level folder, in the anchor chain); parent redirection; mount transitions (simulated); concurrent swaps between check and use; locked files (Windows); read-only / inaccessible folders; Unicode, space-containing and "other account" paths; corrupt receipts; forged journal records; interrupted staging, activation and uninstall at every fault point; repeated recovery; approval replay, expiry, revocation, wrong computer, platform, action, version, key; cross-platform artifact mismatch; zero effects outside the sandbox (canary, environment, working directory, no process, no network).
+
+## 5. What is deliberately not done
+
+Real artifact download; any jq file; any real recipe, reference or approval; an OS key store or user-presence prompt; extraction code (the jq pilot needs none); process-in-use detection; a UI; PATH, registry or agent-configuration changes. Real Mac behaviour (Gatekeeper, Keychain, TCC, a real mount transition) and a second Windows computer are open items for the manual checklists of Phase 3B.
+
+## 6. Gates before any first real installation
+
+1. Red Team approval of this phase. 2. The jq review package (all ten rows) closed with separate user permission for the one-time download of the two files. 3. A real-device run of the filesystem acceptance tests on a real Apple Silicon Mac and a second Windows computer. 4. A real OS key store and user-presence flow behind the `device_trust` interfaces, reviewed. 5. A reviewed recipe and a reviewed reference entry (two digests). 6. A separate explicit user authorization for the first real action.

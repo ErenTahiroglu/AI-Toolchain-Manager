@@ -33,3 +33,8 @@ Turning SAC off (irreversible without an OS reset), adding exclusions, changing 
 
 * Develop and test locally with the **debug** profile; rely on CI for release builds.
 * If a debug build is blocked, re-running after `cargo clean -p <crate>` sometimes yields an allowed artifact. This is a workaround observation, not a guarantee.
+
+## Phase 3C observation: `cargo.exe` is the launcher, not the blocked image
+
+A report of "`cargo.exe` was blocked" was diagnosed read-only from the same CodeIntegrity log (events 3077 / 3033 / 3089). The process that attempted the load was the rustup-installed `cargo.exe`; the **denied image** was a freshly compiled, unsigned test executable `target\debug\deps\<crate>_lib-<hash>.exe`. Later runs of the rebuilt file were allowed. The toolchain binary itself is unsigned (as all Rust toolchain binaries are) and was not what SAC denied. A cross-target type-check that compiled many build scripts in a fresh target directory hit `os error 4551` on one build-script executable and was abandoned in favour of a scratch crate. Nothing was changed (no policy, exclusion, rename, copy or download); retrying after the first-launch reputation check, or touching the source so the file is rebuilt, was enough. Distinguish the launcher from the image by reading the **second path** in event 3077/3033 ("attempted to load ..."), not the first.
+
