@@ -1,0 +1,7 @@
+{
+  "Status": "NotSigned",
+  "SignerCertificate": null,
+  "TimeStamperCertificate": null,
+  "IsOSBinary": false,
+  "note": "Get-AuthenticodeSignature reads the file; nothing was executed. The localized status message (it contains a local path) is not stored."
+}

@@ -1,0 +1,20 @@
+{
+  "superBlobMagic": "0xfade0cc0",
+  "blobs": [
+    {
+      "slotType": "0x0",
+      "offset": 20
+    }
+  ],
+  "codeDirectory": {
+    "version": "0x20400",
+    "flags": "0x20002",
+    "adhocFlag": true,
+    "linkerSignedFlag": true,
+    "hashType": 2,
+    "identifier": "jq",
+    "codeSlots": 204
+  },
+  "cmsSignatureSlotPresent": false,
+  "interpretation": "no CMS slot + ad-hoc flag = ad-hoc/linker signature, NOT a Developer ID signature; not notarized; Gatekeeper/codesign assessment still needs a real Mac"
+}
