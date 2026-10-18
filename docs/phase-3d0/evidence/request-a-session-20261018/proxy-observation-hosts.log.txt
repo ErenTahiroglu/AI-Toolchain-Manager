@@ -1,0 +1,12 @@
+{"event": "proxy-start", "allow": ["api.github.com", "github.com", "tuf-repo-cdn.sigstore.dev", "tuf-repo.github.com"], "t": "2026-10-18T22:44:13Z"}
+{"event": "tunnel", "host": "tuf-repo-cdn.sigstore.dev", "port": "443", "t": "2026-10-18T22:44:21Z"}
+{"event": "tunnel", "host": "tuf-repo.github.com", "port": "443", "t": "2026-10-18T22:44:24Z"}
+{"event": "tunnel", "host": "api.github.com", "port": "443", "t": "2026-10-18T22:44:26Z"}
+{"event": "DENIED", "host": "tmaproduction.blob.core.windows.net", "port": "443", "t": "2026-10-18T22:44:26Z"}
+{"event": "DENIED", "host": "tmaproduction.blob.core.windows.net", "port": "443", "t": "2026-10-18T22:44:26Z"}
+{"event": "DENIED", "host": "tmaproduction.blob.core.windows.net", "port": "443", "t": "2026-10-18T22:44:27Z"}
+{"event": "DENIED", "host": "tmaproduction.blob.core.windows.net", "port": "443", "t": "2026-10-18T22:44:27Z"}
+{"event": "DENIED", "host": "tmaproduction.blob.core.windows.net", "port": "443", "t": "2026-10-18T22:44:27Z"}
+{"event": "DENIED", "host": "tmaproduction.blob.core.windows.net", "port": "443", "t": "2026-10-18T22:44:27Z"}
+{"event": "DENIED", "host": "tmaproduction.blob.core.windows.net", "port": "443", "t": "2026-10-18T22:44:27Z"}
+{"event": "DENIED", "host": "tmaproduction.blob.core.windows.net", "port": "443", "t": "2026-10-18T22:44:27Z"}

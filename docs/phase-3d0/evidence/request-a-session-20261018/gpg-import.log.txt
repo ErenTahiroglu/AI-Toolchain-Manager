@@ -1,0 +1,8 @@
+gpg: keybox '<scratch>/jq-review-20261018T2240Z/gnupg/pubring.kbx' created
+gpg: <scratch>/jq-review-20261018T2240Z/gnupg/trustdb.gpg: trustdb created
+gpg: key B0DA60FB454BAF18: public key "jq Release Signing Key <no-send-email@jqlang.github.io>" imported
+gpg: error running '/usr/bin/gpg-agent': exit status 2
+gpg: failed to start gpg-agent '/usr/bin/gpg-agent': General error
+gpg: can't connect to the gpg-agent: General error
+gpg: Total number processed: 1
+gpg:               imported: 1
