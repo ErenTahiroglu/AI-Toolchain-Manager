@@ -25,6 +25,10 @@ Baseline `2c922c87db81be66c1f3e25ca05ad494f721d83a`. A targeted closure of the a
 * The positive path of the official verifier could not be exercised before real bytes exist (a decoy cannot match a digest); its first real run is the Red Team's check on this procedure, and a mismatch in how the CLI names its JSON fields fails closed (reported, not trusted) — certificate fields the CLI prints are compared when present and reported when absent, while identity is also enforced by the CLI's own flags and by the raw-certificate verifier.
 * Nothing creates or promotes an authenticated reference or `identity_verified`; promotion remains a separate reviewed code change after the Red Team has accepted the session evidence.
 
+## Request A preflight (Issue #18): atomic no-clobber publication
+
+The downloader used to publish with "check that the destination does not exist, then `os.replace`", which is not atomic: an entry created in between (or a dangling symlink, which `os.path.exists` reports as absent) would have been overwritten. `tools/fetch_pinned.py` now stages the verified bytes under a unique, exclusively created name and publishes with a same-directory hard link (`link(2)` / `CreateHardLink`, `follow_symlinks=False` where supported), which fails for ANY existing entry. The folder is probed with throw-away files before any network use (the probe also proves that linking onto an existing name is refused); a folder that cannot do this is refused and there is no fallback. Only files this process created (device+inode) are removed; a replaced staging name or an unremovable one is preserved and reported. Tests: `tests/test_request_a_preflight.py` (loopback only, run on Windows and macOS CI). SHA-256/size pinning, HTTPS and the host allowlist, no credentials, owner-only non-executable files are unchanged.
+
 ## Verification
 
 Python: `tests/test_phase3d0_closure.py` (fetch tool and reviewer, 18 tests) joins the earlier contract tests; Rust, frontend, self-check and GUI smoke were re-run unchanged for the delivery report; exact-SHA Windows and macOS CI as reported. No Rust source changed in this closure.

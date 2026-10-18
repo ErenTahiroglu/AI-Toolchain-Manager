@@ -33,6 +33,8 @@ Asistanın scratch klasörü altında yeni bir oturum klasörü (depo dışında
 5. Yalnızca statik bilgi: Windows dosyasının Authenticode durumu, PE ve Mach-O başlık alanları. Hiçbir şey çalıştırılmaz (`--version` bile).
 6. Tüm sonuçlar `tools/review_jq_verification.py` ile oybirliği denetiminden geçer; her şey uyuşmadıkça başarısız.
 
+Yayımlama **atomik ve üzerine yazmaz**: doğrulanmış dosya önce hedef klasörde benzersiz adlı bir geçici dosyada bekler, sonra sert bağlantıyla (hard link) son adına yayımlanır; o ada ait herhangi bir şey (dosya, klasör, sembolik bağ) varsa — az önce oluşmuş olsa bile — işletim sistemi reddeder ve hiçbir şey ezilmez. Klasörün dosya sistemi bunu desteklemiyorsa ağa bağlanmadan önce işlem reddedilir. Yalnızca aracın kendi oluşturduğu dosyalar silinir; bilinmeyen içerik korunur.
+
 ## 5. Kanıt saklama
 Oturum klasörünün **tamamı Red Team incelemesine kadar saklanır, otomatik silinmez** (aksini siz istemedikçe): iki dosya, sabit metinler, indirme günlüğü (hostlar), taze güven kökü, tüm doğrulama çıktıları, anahtarlık listesi, oybirliği sonucu. Dosyaların SHA-256 listesi depoya yazılır (ikililer değil). Mevcut yedeklere dokunulmaz.
 
