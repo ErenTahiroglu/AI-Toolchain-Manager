@@ -54,18 +54,9 @@ Real-device probe results exist only for the existing development PC; the CI run
 | 4 | Installing verified bytes into a manager-owned root | **NOT authorised, NO-GO** | everything in §9 |
 | 5 | Executing the installed tool | **NOT authorised, NO-GO** | its own later request, after 4 and a separate security review |
 
-## 8. The exact request that would be needed for a download-and-verification-only next step (not yet granted)
+## 8. The request for a download-and-verification-only next step (corrected in the Phase 3D-0 closure; still NOT granted)
 
-> **Request A — download two files and verify them without running them.**
-> **Files (only these, only this version):**
-> 1. `https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe` — 1 035 264 bytes; published SHA-256 `a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627`.
-> 2. `https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-macos-arm64` — 841 504 bytes; published SHA-256 `2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e`.
-> (plus the two 833-byte signature files `…/sig/v1.8.2/jq-windows-amd64.exe.asc` and `jq-macos-arm64.asc` from `raw.githubusercontent.com/jqlang/jq/master/`, which are text.)
-> **Method:** GitHub CLI over HTTPS to `github.com` only, into two new, empty folders under the session scratch directory (one file per folder), outside the repository, outside any managed root, never on PATH, never given an execute permission.
-> **What will be done with them:** compute SHA-256 and compare with four sources (the published digest above, the repository's `sha256sum.txt`, the attestation subject, the size); run `tools/verify_sigstore_bundle.py --artifact`; run `gh attestation verify` against `jqlang/jq` with the signer workflow and the stored bundle (offline); verify the GPG signatures with a temporary, isolated keyring and the pinned fingerprint `9307 9A95 11EF C0B7 D6CD BFB5 B0DA 60FB 454B AF18`; read the Authenticode status of file 1 and the Mach-O header of file 2 **statically** (no execution, no `--version`); record sanitized results in the repository.
-> **Expected effects:** about 1.9 MB downloaded; two files and one temporary keyring on this PC; no change to any other file, setting, registry key or PATH; no connection by the application itself.
-> **Not requested:** executing either file, installing anything, adding any digest to any reference list, any other file or version, a macOS `codesign` check (needs a real Mac and is a separate step), real-device installation.
-> **Duration/limit:** this one session; the downloaded files are deleted when the results are recorded unless you ask to keep them for the Red Team.
+The first wording of this section ("GitHub CLI over HTTPS to `github.com` only", signatures from `master`) was wrong (Issue #17). It is **superseded** by [phase-3d0/REQUEST-A.md](phase-3d0/REQUEST-A.md) (exact commands) and its Turkish counterpart [phase-3d0/REQUEST-A.tr.md](phase-3d0/REQUEST-A.tr.md): both artifacts pinned by name, size and SHA-256 (`jq-windows-amd64.exe`, 1 035 264 bytes, `a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627`; `jq-macos-arm64`, 841 504 bytes, `2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e`); signatures and key pinned to the immutable commit `f0dabad36a5fdb37393829e6bd4c465d70c40a3a` with the exact fingerprint `93079A9511EFC0B7D6CDBFB5B0DA60FB454BAF18`; an explicit host list (`github.com`, the two GitHub asset-storage hosts, `raw.githubusercontent.com`, `api.github.com`, and the two TUF hosts embedded in the GitHub CLI) with fail-closed redirects and no credentials; the maintained GitHub CLI verifier as authority and the custom verifier as supporting evidence only; the whole session folder preserved for the Red Team. See [PHASE-3D0-CLOSURE.md](PHASE-3D0-CLOSURE.md).
 
 ## 9. GO / NO-GO
 
