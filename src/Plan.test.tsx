@@ -49,6 +49,7 @@ describe("installation plan preview", () => {
     expect(calls("plan_install")[0].args).toEqual({
       request: { entryId: "gitleaks", platformTarget: "macos-arm64", agentSurface: "claude-code-terminal", scope: "project", methodId: null, projectAlias: "ornek-web-sitesi" },
     });
+    expect(screen.getByRole("list", { name: "Hedef" })).toHaveTextContent("proje: ornek-web-sitesi");
     expect(screen.getByText(/Bu plan uygulanamaz/)).toBeInTheDocument();
     const reasons = screen.getByRole("list", { name: "Engelleme nedenleri" });
     expect(within(reasons).getByText(/onaylanmış, tipli bir kurulum tarifi yok/)).toBeInTheDocument();

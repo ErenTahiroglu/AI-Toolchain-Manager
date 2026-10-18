@@ -211,6 +211,9 @@ pub enum Recovered {
     CorruptJournal(String),
     /// A lock without any journal (a crash right after locking): removed, nothing had been changed.
     OrphanLockRemoved(String),
+    /// The transaction is finished, but something this module did not create is still in its staging or snapshot folder.
+    /// It was left untouched (nothing is deleted on a guess); the reason is a short description without names.
+    LeftoversRetained(String, String),
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -287,9 +290,10 @@ impl SandboxRoot {
         if !base.is_dir() || is_link(base) {
             return Err("base_not_a_plain_directory");
         }
-        let path = base.join(format!("{SANDBOX_PREFIX}{}", uuid::Uuid::new_v4().simple()));
+        let root_id = uuid::Uuid::new_v4().simple().to_string();
+        let path = base.join(format!("{SANDBOX_PREFIX}{root_id}"));
         fs::create_dir(&path).map_err(|_| "cannot_create_sandbox")?;
-        let marker = serde_json::json!({ "magic": MARKER_MAGIC, "computerId": computer_id }).to_string();
+        let marker = serde_json::json!({ "magic": MARKER_MAGIC, "computerId": computer_id, "rootId": root_id }).to_string();
         fs::write(path.join(MARKER), marker).map_err(|_| "cannot_write_marker")?;
         for d in SUBDIRS {
             fs::create_dir(path.join(d)).map_err(|_| "cannot_create_layout")?;
@@ -313,6 +317,23 @@ impl SandboxRoot {
             return Err("bad_marker");
         }
         let computer_id = marker.get("computerId").and_then(|v| v.as_str()).filter(|c| safe_component(c)).ok_or("bad_marker")?.to_string();
+        // The marker names the folder it was created for: a marker copied into another folder does not carry over.
+        if marker.get("rootId").and_then(|v| v.as_str()) != Some(&name[SANDBOX_PREFIX.len()..]) {
+            return Err("marker_does_not_belong_to_this_folder");
+        }
+        // A sandbox has a closed top level: the marker and the fixed folders, nothing else. A populated user folder that merely
+        // received a marker file and the right folder names is therefore not adopted.
+        let mut seen_top = 0;
+        for e in fs::read_dir(path).map_err(|_| "unreadable")?.flatten() {
+            let n = e.file_name().to_string_lossy().into_owned();
+            if n != MARKER && !SUBDIRS.contains(&n.as_str()) {
+                return Err("unexpected_top_level_entry");
+            }
+            seen_top += 1;
+        }
+        if seen_top != SUBDIRS.len() + 1 {
+            return Err("layout_damaged_or_redirected");
+        }
         let root = SandboxRoot { path: path.to_path_buf(), computer_id };
         for d in SUBDIRS {
             let p = root.path.join(d);
@@ -388,6 +409,116 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 fn io<E>(_: E) -> TxnError {
     TxnError::Refused("io_error")
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Conservative removal: only what this module created, in the shape it created it
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// A removal that tolerates the short delays Windows shows while a scanner or indexer still holds a handle on something that
+/// was just closed. It retries only the same single, non-recursive operation; it never widens it.
+fn retry_io<T>(mut op: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    let mut last = None;
+    for attempt in 0..8 {
+        match op() {
+            Ok(v) => return Ok(v),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(e),
+            Err(e) => last = Some(e),
+        }
+        if attempt < 7 {
+            std::thread::sleep(std::time::Duration::from_millis(25 * (attempt + 1) as u64));
+        }
+    }
+    Err(last.unwrap_or_else(|| std::io::Error::other("removal failed")))
+}
+
+fn entry_kind(p: &Path) -> &'static str {
+    if is_link(p) {
+        return "link";
+    }
+    match fs::symlink_metadata(p) {
+        Ok(m) if m.is_file() => "file",
+        Ok(m) if m.is_dir() => "folder",
+        _ => "other",
+    }
+}
+
+fn list_entries(dir: &Path) -> Result<Vec<(String, &'static str)>, String> {
+    let mut v: Vec<(String, &'static str)> = fs::read_dir(dir)
+        .map_err(|e| format!("cannot list the folder: {e}"))?
+        .flatten()
+        .map(|e| (e.file_name().to_string_lossy().into_owned(), entry_kind(&e.path())))
+        .collect();
+    v.sort();
+    Ok(v)
+}
+
+fn unexpected_description(unexpected: &[&(String, &'static str)]) -> String {
+    let count = |k: &str| unexpected.iter().filter(|(_, kind)| *kind == k).count();
+    format!(
+        "{} unexpected entr{} ({} file(s), {} folder(s), {} link(s), {} other) were left untouched; nothing was deleted",
+        unexpected.len(),
+        if unexpected.len() == 1 { "y" } else { "ies" },
+        count("file"),
+        count("folder"),
+        count("link"),
+        count("other")
+    )
+}
+
+/// Removes the regular files named in `allowed` that sit directly in `dir`, and then `dir` itself WITHOUT recursion. All or
+/// nothing: if anything else is present (another file, a folder, a link of any kind) nothing is deleted. Entries are judged
+/// by `symlink_metadata`, so a link is never followed. A remaining window exists between the listing and the removal; it can
+/// only ever delete one of the named files (or a link that replaced it, not its target) and the final non-recursive
+/// `remove_dir` fails if anything else appeared.
+fn remove_closed_dir(dir: &Path, allowed: &[&str]) -> Result<(), String> {
+    let entries = list_entries(dir)?;
+    let unexpected: Vec<&(String, &'static str)> =
+        entries.iter().filter(|(n, k)| !(allowed.contains(&n.as_str()) && *k == "file")).collect();
+    if !unexpected.is_empty() {
+        return Err(unexpected_description(&unexpected));
+    }
+    for (n, _) in &entries {
+        retry_io(|| fs::remove_file(dir.join(n))).map_err(|e| format!("cannot remove a file this module created: {e}"))?;
+    }
+    retry_io(|| fs::remove_dir(dir)).map_err(|e| format!("the folder is not empty or cannot be removed: {e}"))
+}
+
+/// Removes a transaction snapshot (`pointer.json`, and `versions/<version>/artifact.bin` after an uninstall). The whole
+/// structure is validated first; any foreign entry anywhere keeps everything in place.
+fn remove_snapshot(dir: &Path) -> Result<(), String> {
+    let top = list_entries(dir)?;
+    let foreign: Vec<&(String, &'static str)> =
+        top.iter().filter(|(n, k)| !((n == "pointer.json" && *k == "file") || (n == "versions" && *k == "folder"))).collect();
+    if !foreign.is_empty() {
+        return Err(unexpected_description(&foreign));
+    }
+    let versions = dir.join("versions");
+    let mut version_dirs: Vec<PathBuf> = Vec::new();
+    if top.iter().any(|(n, _)| n == "versions") {
+        for (n, k) in list_entries(&versions)? {
+            let vd = versions.join(&n);
+            if k != "folder" || !safe_component(&n) {
+                return Err(unexpected_description(&[&(n, k)]));
+            }
+            let inner = list_entries(&vd)?;
+            let bad: Vec<&(String, &'static str)> = inner.iter().filter(|(n, k)| !(n == "artifact.bin" && *k == "file")).collect();
+            if !bad.is_empty() {
+                return Err(unexpected_description(&bad));
+            }
+            version_dirs.push(vd);
+        }
+    }
+    for vd in &version_dirs {
+        remove_closed_dir(vd, &["artifact.bin"])?;
+    }
+    if top.iter().any(|(n, _)| n == "versions") {
+        fs::remove_dir(&versions).map_err(|e| format!("cannot remove the versions folder: {e}"))?;
+    }
+    if top.iter().any(|(n, _)| n == "pointer.json") {
+        fs::remove_file(dir.join("pointer.json")).map_err(|e| format!("cannot remove the snapshot file: {e}"))?;
+    }
+    fs::remove_dir(dir).map_err(|e| format!("the snapshot folder is not empty or cannot be removed: {e}"))
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -768,7 +899,7 @@ impl<'a> Engine<'a> {
     fn finish(&self, mut j: Journal, result: Result<Receipt, TxnError>) -> Result<Outcome, TxnError> {
         match result {
             Ok(receipt) => {
-                self.cleanup_after_commit(&j);
+                let _ = self.cleanup_after_commit(&j);
                 self.unlock(&j.tool_id, &j.txn_id);
                 Ok(Outcome { receipt, already_applied: false })
             }
@@ -781,7 +912,7 @@ impl<'a> Engine<'a> {
                 };
                 let report = self.roll_back(&mut j);
                 if report.status == "restored" || report.status == "not_needed" {
-                    self.cleanup_after_commit(&j);
+                    let _ = self.cleanup_after_commit(&j);
                     self.unlock(&j.tool_id, &j.txn_id);
                 }
                 Err(TxnError::Failed { code, rollback: report })
@@ -789,13 +920,25 @@ impl<'a> Engine<'a> {
         }
     }
 
-    fn cleanup_after_commit(&self, j: &Journal) {
+    /// Removes what a finished transaction leaves behind — staging and snapshot — but only in the shape this module creates.
+    /// Anything foreign keeps the folder where it is. Returns why something was retained.
+    fn cleanup_after_commit(&self, j: &Journal) -> Option<String> {
+        let mut why: Option<String> = None;
         if let Ok(p) = self.root.join("staging", &[&j.txn_id]) {
-            let _ = fs::remove_dir_all(p);
+            if p.exists() {
+                if let Err(e) = remove_closed_dir(&p, &["artifact.bin", "artifact.bin.part"]) {
+                    why = Some(format!("staging: {e}"));
+                }
+            }
         }
         if let Ok(p) = self.root.join("snapshots", &[&j.txn_id]) {
-            let _ = fs::remove_dir_all(p);
+            if p.exists() {
+                if let Err(e) = remove_snapshot(&p) {
+                    why.get_or_insert(format!("snapshot: {e}"));
+                }
+            }
         }
+        why
     }
 
     // ---- uninstall ------------------------------------------------------------------------------------------------------
@@ -971,26 +1114,49 @@ impl<'a> Engine<'a> {
         self.rollback_hit(Point::RollbackRemoveStaging)?;
         let stage = self.root.join("staging", &[&j.txn_id]).map_err(|_| "path refused".to_string())?;
         if stage.exists() {
-            fs::remove_dir_all(&stage).map_err(|e| format!("cannot remove the staging folder: {e}"))?;
+            if entry_kind(&stage) != "folder" {
+                return Err("the staging path is not a plain folder; it was left untouched".to_string());
+            }
+            remove_closed_dir(&stage, &["artifact.bin", "artifact.bin.part"])?;
         }
         Ok(())
     }
 
-    /// Removes the version folder this transaction created — and only if it still holds exactly the artifact this transaction
-    /// wrote. Returns whether a folder was removed.
+    /// Removes the version folder this transaction created — and ONLY if its whole content is exactly what the transaction
+    /// wrote: nothing, or the single regular file `artifact.bin` whose SHA-256 equals the transaction's. A matching primary
+    /// artifact is not proof that its siblings are ours: any other file, folder, link or junction keeps everything in place.
+    /// The removal is the file, then the (then empty) folder, never a recursive delete. Returns whether a folder was removed.
     fn undo_version_dir(&self, j: &Journal, tool: &str, version: &str) -> Result<bool, String> {
         self.rollback_hit(Point::RollbackRemoveVersionDir)?;
-        let vdir = self.root.join("versions", &[tool, version]).map_err(|_| "path refused".to_string())?;
-        if !vdir.exists() {
+        let vdir = self
+            .root
+            .join("versions", &[tool, version])
+            .map_err(|_| "the version path is a link, redirected or unsafe; it was left untouched".to_string())?;
+        if fs::symlink_metadata(&vdir).is_err() {
             return Ok(false);
         }
-        let art = vdir.join("artifact.bin");
-        let ours = fs::read(&art).map(|b| Some(sha256_hex_bytes(&b)) == j.artifact_sha256).unwrap_or(false)
-            || fs::read_dir(&vdir).map(|mut d| d.next().is_none()).unwrap_or(false);
-        if !ours {
-            return Err("the folder no longer holds what this transaction wrote; it was left untouched".to_string());
+        if entry_kind(&vdir) != "folder" {
+            return Err("the version path is not a plain folder (link or other); it was left untouched".to_string());
         }
-        fs::remove_dir_all(&vdir).map_err(|e| format!("cannot remove the folder: {e}"))?;
+        let entries = list_entries(&vdir)?;
+        match entries.as_slice() {
+            [] => {
+                fs::remove_dir(&vdir).map_err(|e| format!("cannot remove the empty folder: {e}"))?;
+            }
+            [(name, "file")] if name == "artifact.bin" => {
+                let bytes = fs::read(vdir.join("artifact.bin")).map_err(|e| format!("cannot read the artifact to check it: {e}"))?;
+                if Some(sha256_hex_bytes(&bytes)) != j.artifact_sha256 {
+                    return Err("the artifact no longer is what this transaction wrote; the folder was left untouched".to_string());
+                }
+                remove_closed_dir(&vdir, &["artifact.bin"])?;
+            }
+            other => {
+                let unexpected: Vec<&(String, &'static str)> =
+                    other.iter().filter(|(n, k)| !(n == "artifact.bin" && *k == "file")).collect();
+                let detail = if unexpected.is_empty() { "unrecognised content".to_string() } else { unexpected_description(&unexpected) };
+                return Err(format!("the version folder holds more than this transaction wrote: {detail}"));
+            }
+        }
         // the tool's version root goes too, but only when nothing else (an older version) is in it
         if let Some(parent) = vdir.parent() {
             let _ = fs::remove_dir(parent);
@@ -1027,19 +1193,17 @@ impl<'a> Engine<'a> {
             };
             seen_txns.push(j.txn_id.clone());
             match j.state {
-                TxnState::Committed => {
-                    self.cleanup_after_commit(&j);
-                    self.unlock(&j.tool_id, &j.txn_id);
-                }
-                TxnState::RolledBack => {
-                    self.cleanup_after_commit(&j);
+                TxnState::Committed | TxnState::RolledBack => {
+                    if let Some(why) = self.cleanup_after_commit(&j) {
+                        out.push(Recovered::LeftoversRetained(j.txn_id.clone(), why));
+                    }
                     self.unlock(&j.tool_id, &j.txn_id);
                 }
                 TxnState::RollbackFailed => {
                     // try again; the previous failure may have been transient
                     let report = self.roll_back(&mut j);
                     if report.not_undone.is_empty() {
-                        self.cleanup_after_commit(&j);
+                        let _ = self.cleanup_after_commit(&j);
                         self.unlock(&j.tool_id, &j.txn_id);
                         out.push(Recovered::RolledBack(j.txn_id.clone()));
                     } else {
@@ -1050,13 +1214,13 @@ impl<'a> Engine<'a> {
                     if self.complete_except_bookkeeping(&j) {
                         j.state = TxnState::Committed;
                         let _ = self.save(&mut j);
-                        self.cleanup_after_commit(&j);
+                        let _ = self.cleanup_after_commit(&j);
                         self.unlock(&j.tool_id, &j.txn_id);
                         out.push(Recovered::RolledForward(j.txn_id.clone()));
                     } else {
                         let report = self.roll_back(&mut j);
                         if report.not_undone.is_empty() {
-                            self.cleanup_after_commit(&j);
+                            let _ = self.cleanup_after_commit(&j);
                             self.unlock(&j.tool_id, &j.txn_id);
                             out.push(Recovered::RolledBack(j.txn_id.clone()));
                         } else {

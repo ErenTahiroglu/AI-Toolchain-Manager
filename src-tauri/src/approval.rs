@@ -153,6 +153,8 @@ pub enum ApprovalError {
     WrongComputer,
     ActionChanged,
     ProjectUnknown,
+    /// The approval names another project than the plan was made for (or names one for a user-scope plan).
+    ProjectMismatch,
     ActorNotAllowed,
     ConfirmationMismatch,
     BadLifetime,
@@ -177,6 +179,7 @@ impl ApprovalError {
             ApprovalError::WrongComputer => "wrong_computer",
             ApprovalError::ActionChanged => "action_changed",
             ApprovalError::ProjectUnknown => "project_unknown",
+            ApprovalError::ProjectMismatch => "project_mismatch",
             ApprovalError::ActorNotAllowed => "actor_not_allowed",
             ApprovalError::ConfirmationMismatch => "confirmation_mismatch",
             ApprovalError::BadLifetime => "bad_lifetime",
@@ -249,6 +252,10 @@ pub fn approve(
     ttl_seconds: i64,
 ) -> Result<Approval, ApprovalError> {
     check_plan_and_target(s)?;
+    // the project is part of the plan itself; an approval can only name that very project
+    if project_alias != s.plan.target.project_alias.as_deref() {
+        return Err(ApprovalError::ProjectMismatch);
+    }
     if !policy.accepts(&actor) {
         return Err(ApprovalError::ActorNotAllowed);
     }
@@ -367,6 +374,9 @@ pub fn verify_approval(a: &Approval, s: &Situation, policy: ApprovalPolicy) -> R
         return Err(ApprovalError::TargetChanged);
     }
     check_plan_and_target(s)?;
+    if a.project_alias != s.plan.target.project_alias {
+        return Err(ApprovalError::ProjectMismatch);
+    }
     check_project(s, a.project_alias.as_deref())?;
     if a.permissions_digest != s.recipe.permissions_digest() {
         return Err(ApprovalError::PermissionsChanged);

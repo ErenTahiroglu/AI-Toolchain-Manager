@@ -215,7 +215,7 @@ function PlanView({ plan }: { plan: InstallPlan }) {
       <h3>Hedef</h3>
       <ul aria-label="Hedef">
         <li>Araç: {plan.entry.displayName} · kaynak: {plan.entry.source} · sürüm etiketi: {plan.entry.revision}</li>
-        <li>Platform: {platformLabel(plan.target.platformTarget)} · ajan yüzeyi: {surfaceLabel(plan.target.agentSurface)} · kapsam: {SCOPES[plan.target.scope] ?? plan.target.scope}</li>
+        <li>Platform: {platformLabel(plan.target.platformTarget)} · ajan yüzeyi: {surfaceLabel(plan.target.agentSurface)} · kapsam: {SCOPES[plan.target.scope] ?? plan.target.scope}{plan.target.projectAlias ? ` · proje: ${plan.target.projectAlias}` : ""}</li>
         <li>
           {plan.target.thisComputerMatches
             ? "Seçilen platform bu bilgisayarınkiyle aynı."

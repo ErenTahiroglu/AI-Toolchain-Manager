@@ -56,10 +56,10 @@ export const PLAN_STATEMENT =
 
 /** A plan in the wire shape of the Rust planner (the real planner is covered by the Rust tests and the contract test). */
 export const makePlan = (r: PlanRequest, over: Partial<InstallPlan> = {}): InstallPlan => ({
-  schemaVersion: 1, plannerVersion: "1.0.0", planId: "a".repeat(64), state: "preview_only", executable: false, executed: false, modifiesAnything: false,
+  schemaVersion: 2, plannerVersion: "1.1.0", planId: "a".repeat(64), state: "preview_only", executable: false, executed: false, modifiesAnything: false,
   statement: PLAN_STATEMENT,
   entry: { entryId: r.entryId, displayName: r.entryId, kind: "executable_tool", source: "example/" + r.entryId, reviewState: "unreviewed", executionPolicy: "manual-only", licenseState: "known", revision: "v1@abcdef", sourcePin: "none" },
-  target: { platformTarget: r.platformTarget, agentSurface: r.agentSurface, scope: r.scope, thisComputer: "windows-x64", thisComputerMatches: r.platformTarget === "windows-x64", recipeTargetId: null, catalogCompatibility: "vendor-declared" },
+  target: { platformTarget: r.platformTarget, agentSurface: r.agentSurface, scope: r.scope, projectAlias: r.projectAlias, thisComputer: "windows-x64", thisComputerMatches: r.platformTarget === "windows-x64", recipeTargetId: null, catalogCompatibility: "vendor-declared" },
   eligibility: {
     status: "blocked", canExecute: false,
     blockers: [

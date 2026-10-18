@@ -1114,3 +1114,347 @@ fn the_process_environment_and_working_directory_are_unchanged_by_a_full_lifecyc
     after.sort();
     assert_eq!(after, vars);
 }
+
+// =====================================================================================================================
+// Phase 3A closure (Issue #13, RT-3A-02): rollback and cleanup delete only what this module created, in the shape it
+// created it
+// =====================================================================================================================
+
+/// A failing install whose version folder is tampered with right after the pointer switch (`inject` runs once, there).
+fn install_with_obstruction(l: &Lab, inject: impl Fn(&Path) + Sync, then: Fault) -> Result<Outcome, TxnError> {
+    let vdir = l.p(&format!("versions/{TOOL}/1.0.0"));
+    let hook = move |p: Point| {
+        if p == Point::AfterPointerSwitch {
+            inject(&vdir);
+            Some(then)
+        } else {
+            None
+        }
+    };
+    l.install(&l.v1, Some(&hook))
+}
+
+fn only_partial_failure(report: &RollbackReport) {
+    assert!(matches!(report.status.as_str(), "partial" | "failed"), "{report:?}");
+    assert!(report.not_undone.iter().any(|n| n.what.contains("version folder 1.0.0")), "{report:?}");
+    assert!(!report.undone.iter().any(|u| u.contains("version folder")), "it must not claim the folder was removed: {report:?}");
+}
+
+#[test]
+fn a_clean_rollback_removes_the_artifact_and_the_folder_and_nothing_else() {
+    let l = lab();
+    let (_, report) = failed(install_with_obstruction(&l, |_| {}, Fault::Fail));
+    assert_eq!(report.status, "restored", "{report:?}");
+    assert!(report.undone.iter().any(|u| u.contains("version folder 1.0.0 removed")));
+    assert!(!l.p(&format!("versions/{TOOL}")).exists(), "the empty tool folder goes too");
+    l.assert_clean();
+    l.outside_is_untouched();
+    // an empty folder that this transaction created is handled as well
+    let l = lab();
+    let (_, report) = failed(l.install(&l.v1, Some(&at(Point::AfterVersionDirCreate, Fault::Fail))));
+    assert_eq!(report.status, "restored", "{report:?}");
+    assert!(!l.p(&format!("versions/{TOOL}")).exists());
+}
+
+#[test]
+fn an_unrelated_file_next_to_a_matching_artifact_survives_rollback_and_nothing_is_deleted() {
+    let l = lab();
+    let (_, report) = failed(install_with_obstruction(&l, |d| fs::write(d.join("notes.txt"), b"unrelated, mine").unwrap(), Fault::Fail));
+    only_partial_failure(&report);
+    assert!(report.not_undone.iter().any(|n| n.why.contains("1 unexpected entry") && n.why.contains("nothing was deleted")), "{report:?}");
+    let d = l.p(&format!("versions/{TOOL}/1.0.0"));
+    assert_eq!(fs::read(d.join("notes.txt")).unwrap(), b"unrelated, mine");
+    assert_eq!(fs::read(d.join("artifact.bin")).unwrap(), l.v1.sc.bytes, "all or nothing: the matching artifact stays too");
+    // the pointer, which could be restored, was
+    assert_eq!(l.active(), None);
+    assert!(report.undone.iter().any(|u| u.contains("pointer")));
+    // the journal and the lock are kept for recovery, and new work is refused
+    let j = l.journals().remove(0);
+    assert_eq!(j.state, TxnState::RollbackFailed);
+    assert_eq!(l.files("locks").len(), 1);
+    assert!(matches!(l.install(&l.v1, None), Err(TxnError::Busy)));
+    l.outside_is_untouched();
+}
+
+#[test]
+fn an_unexpected_subdirectory_is_never_deleted_recursively() {
+    let l = lab();
+    let (_, report) = failed(install_with_obstruction(
+        &l,
+        |d| {
+            fs::create_dir_all(d.join("cache/deep")).unwrap();
+            fs::write(d.join("cache/deep/precious.db"), b"precious").unwrap();
+        },
+        Fault::Fail,
+    ));
+    only_partial_failure(&report);
+    assert!(report.not_undone.iter().any(|n| n.why.contains("1 folder(s)")), "{report:?}");
+    assert_eq!(fs::read(l.p(&format!("versions/{TOOL}/1.0.0/cache/deep/precious.db"))).unwrap(), b"precious");
+    assert!(l.artifact_of("1.0.0").is_some());
+}
+
+fn make_file_link(link: &Path, target: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        std::os::windows::fs::symlink_file(target, link).is_ok()
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link).is_ok()
+    }
+}
+
+#[test]
+fn a_symbolic_link_inside_the_version_folder_stops_the_cleanup_and_its_target_is_untouched() {
+    let l = lab();
+    let outside = l.base.join("outside-file.txt");
+    fs::write(&outside, b"outside target").unwrap();
+    let link_ok = std::sync::atomic::AtomicBool::new(true);
+    let out2 = outside.clone();
+    let (_, report) = failed(install_with_obstruction(
+        &l,
+        |d| {
+            if !make_file_link(&d.join("shortcut"), &out2) {
+                link_ok.store(false, Ordering::SeqCst);
+            }
+        },
+        Fault::Fail,
+    ));
+    if !link_ok.load(Ordering::SeqCst) {
+        eprintln!("file symlinks need a privilege that is not available here; case not exercised");
+        return;
+    }
+    only_partial_failure(&report);
+    assert!(report.not_undone.iter().any(|n| n.why.contains("1 link(s)")), "{report:?}");
+    assert_eq!(fs::read(&outside).unwrap(), b"outside target", "the link target is untouched");
+    assert!(fs::symlink_metadata(l.p(&format!("versions/{TOOL}/1.0.0/shortcut"))).is_ok(), "the link itself is left in place");
+    assert!(l.artifact_of("1.0.0").is_some());
+}
+
+#[test]
+fn a_junction_or_directory_link_inside_the_version_folder_stops_the_cleanup_and_the_outside_stays_byte_identical() {
+    let l = lab();
+    let outside = l.base.join("outside-dir");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("keep.txt"), b"outside content").unwrap();
+    let made = std::sync::atomic::AtomicBool::new(true);
+    let o2 = outside.clone();
+    let (_, report) = failed(install_with_obstruction(
+        &l,
+        |d| {
+            if !make_dir_link(&d.join("redirect"), &o2) {
+                made.store(false, Ordering::SeqCst);
+            }
+        },
+        Fault::Fail,
+    ));
+    if !made.load(Ordering::SeqCst) {
+        eprintln!("directory links are not available here; case not exercised");
+        return;
+    }
+    only_partial_failure(&report);
+    assert!(report.not_undone.iter().any(|n| n.why.contains("1 link(s)")), "{report:?}");
+    assert_eq!(fs::read(outside.join("keep.txt")).unwrap(), b"outside content");
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 1, "nothing was added or removed outside");
+    remove_dir_link(&l.p(&format!("versions/{TOOL}/1.0.0/redirect")));
+}
+
+#[test]
+fn a_version_folder_that_is_itself_a_link_is_refused_and_never_followed() {
+    let l = lab();
+    let outside = l.base.join("outside-dir");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("keep.txt"), b"outside content").unwrap();
+    let made = std::sync::atomic::AtomicBool::new(true);
+    let o2 = outside.clone();
+    let vdir = l.p(&format!("versions/{TOOL}/1.0.0"));
+    let hook = {
+        let vdir = vdir.clone();
+        move |p: Point| {
+            if p == Point::AfterPointerSwitch {
+                // the folder the engine made is swapped for a link to a foreign folder
+                fs::remove_dir_all(&vdir).unwrap();
+                if !make_dir_link(&vdir, &o2) {
+                    made.store(false, Ordering::SeqCst);
+                }
+                return Some(Fault::Fail);
+            }
+            None
+        }
+    };
+    let (_, report) = failed(l.install(&l.v1, Some(&hook)));
+    only_partial_failure(&report);
+    assert!(report.not_undone.iter().any(|n| n.why.contains("left untouched")), "{report:?}");
+    assert_eq!(fs::read(outside.join("keep.txt")).unwrap(), b"outside content");
+    remove_dir_link(&vdir);
+}
+
+#[test]
+fn a_changed_artifact_is_never_removed_on_the_assumption_that_it_is_ours() {
+    let l = lab();
+    let (_, report) =
+        failed(install_with_obstruction(&l, |d| fs::write(d.join("artifact.bin"), b"someone else's content").unwrap(), Fault::Fail));
+    only_partial_failure(&report);
+    assert_eq!(fs::read(l.p(&format!("versions/{TOOL}/1.0.0/artifact.bin"))).unwrap(), b"someone else's content");
+}
+
+#[test]
+fn a_crash_followed_by_recovery_with_unexpected_content_keeps_it_and_repeating_recovery_changes_nothing() {
+    let l = lab();
+    let outside = l.base.join("sentinel.bin");
+    fs::write(&outside, [7u8; 64]).unwrap();
+    let r = install_with_obstruction(&l, |d| fs::write(d.join("notes.txt"), b"unrelated, mine").unwrap(), Fault::Crash);
+    assert!(matches!(r, Err(TxnError::Interrupted(Point::AfterPointerSwitch))), "{r:?}");
+    let notes = l.p(&format!("versions/{TOOL}/1.0.0/notes.txt"));
+    // first recovery: the pointer is restored, the folder is NOT removed, the transaction needs attention
+    let first = l.recover(None);
+    match &first[..] {
+        [Recovered::NeedsAttention(_, report)] => only_partial_failure(report),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(l.active(), None, "what could be undone was undone");
+    assert_eq!(l.files("locks").len(), 1);
+    assert_eq!(l.journals().remove(0).state, TxnState::RollbackFailed);
+    // repeating recovery any number of times: same answer, same files, no growth
+    let snapshot = |l: &Lab| (l.files("journal"), l.files("receipts"), fs::read(&notes).unwrap(), l.artifact_of("1.0.0"));
+    // (an empty staging/snapshot folder may be removed by a later recovery; what matters is that nothing foreign or recorded changes)
+    let before = snapshot(&l);
+    for _ in 0..3 {
+        assert!(matches!(&l.recover(None)[..], [Recovered::NeedsAttention(..)]));
+        assert_eq!(snapshot(&l), before);
+    }
+    assert_eq!(fs::read(&notes).unwrap(), b"unrelated, mine");
+    assert_eq!(fs::read(&outside).unwrap(), [7u8; 64], "the sentinel outside the sandbox is byte-identical");
+    // the obstruction is resolved by its owner; the next start finishes the rollback
+    fs::remove_file(&notes).unwrap();
+    assert!(matches!(&l.recover(None)[..], [Recovered::RolledBack(_)]));
+    assert!(!l.p(&format!("versions/{TOOL}")).exists());
+    assert_eq!(l.active(), None);
+    l.assert_clean();
+    l.outside_is_untouched_except(&["sentinel.bin"]);
+    // and work resumes
+    assert!(l.install(&l.v1, None).is_ok());
+}
+
+#[test]
+fn staging_and_snapshot_cleanup_keep_anything_foreign_and_report_it_on_recovery() {
+    // a foreign file inside the transaction's staging folder
+    let l = lab();
+    let stage_root = l.p("staging");
+    let hook = move |p: Point| {
+        if p == Point::AfterVerify {
+            let dir = fs::read_dir(&stage_root).unwrap().flatten().next().unwrap().path();
+            fs::write(dir.join("extra.txt"), b"mine").unwrap();
+            return Some(Fault::Fail);
+        }
+        None
+    };
+    let (_, report) = failed(l.install(&l.v1, Some(&hook)));
+    assert!(report.not_undone.iter().any(|n| n.what == "staging folder" && n.why.contains("unexpected")), "{report:?}");
+    let staged = l.p(&format!("staging/{}", l.files("staging")[0]));
+    assert_eq!(fs::read(staged.join("extra.txt")).unwrap(), b"mine");
+    assert!(staged.join("artifact.bin").exists(), "all or nothing: the staged artifact stays as well");
+    assert_eq!(l.journals().remove(0).state, TxnState::RollbackFailed);
+    fs::remove_file(staged.join("extra.txt")).unwrap();
+    assert!(matches!(&l.recover(None)[..], [Recovered::RolledBack(_)]));
+    l.assert_clean();
+
+    // a foreign file inside the snapshot of a committed uninstall
+    let l = lab();
+    l.install(&l.v1, None).unwrap();
+    let snaps = l.p("snapshots");
+    let hook = move |p: Point| {
+        if p == Point::BeforeJournalCommit {
+            let dir = fs::read_dir(&snaps).unwrap().flatten().next().unwrap().path();
+            fs::write(dir.join("versions/1.0.0/extra.txt"), b"mine").unwrap();
+        }
+        None
+    };
+    let out = l.uninstall(&l.v1, Some(&hook)).unwrap();
+    assert!(!out.already_applied);
+    assert_eq!(l.active(), None, "the uninstall itself is complete");
+    let snap_dir = l.p(&format!("snapshots/{}", l.files("snapshots")[0]));
+    assert_eq!(fs::read(snap_dir.join("versions/1.0.0/extra.txt")).unwrap(), b"mine", "the foreign file survives the cleanup");
+    for _ in 0..2 {
+        let rec = l.recover(None);
+        assert!(
+            matches!(&rec[..], [Recovered::LeftoversRetained(_, why)] if why.contains("snapshot") && why.contains("unexpected")),
+            "{rec:?}"
+        );
+    }
+    fs::remove_file(snap_dir.join("versions/1.0.0/extra.txt")).unwrap();
+    assert!(l.recover(None).is_empty(), "nothing is retained any more");
+    l.assert_clean();
+}
+
+#[test]
+fn closed_directory_removal_never_recurses_and_never_follows_links() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let dir = base.join("d");
+    fs::create_dir(&dir).unwrap();
+    fs::write(dir.join("artifact.bin"), b"a").unwrap();
+    // allowed set only: removed, folder gone
+    assert!(remove_closed_dir(&dir, &["artifact.bin"]).is_ok() && !dir.exists());
+    // a file that is not allowed, a sub-folder, a name that merely looks allowed (case), all keep everything
+    for (name, is_dir) in [("other", false), ("sub", true), ("ARTIFACT.BIN.x", false)] {
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("artifact.bin"), b"a").unwrap();
+        if is_dir {
+            fs::create_dir(dir.join(name)).unwrap();
+        } else {
+            fs::write(dir.join(name), b"x").unwrap();
+        }
+        assert!(remove_closed_dir(&dir, &["artifact.bin"]).is_err(), "{name}");
+        assert!(dir.join("artifact.bin").exists() && dir.join(name).exists(), "{name}: nothing deleted");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+    // the allowed name present as a FOLDER is not the allowed file
+    fs::create_dir_all(dir.join("artifact.bin")).unwrap();
+    assert!(remove_closed_dir(&dir, &["artifact.bin"]).is_err() && dir.join("artifact.bin").is_dir());
+}
+
+// ---- the sandbox boundary ------------------------------------------------------------------------------------------------------
+
+#[test]
+fn a_populated_user_folder_with_a_copied_marker_and_the_right_folder_names_is_not_adopted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let real = SandboxRoot::create(&base, COMPUTER).unwrap();
+    let real_marker = fs::read_to_string(real.path().join(MARKER)).unwrap();
+    // 1. the marker of a real sandbox copied into another folder that carries the sandbox name pattern
+    let copy = base.join(format!("{SANDBOX_PREFIX}00000000000000000000000000000000"));
+    fs::create_dir(&copy).unwrap();
+    fs::write(copy.join(MARKER), &real_marker).unwrap();
+    for d in SUBDIRS {
+        fs::create_dir(copy.join(d)).unwrap();
+    }
+    assert_eq!(SandboxRoot::open(&copy).unwrap_err(), "marker_does_not_belong_to_this_folder");
+    // 2. a user folder: marker and layout forged correctly, but it already holds the user's own files
+    let user = base.join(format!("{SANDBOX_PREFIX}1234567890abcdef1234567890abcdef"));
+    fs::create_dir(&user).unwrap();
+    fs::write(
+        user.join(MARKER),
+        serde_json::json!({ "magic": MARKER_MAGIC, "computerId": COMPUTER, "rootId": "1234567890abcdef1234567890abcdef" }).to_string(),
+    )
+    .unwrap();
+    for d in SUBDIRS {
+        fs::create_dir(user.join(d)).unwrap();
+    }
+    assert!(SandboxRoot::open(&user).is_ok(), "control: an exactly shaped, empty folder is what a sandbox looks like");
+    fs::write(user.join("my-thesis.docx"), b"precious").unwrap();
+    assert_eq!(SandboxRoot::open(&user).unwrap_err(), "unexpected_top_level_entry");
+    fs::remove_file(user.join("my-thesis.docx")).unwrap();
+    fs::remove_dir(user.join("locks")).unwrap();
+    assert_eq!(SandboxRoot::open(&user).unwrap_err(), "layout_damaged_or_redirected");
+    // 3. create() makes a new folder and never adopts: it is not affected by what already exists
+    let second = SandboxRoot::create(&base, COMPUTER).unwrap();
+    assert_ne!(second.path(), real.path());
+}
+
+#[test]
+fn no_recursive_delete_exists_anywhere_in_the_production_engine() {
+    let production = include_str!("lifecycle.rs").split("#[cfg(test)]").next().unwrap();
+    let needle = format!("{}{}", "remove_dir", "_all");
+    assert!(!production.contains(&needle), "the engine must remove named files and then empty folders, never a tree");
+}

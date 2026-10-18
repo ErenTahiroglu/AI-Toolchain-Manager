@@ -460,7 +460,7 @@ export interface InstallPlan {
     licenseState: string; revision: string; sourcePin: "none" | "malformed" | "declared_unverified" | "authenticated";
   };
   target: {
-    platformTarget: string; agentSurface: string; scope: string; thisComputer: string; thisComputerMatches: boolean;
+    platformTarget: string; agentSurface: string; scope: string; projectAlias: string | null; thisComputer: string; thisComputerMatches: boolean;
     recipeTargetId: string | null; catalogCompatibility: string;
   };
   eligibility: { status: "blocked"; canExecute: false; blockers: PlanBlocker[]; warnings: PlanBlocker[] };

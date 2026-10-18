@@ -33,7 +33,8 @@ class PlanContract(unittest.TestCase):
     def test_every_plan_is_a_versioned_blocked_preview_that_claims_no_effect(self):
         for p in self.plans:
             name = p["entry"]["entryId"]
-            self.assertEqual(p["schemaVersion"], 1, name)
+            self.assertEqual(p["schemaVersion"], 2, name)
+            self.assertIsNone(p["target"]["projectAlias"], "user-scope plans carry no project identity")
             self.assertEqual(p["state"], "preview_only", name)
             self.assertEqual((p["executable"], p["executed"], p["modifiesAnything"]), (False, False, False), name)
             self.assertEqual((p["eligibility"]["status"], p["eligibility"]["canExecute"]), ("blocked", False), name)

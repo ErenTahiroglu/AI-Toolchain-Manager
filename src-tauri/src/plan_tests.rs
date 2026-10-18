@@ -355,13 +355,14 @@ fn plans_round_trip_and_forged_or_foreign_versions_are_rejected() {
     let p = plan(&conn, &req("gitleaks", WIN, "local-cli"), &host(WIN));
     let text = serde_json::to_string(&p).unwrap();
     assert_eq!(parse_plan(&text).unwrap(), p);
-    assert!(text.contains("\"schemaVersion\":1") && text.contains("\"plannerVersion\":\"1.0.0\""));
+    assert!(text.contains("\"schemaVersion\":2") && text.contains("\"plannerVersion\":\"1.1.0\""));
     let tamper = |f: &dyn Fn(&mut Value)| {
         let mut v: Value = serde_json::from_str(&text).unwrap();
         f(&mut v);
         parse_plan(&v.to_string()).unwrap_err()
     };
-    assert_eq!(tamper(&|v| v["schemaVersion"] = json!(2)), "unsupported_schema_version");
+    assert_eq!(tamper(&|v| v["schemaVersion"] = json!(3)), "unsupported_schema_version");
+    assert_eq!(tamper(&|v| v["schemaVersion"] = json!(1)), "unsupported_schema_version");
     assert_eq!(tamper(&|v| v["executable"] = json!(true)), "plan_claims_execution");
     assert_eq!(tamper(&|v| v["executed"] = json!(true)), "plan_claims_execution");
     assert_eq!(tamper(&|v| v["modifiesAnything"] = json!(true)), "plan_claims_execution");
@@ -1056,7 +1057,7 @@ fn the_plan_id_of_a_fixed_input_is_the_same_on_every_platform() {
     assert_eq!(p.plan_id, GOLDEN_PLAN_ID, "the canonical plan content changed; if intended, update the pinned id");
 }
 
-const GOLDEN_PLAN_ID: &str = "0c1d15754c7808d1259e161d5227c9239b7fd0ed74b3a7a1eaa550e669ed9fb5";
+const GOLDEN_PLAN_ID: &str = "85cd660145c34e05471facba07a6964b7df8fb6acedaa115e1a985c2c88dbdc5";
 
 #[test]
 fn modifying_the_plan_id_or_any_content_field_without_the_matching_id_is_rejected() {

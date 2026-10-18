@@ -185,6 +185,7 @@ fn lifecycle_probe(conn: &rusqlite::Connection, dir: &std::path::Path) -> Result
             Recovered::NeedsAttention(..) => "needs_attention",
             Recovered::CorruptJournal(_) => "corrupt_journal",
             Recovered::OrphanLockRemoved(_) => "orphan_lock_removed",
+            Recovered::LeftoversRetained(..) => "leftovers_retained",
         })
         .collect();
     record("recovery", &e, json!({ "recovered": recovered }));

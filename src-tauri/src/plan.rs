@@ -22,8 +22,10 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-pub const PLAN_SCHEMA_VERSION: u32 = 1;
-pub const PLANNER_VERSION: &str = "1.0.0";
+/// Version 2: the plan target carries the exact project identity (`projectAlias`), so two projects can never share a plan id.
+/// Version-1 plans are not readable any more and are never reinterpreted.
+pub const PLAN_SCHEMA_VERSION: u32 = 2;
+pub const PLANNER_VERSION: &str = "1.1.0";
 
 /// Shown with every plan, verbatim.
 pub const PREVIEW_STATEMENT: &str =
@@ -344,6 +346,8 @@ pub struct PlanTarget {
     pub platform_target: String,
     pub agent_surface: String,
     pub scope: String,
+    /// The registered project this plan is for: present exactly when `scope` is `project`. A safe alias only, never a path.
+    pub project_alias: Option<String>,
     pub this_computer: String,
     pub this_computer_matches: bool,
     /// The install-recipe schema's target id, if one exists for this platform and surface.
@@ -567,6 +571,11 @@ impl InstallPlan {
             || !(PLATFORMS.contains(&t.this_computer.as_str()) || t.this_computer == "unsupported")
         {
             return Err("target_not_in_vocabulary");
+        }
+        match (t.scope.as_str(), t.project_alias.as_deref()) {
+            ("user", None) => {}
+            ("project", Some(alias)) if crate::projects::valid_alias(alias) => {}
+            _ => return Err("project_identity_inconsistent"),
         }
         if t.recipe_target_id.as_deref() != recipe_target(&t.platform_target, &t.agent_surface)
             || t.this_computer_matches != (t.this_computer == t.platform_target)
@@ -1460,6 +1469,7 @@ fn build_draft(entry: &CatalogEntry, req: &PlanRequest, host: &HostFacts, observ
         platform_target: req.platform_target.clone(),
         agent_surface: req.agent_surface.clone(),
         scope: req.scope.clone(),
+        project_alias: req.project_alias.clone(),
         this_computer: host.platform.clone(),
         this_computer_matches: this_matches,
         recipe_target_id: recipe_target_id.map(str::to_string),

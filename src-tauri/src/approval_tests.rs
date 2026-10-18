@@ -219,54 +219,148 @@ fn a_plan_without_a_validated_recipe_or_for_another_recipe_or_platform_cannot_be
 
 // ---- projects ------------------------------------------------------------------------------------------------------------
 
-fn project_fx() -> (Fx, PlanRequest) {
+/// A project-scope scenario for `alias` (both "proje-a" and "proje-b" are registered projects in its database).
+fn project_fx_for(alias: &str) -> Fx {
     let mut f = base_fx();
+    crate::projects::add_reference(&f.conn, "proje-b", "Proje B", "").unwrap();
     f.sc.reviewed.recipe.target.scope = "project".to_string();
     synthetic::rereview(&mut f.sc.reviewed);
     f.valid = f.sc.validated();
+    f.plan = project_plan(&f, alias);
+    assert_eq!(f.plan.recipe.state, "validated");
+    f
+}
+
+fn project_plan(f: &Fx, alias: &str) -> plan::InstallPlan {
     let req = PlanRequest {
         scope: "project".to_string(),
-        project_alias: Some("proje-a".to_string()),
+        project_alias: Some(alias.to_string()),
         ..synthetic::request("synthetic-tool", this_platform())
     };
-    f.plan = plan::build_plan_with(&f.sc.entry, &req, &synthetic::host(this_platform()), &[], &[&f.sc.reviewed], &f.sc.refs).unwrap();
-    assert_eq!(f.plan.recipe.state, "validated");
-    (f, req)
+    plan::build_plan_with(&f.sc.entry, &req, &synthetic::host(this_platform()), &[], &[&f.sc.reviewed], &f.sc.refs).unwrap()
+}
+
+fn project_approval(f: &Fx, alias: Option<&str>) -> Result<Approval, ApprovalError> {
+    approve(
+        &situation(f, Action::Install, None, COMPUTER, t0()),
+        alias,
+        Actor::synthetic("synthetic-user-1"),
+        &confirm(Action::Install, f),
+        ApprovalPolicy::synthetic_only(),
+        600,
+    )
 }
 
 #[test]
-fn a_project_approval_needs_a_registered_project_and_stops_being_valid_when_it_disappears() {
-    let (f, _) = project_fx();
-    let make = |alias: Option<&str>| {
-        approve(
-            &situation(&f, Action::Install, None, COMPUTER, t0()),
-            alias,
-            Actor::synthetic("synthetic-user-1"),
-            &confirm(Action::Install, &f),
-            ApprovalPolicy::synthetic_only(),
-            600,
-        )
+fn two_projects_with_identical_facts_get_different_plan_ids_and_an_approval_for_one_never_verifies_for_the_other() {
+    let a = project_fx_for("proje-a");
+    let b = project_fx_for("proje-b");
+    // identical tool, platform, agent, scope and observations: only the project identity differs
+    assert_eq!((a.plan.target.project_alias.as_deref(), b.plan.target.project_alias.as_deref()), (Some("proje-a"), Some("proje-b")));
+    assert_ne!(a.plan.plan_id, b.plan.plan_id, "the project is part of the canonical plan");
+    let strip = |p: &plan::InstallPlan| {
+        let mut v = serde_json::to_value(p).unwrap();
+        v["target"]["projectAlias"] = serde_json::Value::Null;
+        v["planId"] = serde_json::Value::Null;
+        v
     };
-    // well-formed but nonexistent, a path-like string, and no alias at all
-    assert_eq!(err_of(make(Some("proje-yok"))), ApprovalError::ProjectUnknown);
-    assert_eq!(err_of(make(Some("C:\\Users\\x"))), ApprovalError::ProjectUnknown);
-    assert_eq!(err_of(make(None)), ApprovalError::ProjectUnknown);
-    let a = make(Some("proje-a")).unwrap();
+    assert_eq!(strip(&a.plan), strip(&b.plan), "nothing else differs");
+    // the plan id is stable per project
+    assert_eq!(a.plan.plan_id, project_plan(&a, "proje-a").plan_id);
+    // approve A with the synthetic actor
+    let approval_a = project_approval(&a, Some("proje-a")).unwrap();
+    assert_eq!(approval_a.project_alias.as_deref(), Some("proje-a"));
+    assert!(verify(&a, &approval_a, t0()).is_ok());
+    // A's approval against B's plan (both projects exist, everything else is identical): explicitly refused
+    assert_eq!(err_of(verify(&b, &approval_a, t0())), ApprovalError::ProjectMismatch);
+    // and approving B's plan with A's alias is refused as well
+    assert_eq!(err_of(project_approval(&b, Some("proje-a"))), ApprovalError::ProjectMismatch);
+    assert_eq!(err_of(project_approval(&a, Some("proje-b"))), ApprovalError::ProjectMismatch);
+    // a hand-made approval naming B, bound to A's plan id, with a recomputed binding: still refused
+    let mut forged = approval_a.clone();
+    forged.project_alias = Some("proje-b".to_string());
+    rebind(&mut forged);
+    assert_eq!(err_of(verify(&a, &forged, t0())), ApprovalError::ProjectMismatch);
+    // naming B AND carrying B's plan id passes the plan-id comparison but not the situation of A
+    let mut forged_b = forged.clone();
+    forged_b.plan_id = b.plan.plan_id.clone();
+    rebind(&mut forged_b);
+    assert_eq!(err_of(verify(&a, &forged_b, t0())), ApprovalError::ProjectMismatch);
+    // without an alias at all
+    let mut none = approval_a.clone();
+    none.project_alias = None;
+    rebind(&mut none);
+    assert_eq!(err_of(verify(&a, &none, t0())), ApprovalError::ProjectMismatch);
+}
+
+#[test]
+fn a_project_approval_needs_a_registered_project_and_stops_being_valid_when_it_changes_or_disappears() {
+    let f = project_fx_for("proje-a");
+    assert_eq!(err_of(project_approval(&f, None)), ApprovalError::ProjectMismatch, "a project plan needs its project");
+    let a = project_approval(&f, Some("proje-a")).unwrap();
     assert!(verify(&f, &a, t0()).is_ok());
+    // approval expiry still applies
+    assert_eq!(err_of(verify(&f, &a, t0() + Duration::seconds(600))), ApprovalError::Expired);
+    // the project identity changes after approval: the situation now is the other project's plan
+    let other_plan = project_plan(&f, "proje-b");
+    let moved = Fx { plan: other_plan, ..project_fx_for("proje-b") };
+    assert_eq!(err_of(verify(&moved, &a, t0())), ApprovalError::ProjectMismatch);
     // the project is removed after the approval: it no longer binds
     crate::projects::remove_reference(&f.conn, "proje-a").unwrap();
     assert_eq!(err_of(verify(&f, &a, t0())), ApprovalError::ProjectUnknown);
-    // a user-scope recipe cannot be approved for a project
-    let user = base_fx();
-    let r = approve(
-        &situation(&user, Action::Install, None, COMPUTER, t0()),
-        Some("proje-a"),
-        Actor::synthetic("synthetic-user-1"),
-        &confirm(Action::Install, &user),
-        ApprovalPolicy::synthetic_only(),
-        600,
-    );
-    assert_eq!(err_of(r), ApprovalError::TargetChanged);
+    // a plan for a well-formed but unregistered project can be built as data, but cannot be approved
+    let unknown = Fx { plan: project_plan(&f, "proje-yok"), ..project_fx_for("proje-a") };
+    assert_eq!(err_of(project_approval(&unknown, Some("proje-yok"))), ApprovalError::ProjectUnknown);
+}
+
+#[test]
+fn malformed_aliases_and_user_scope_plans_with_an_alias_never_become_plans_or_approvals() {
+    let f = base_fx();
+    let host = synthetic::host(this_platform());
+    for bad in ["C:\\Users\\x", "../x", "A", "x", "proje a", "-bad", "PROJE", &"a".repeat(60)] {
+        let r = PlanRequest {
+            scope: "project".to_string(),
+            project_alias: Some(bad.to_string()),
+            ..synthetic::request("synthetic-tool", this_platform())
+        };
+        assert_eq!(
+            plan::build_plan_with(&f.sc.entry, &r, &host, &[], &[&f.sc.reviewed], &f.sc.refs).unwrap_err().code,
+            "PLAN_REQUEST_INVALID",
+            "{bad:?}"
+        );
+    }
+    // a user-scope request with an alias, and a project-scope request without one
+    let r = PlanRequest { project_alias: Some("proje-a".to_string()), ..synthetic::request("synthetic-tool", this_platform()) };
+    assert_eq!(plan::build_plan_with(&f.sc.entry, &r, &host, &[], &[&f.sc.reviewed], &f.sc.refs).unwrap_err().code, "PLAN_REQUEST_INVALID");
+    let r = PlanRequest { scope: "project".to_string(), ..synthetic::request("synthetic-tool", this_platform()) };
+    assert_eq!(plan::build_plan_with(&f.sc.entry, &r, &host, &[], &[&f.sc.reviewed], &f.sc.refs).unwrap_err().code, "PLAN_REQUEST_INVALID");
+    // a user-scope plan cannot be approved for a project …
+    assert_eq!(err_of(project_approval(&f, Some("proje-a"))), ApprovalError::ProjectMismatch);
+    // … and a plan edited to carry an alias (or to lose it) is not a valid plan at all
+    for edit in [(|v: &mut serde_json::Value| v["target"]["projectAlias"] = json!("proje-a")) as fn(&mut serde_json::Value), |v| {
+        v["target"]["scope"] = json!("project")
+    }] {
+        let mut v = serde_json::to_value(&f.plan).unwrap();
+        edit(&mut v);
+        let forged: plan::InstallPlan = serde_json::from_value(v).unwrap();
+        assert_eq!(forged.check_semantics().unwrap_err(), "project_identity_inconsistent");
+        let g = Fx { plan: forged, ..base_fx() };
+        assert!(matches!(err_of(project_approval(&g, None)), ApprovalError::PlanNotValid("project_identity_inconsistent")));
+    }
+    let mut v = serde_json::to_value(&project_fx_for("proje-a").plan).unwrap();
+    v["target"]["projectAlias"] = json!("Not A Safe Alias");
+    assert_eq!(serde_json::from_value::<plan::InstallPlan>(v).unwrap().check_semantics().unwrap_err(), "project_identity_inconsistent");
+}
+
+#[test]
+fn a_version_one_plan_is_not_readable_and_is_never_reinterpreted() {
+    let f = base_fx();
+    let mut v = serde_json::to_value(&f.plan).unwrap();
+    v["schemaVersion"] = json!(1);
+    v["plannerVersion"] = json!("1.0.0");
+    v["target"].as_object_mut().unwrap().remove("projectAlias");
+    assert_eq!(plan::parse_plan(&v.to_string()).unwrap_err(), "unsupported_schema_version");
+    assert_eq!(f.plan.schema_version, 2);
 }
 
 #[test]
@@ -533,6 +627,7 @@ fn every_error_has_a_distinct_stable_code() {
         ApprovalError::WrongComputer,
         ApprovalError::ActionChanged,
         ApprovalError::ProjectUnknown,
+        ApprovalError::ProjectMismatch,
         ApprovalError::ActorNotAllowed,
         ApprovalError::ConfirmationMismatch,
         ApprovalError::BadLifetime,

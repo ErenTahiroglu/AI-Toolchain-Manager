@@ -77,7 +77,7 @@ ATM_SELFCHECK_JSON=out.json python -m unittest discover -s tests -v
 ## Test ve CI kanıtı
 
 - Her `development` itme işlemi GitHub Actions'ta Windows x64 ve macOS arm64 üzerinde şunları çalıştırır: Rust biçim/lint (`-D warnings`) ve testler, ön yüz tip denetimi/testi/derlemesi, Python sözleşme testleri, derlenen ikilinin başsız `--self-check` çalıştırması. Kesin SHA ve sonuçlar için [Actions sayfasına](https://github.com/ErenTahiroglu/AI-Toolchain-Manager/actions) bakın; yeşil bir CI yalnızca o koşucunun gerçekten yaptığını kanıtlar.
-- Phase 3A yerel sonuçları (Windows 11 x64): Rust 403 test, ön yüz 72 test, Python sözleşme 78 test, hata ayıklama derlemesi ve WebView2 üzerinde elle arayüz denemesi. Sayılar aşama raporlarında güncellenir; bu satır bir sürüm vaadi değildir.
+- Phase 3A yerel sonuçları (Windows 11 x64): Rust 418 test, ön yüz 72 test, Python sözleşme 78 test, hata ayıklama derlemesi ve WebView2 üzerinde elle arayüz denemesi. Sayılar aşama raporlarında güncellenir; bu satır bir sürüm vaadi değildir.
 - Kanıt sınırı: macOS CI'ı gerçek Mac masaüstü testi değildir; Windows release derlemesinin yerel doğrulaması yoktur.
 
 ## Aşama raporları ve belgeler
