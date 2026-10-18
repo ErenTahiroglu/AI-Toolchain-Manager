@@ -42,6 +42,7 @@ fn migrate_7(tx: &Transaction) -> AppResult<()> {
 /// 7 = Phase 2B closure: identity taxonomy (`record_corroborated`; `validated` reserved) and in-place lowering of
 ///     high-trust values stored by earlier builds. Table rebuild; every row and id is preserved.
 /// 8 = Phase 2C: `discovery_scans.authorized_fingerprint` and the (always unauthenticated) `reference_digests` table.
+/// 9 = Phase 3C: `managed_roots`, the manager's own record of the identity of the folder it owns (additive; nothing inserts yet).
 const MIGRATIONS: &[Migration] = &[
     Migration::Sql(include_str!("../migrations/0001_init.sql")),
     Migration::Rust(migrate_2),
@@ -51,6 +52,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Sql(include_str!("../migrations/0006_passive_provenance.sql")),
     Migration::Rust(migrate_7),
     Migration::Sql(include_str!("../migrations/0008_artifact_provenance.sql")),
+    Migration::Sql(include_str!("../migrations/0009_managed_roots.sql")),
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

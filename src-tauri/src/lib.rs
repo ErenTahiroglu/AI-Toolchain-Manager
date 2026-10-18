@@ -17,6 +17,7 @@ mod github_url;
 mod health;
 mod lifecycle;
 mod managed_fs;
+mod managed_root;
 mod plan;
 mod projects;
 mod recipe;
