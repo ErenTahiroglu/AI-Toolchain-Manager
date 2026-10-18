@@ -385,8 +385,11 @@ class Reviewer(unittest.TestCase):
         self.assertEqual(p["artifacts"]["jq-macos-arm64"]["sha256"], "2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e")
         self.assertEqual((p["signatureCommit"], p["gpgFingerprint"]), ("f0dabad36a5fdb37393829e6bd4c465d70c40a3a", "93079A9511EFC0B7D6CDBFB5B0DA60FB454BAF18"))
         ev = ROOT / "docs" / "phase-3d0" / "evidence" / "pinned-f0dabad36a5fdb37393829e6bd4c465d70c40a3a"
+        # the repository's .gitignore blocks "*.key" (private-key guard), so the PUBLIC key is stored under another name
+        stored_as = {"jq-release-new.key": "jq-release-new.public-key.asc"}
         for name, want in p["pinnedText"].items():
-            self.assertEqual(hashlib.sha256((ev / name).read_bytes()).hexdigest(), want, name)
+            self.assertEqual(hashlib.sha256((ev / stored_as.get(name, name)).read_bytes()).hexdigest(), want, name)
+        self.assertNotIn(b"PRIVATE", (ev / "jq-release-new.public-key.asc").read_bytes())
 
 
 class Documents(unittest.TestCase):
