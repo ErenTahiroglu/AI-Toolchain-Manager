@@ -113,6 +113,9 @@ struct Txn {
     rollback: Option<RollbackReport>,
     owned: Vec<OwnedFile>,
     journal_digest: String,
+    /// Identity of the journal file as last written or read (memory only): the only file a journal write may replace.
+    #[serde(skip)]
+    journal_id: Option<Identity>,
 }
 
 fn txn_digest(t: &Txn) -> String {
@@ -240,6 +243,7 @@ impl<'a> Adapter<'a> {
             rollback: None,
             owned: Vec::new(),
             journal_digest: String::new(),
+            journal_id: None,
         }
     }
 
@@ -252,15 +256,26 @@ impl<'a> Adapter<'a> {
         let mut f = d.journal.create_file(&tmp).map_err(fs_err)?;
         f.write_all(&bytes).map_err(fs_err)?;
         f.sync_all().map_err(fs_err)?;
+        let tmp_id = f.stat().map_err(fs_err)?.identity;
         drop(f);
-        d.journal.rename_file(&tmp, &d.journal, &format!("{}.json", t.txn_id), true, None).map_err(fs_err)?;
+        let name = format!("{}.json", t.txn_id);
+        match t.journal_id {
+            // the first write must create the journal: an existing file of that name is refused atomically, never replaced
+            None => d.journal.move_file(&tmp, &d.journal, &name, Some(tmp_id)).map_err(fs_err)?,
+            // later writes replace exactly the journal file this transaction last wrote (or read), nothing else
+            Some(old) => {
+                d.journal.replace_owned_file(&tmp, &d.journal, &name, tmp_id, old).map_err(fs_err)?;
+            }
+        }
+        t.journal_id = Some(tmp_id);
         d.journal.sync();
         Ok(())
     }
 
     fn read_txn(d: &Dirs, name: &str) -> Option<Txn> {
         let bytes = d.journal.read_file(name, MAX_JSON).ok()?;
-        let t: Txn = serde_json::from_slice(&bytes).ok()?;
+        let mut t: Txn = serde_json::from_slice(&bytes).ok()?;
+        t.journal_id = d.journal.stat(name).ok().flatten().filter(|s| s.kind == Kind::File).map(|s| s.identity);
         (txn_digest(&t) == t.journal_digest).then_some(t)
     }
 
@@ -537,6 +552,73 @@ impl<'a> Adapter<'a> {
         (receipt_digest(&r) == r.receipt_digest).then_some(r)
     }
 
+    /// The installed state, judged read-only: the pointer and the receipt must bind to this exact tool, version, platform and artifact,
+    /// and the installed artifact must still be a plain single-link file with the recorded digest, size and file identity, in a
+    /// folder that holds nothing else. Drift is reported, never repaired: nothing is replaced, deleted, adopted or reinstalled.
+    ///
+    /// What can be proven after a restart: path, kind, link count and digest (through a confined, no-follow handle) and the file
+    /// identity recorded in the installing transaction's journal. That journal is unauthenticated (a same-user process can forge it),
+    /// and macOS device numbers are not stable across mounts, so on macOS only the inode is compared. None of this is an
+    /// authenticated statement about the artifact: that remains the job of the authenticated reference set.
+    fn verify_installed(&self, d: &Dirs, tool: &str, version: &str, sha: &str, size: u64, p: &Pointer) -> R<Receipt> {
+        if p.tool != tool || p.version != version || p.artifact_sha256 != sha {
+            return Err(TxnError::Refused("installed_state_pointer_mismatch"));
+        }
+        let receipt = Self::read_receipt_in(d, &p.txn).ok_or(TxnError::Refused("installed_state_has_no_valid_receipt"))?;
+        let bound = receipt.txn_id == p.txn
+            && receipt.tool_id == tool
+            && receipt.to_version.as_deref() == Some(version)
+            && receipt.artifact_sha256.as_deref() == Some(sha)
+            && receipt.platform_target == self.host_platform
+            && receipt.computer_id == self.root.computer_id()
+            && receipt.state == "committed"
+            && matches!(receipt.action, Action::Install | Action::Update);
+        if !bound {
+            return Err(TxnError::Refused("installed_state_receipt_mismatch"));
+        }
+        let missing = TxnError::Refused("installed_artifact_missing");
+        let drift = TxnError::Refused("installed_artifact_drift");
+        let vtool = match d.versions.child(tool) {
+            Ok(v) => v,
+            Err(FsError::NotFound) => return Err(missing),
+            Err(FsError::Link | FsError::NotDir) => return Err(drift),
+            Err(e) => return Err(fs_err(e)),
+        };
+        let vd = match vtool.child(version) {
+            Ok(v) => v,
+            Err(FsError::NotFound) => return Err(missing),
+            Err(FsError::Link | FsError::NotDir) => return Err(drift),
+            Err(e) => return Err(fs_err(e)),
+        };
+        let entries = vd.list().map_err(fs_err)?;
+        match entries.iter().find(|(n, _)| n == "artifact.bin") {
+            None => return Err(missing),
+            Some((_, Kind::File)) => {}
+            Some(_) => return Err(drift), // a link, folder or special entry under the artifact name
+        }
+        if entries.len() != 1 {
+            return Err(TxnError::Refused("installed_folder_has_unexpected_entries"));
+        }
+        let mut f = match vd.open_file("artifact.bin") {
+            Ok(f) => f,
+            Err(FsError::NotFound) => return Err(missing),
+            Err(FsError::Link | FsError::NotFile) => return Err(drift),
+            Err(e) => return Err(fs_err(e)),
+        };
+        let st = f.stat().map_err(fs_err)?;
+        let (digest, n) = f.sha256_bounded(MAX_ARTIFACT).map_err(fs_err)?;
+        if st.links != 1 || n != size || digest != sha {
+            return Err(drift);
+        }
+        // the file must be the very one the installing transaction placed there (its journal recorded the identity)
+        let journal = Self::read_txn(d, &format!("{}.json", p.txn)).ok_or(TxnError::Refused("installed_identity_unprovable"))?;
+        let recorded = Self::identity_of(&journal, "staged_artifact").ok_or(TxnError::Refused("installed_identity_unprovable"))?;
+        if recorded.object != st.identity.object || (cfg!(windows) && recorded.volume != st.identity.volume) {
+            return Err(drift);
+        }
+        Ok(receipt)
+    }
+
     /// Everything that can be decided without changing anything. Returns (artifact digest, installed pointer, existing receipt when the
     /// requested state already holds).
     fn preflight_apply(&self, d: &Dirs, a: &Authority, action: Action, artifact: &[u8]) -> R<(String, Option<Pointer>, Option<Receipt>)> {
@@ -548,10 +630,11 @@ impl<'a> Adapter<'a> {
         let sha = check_artifact(self.refs, self.host_platform, a, artifact)?;
         self.ensure_free(d, &r.tool_id)?;
         let current = Self::read_pointer(d, &r.tool_id)?;
-        let existing = |p: &Pointer| Self::read_receipt_in(d, &p.txn).ok_or(TxnError::Refused("installed_state_has_no_valid_receipt"));
         match (action, &current) {
             (Action::Install | Action::Update, Some(p)) if p.version == r.version && p.artifact_sha256 == sha => {
-                return Ok((sha, current.clone(), Some(existing(p)?)));
+                // "already applied" needs more than a self-consistent pointer and receipt: the installed file itself is checked
+                let receipt = self.verify_installed(d, &r.tool_id, &r.version, &sha, r.artifact.size_bytes, p)?;
+                return Ok((sha, current.clone(), Some(receipt)));
             }
             (Action::Install, Some(_)) => return Err(TxnError::Refused("already_installed_use_update")),
             (Action::Update, Some(p)) if Some(p.version.as_str()) != a.approval.approval().from_version.as_deref() => {
@@ -812,7 +895,7 @@ impl<'a> Adapter<'a> {
         self.hit(Point::StageAfterSync)?;
         let recipe_sha = a.recipe.recipe().artifact.sha256.clone();
         self.mark(d, t, "staged_artifact", Phase::Final, None, Some((recipe_sha.clone(), artifact.len() as u64)))?;
-        stage.rename_file("artifact.bin.part", &stage, "artifact.bin", false, Some(staged_id)).map_err(fs_err)?;
+        stage.move_file("artifact.bin.part", &stage, "artifact.bin", Some(staged_id)).map_err(fs_err)?;
         t.state = TxnState::Staged;
         self.save(d, t)?;
         self.hit(Point::AfterStageWrite)?;
@@ -852,7 +935,7 @@ impl<'a> Adapter<'a> {
         if !staged_ours(t) {
             return Err(TxnError::Refused("staged_file_is_not_the_file_this_transaction_wrote"));
         }
-        stage.rename_file("artifact.bin", &vdir, "artifact.bin", false, Some(staged_id)).map_err(fs_err)?;
+        stage.move_file("artifact.bin", &vdir, "artifact.bin", Some(staged_id)).map_err(fs_err)?;
         drop(vdir);
         drop(vtool);
         self.hit(Point::BeforePointerWrite)?;
@@ -872,7 +955,15 @@ impl<'a> Adapter<'a> {
             &pbytes,
             (Point::PointerAfterCreate, Point::PointerAfterSync),
         )?;
-        d.state.rename_file(&format!("{pname}.new"), &d.state, &pname, true, Some(new_id)).map_err(fs_err)?;
+        let new_name = format!("{pname}.new");
+        match Self::identity_of(t, "previous_pointer") {
+            // an update replaces exactly the pointer that was recorded as active when the transaction began
+            Some(previous) if had_pointer => {
+                d.state.replace_owned_file(&new_name, &d.state, &pname, new_id, previous).map_err(fs_err)?;
+            }
+            // a fresh install creates the pointer; anything already there is refused atomically
+            _ => d.state.move_file(&new_name, &d.state, &pname, Some(new_id)).map_err(fs_err)?,
+        }
         d.state.sync();
         t.state = TxnState::Activated;
         self.save(d, t)?;
@@ -1061,7 +1152,7 @@ impl<'a> Adapter<'a> {
         self.save(d, t)?;
         let pname = pointer_name(&tool);
         let pid = Self::identity_of(t, "removed_pointer");
-        d.state.rename_file(&pname, &snap, "pointer.json", false, pid).map_err(fs_err)?;
+        d.state.move_file(&pname, &snap, "pointer.json", pid).map_err(fs_err)?;
         self.hit(Point::UninstallAfterPointerMoved)?;
         t.intents.push("versions_moved".to_string());
         self.save(d, t)?;
@@ -1076,7 +1167,7 @@ impl<'a> Adapter<'a> {
             for (v, id) in &versions {
                 let sv = svs.create_child(v).map_err(fs_err)?;
                 let vd = vtool.child(v).map_err(fs_err)?;
-                vd.rename_file("artifact.bin", &sv, "artifact.bin", false, *id).map_err(fs_err)?;
+                vd.move_file("artifact.bin", &sv, "artifact.bin", *id).map_err(fs_err)?;
                 drop(vd);
                 vtool.remove_dir(v).map_err(fs_err)?;
             }
@@ -1267,8 +1358,16 @@ impl<'a> Adapter<'a> {
                 if !matches!(Self::classify(&snap, "pointer.json", Some(saved)), Class::Ours(_)) {
                     return Err("the saved pointer is not the file this transaction wrote; it was not restored".to_string());
                 }
-                snap.rename_file("pointer.json", &d.state, &pname, true, saved.identity.map(unpair))
-                    .map_err(|e| format!("cannot restore the pointer {}", code(e)))
+                let src = saved
+                    .identity
+                    .map(unpair)
+                    .ok_or_else(|| "the saved pointer has no recorded identity; it was not restored".to_string())?;
+                match &current {
+                    // the active pointer is the one this transaction wrote (checked above): replace exactly that file
+                    Some(cur) => snap.replace_owned_file("pointer.json", &d.state, &pname, src, cur.identity).map(|_| ()),
+                    None => snap.move_file("pointer.json", &d.state, &pname, Some(src)),
+                }
+                .map_err(|e| format!("cannot restore the pointer {}", code(e)))
             }
             None => match current {
                 None => Ok(()),
@@ -1305,7 +1404,7 @@ impl<'a> Adapter<'a> {
         if !matches!(Self::classify(&snap, "pointer.json", entry), Class::Ours(_)) {
             return Err("the saved pointer is not the file this transaction moved; it was not put back".to_string());
         }
-        snap.rename_file("pointer.json", &d.state, &pname, false, id).map_err(|e| format!("cannot put the pointer back ({})", e.code()))
+        snap.move_file("pointer.json", &d.state, &pname, id).map_err(|e| format!("cannot put the pointer back ({})", e.code()))
     }
 
     fn undo_moved_versions(&self, d: &Dirs, t: &Txn) -> Result<(), String> {
@@ -1339,8 +1438,7 @@ impl<'a> Adapter<'a> {
                 Err(FsError::NotFound) => vtool.create_child(v).map_err(|e| e.code().to_string())?,
                 Err(e) => return Err(e.code().to_string()),
             };
-            sv.rename_file("artifact.bin", &vd, "artifact.bin", false, id)
-                .map_err(|e| format!("cannot put a version back ({})", e.code()))?;
+            sv.move_file("artifact.bin", &vd, "artifact.bin", id).map_err(|e| format!("cannot put a version back ({})", e.code()))?;
         }
         Ok(())
     }

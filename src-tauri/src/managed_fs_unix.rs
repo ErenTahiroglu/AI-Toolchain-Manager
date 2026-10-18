@@ -88,6 +88,15 @@ pub fn sync_file(f: &std::fs::File) -> Result<(), FsError> {
 
 const DIR_FLAGS: libc::c_int = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
 
+/// How a move treats an existing destination.
+#[derive(Clone, Copy)]
+pub enum Mode {
+    /// An existing destination of any kind is refused.
+    NoReplace,
+    /// Only a plain single-link file with exactly this identity may be replaced.
+    Replace { dest: Identity },
+}
+
 pub struct DirImp {
     fd: libc::c_int,
     pub identity: Identity,
@@ -351,23 +360,79 @@ impl DirImp {
         Ok(())
     }
 
-    pub fn rename_file(&self, from: &str, to_dir: &DirImp, to: &str, replace: bool, expect: Option<Identity>) -> Result<(), FsError> {
+    /// `renameatx_np(RENAME_EXCL)`: fails with EEXIST, atomically with the move, if ANYTHING exists at the destination. No fallback to
+    /// an ordinary `renameat`: where the primitive or the file system does not support it, the result is `Unsupported`.
+    #[cfg(target_os = "macos")]
+    fn exchange(&self, from: &CString, to_dir: &DirImp, to: &CString, flags: libc::c_uint) -> Result<(), FsError> {
+        // SAFETY: valid directory descriptors and NUL-terminated names; the flags select exclusive-create or swap semantics.
+        if unsafe { libc::renameatx_np(self.fd, from.as_ptr(), to_dir.fd, to.as_ptr(), flags) } == 0 {
+            return Ok(());
+        }
+        Err(match errno() {
+            libc::EEXIST => FsError::Exists,
+            // the file system (or system) does not offer the primitive: refuse, never fall back
+            libc::ENOTSUP | libc::ENOSYS | libc::EINVAL => FsError::Unsupported,
+            code => map_errno(code),
+        })
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn exchange(&self, _from: &CString, _to_dir: &DirImp, _to: &CString, _flags: libc::c_uint) -> Result<(), FsError> {
+        Err(FsError::Unsupported)
+    }
+
+    /// Returns whether the displaced destination still exists under the source name (after a swap it does).
+    pub fn rename_file(&self, from: &str, to_dir: &DirImp, to: &str, mode: Mode, expect: Option<Identity>) -> Result<bool, FsError> {
         let (cf, ct) = (cname(from)?, cname(to)?);
-        match self.stat_name(from)? {
+        let src = match self.stat_name(from)? {
             None => return Err(FsError::NotFound),
             Some(s) if s.kind == Kind::Link => return Err(FsError::Link),
             Some(s) if s.kind != Kind::File => return Err(FsError::NotFile),
             Some(s) if expect.is_some_and(|i| i != s.identity) => return Err(FsError::Changed),
-            Some(_) => {}
+            Some(s) => s,
+        };
+        #[cfg(target_os = "macos")]
+        let (excl, swap) = (libc::RENAME_EXCL, libc::RENAME_SWAP);
+        #[cfg(not(target_os = "macos"))]
+        let (excl, swap) = (0, 0);
+        match mode {
+            Mode::NoReplace => {
+                // an early, cheap refusal; the atomic authority is the exclusive rename below
+                if to_dir.stat_name(to)?.is_some() {
+                    return Err(FsError::Exists);
+                }
+                hook::fire("before-rename");
+                self.exchange(&cf, to_dir, &ct, excl)?;
+                // the source was verified by name before the move; verify what actually moved, and put it back if it was swapped
+                match to_dir.stat_name(to)? {
+                    Some(m) if m.identity == src.identity => Ok(false),
+                    _ => {
+                        let _ = to_dir.exchange(&ct, self, &cf, excl);
+                        Err(FsError::Changed)
+                    }
+                }
+            }
+            Mode::Replace { dest } => {
+                match to_dir.stat_name(to)? {
+                    None => return Err(FsError::NotFound),
+                    Some(d) if d.kind == Kind::Link => return Err(FsError::Link),
+                    Some(d) if d.kind != Kind::File || d.links != 1 || d.identity != dest => return Err(FsError::Changed),
+                    Some(_) => {}
+                }
+                hook::fire("before-rename");
+                // atomic exchange of the two names; then verify what was displaced and what moved in, and swap back otherwise
+                self.exchange(&cf, to_dir, &ct, swap)?;
+                let displaced = self.stat_name(from)?;
+                let moved_in = to_dir.stat_name(to)?;
+                let ok = displaced.is_some_and(|d| d.identity == dest && d.kind == Kind::File)
+                    && moved_in.is_some_and(|m| m.identity == src.identity);
+                if !ok {
+                    let _ = self.exchange(&cf, to_dir, &ct, swap);
+                    return Err(FsError::Changed);
+                }
+                Ok(true)
+            }
         }
-        if !replace && to_dir.stat_name(to)?.is_some() {
-            return Err(FsError::Exists);
-        }
-        // SAFETY: valid descriptors and names; renameat replaces the destination atomically.
-        if unsafe { libc::renameat(self.fd, cf.as_ptr(), to_dir.fd, ct.as_ptr()) } != 0 {
-            return Err(map_errno(errno()));
-        }
-        Ok(())
     }
 
     pub fn sync(&self) -> bool {

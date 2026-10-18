@@ -391,53 +391,19 @@ fn the_root_folder_is_created_owner_only_and_the_result_is_read_back() {
 // ---- mount transitions ---------------------------------------------------------------------------------------------------------
 
 #[test]
-fn a_folder_on_another_volume_is_refused_and_a_move_between_volumes_is_never_attempted() {
+fn a_folder_on_another_volume_is_refused() {
     let b = bed();
     let sub = b.anchor.create_child("sub").unwrap();
-    let other = b.anchor.create_child("other").unwrap();
     let sub_object = sub.identity().object;
     drop(sub);
     // SIMULATED: a real mount point is a reparse point on Windows (refused as a link) and needs a second volume on macOS
     hook::set_volume(move |object| (object == sub_object).then_some(0xDEAD_BEEF));
     assert_eq!(b.anchor.child("sub").err(), Some(FsError::CrossDevice));
     hook::clear();
-    let ok = b.anchor.child("sub").unwrap();
-    put(&other, "m.bin", b"1");
-    hook::set_volume(move |object| (object == sub_object).then_some(0xDEAD_BEEF));
-    assert_eq!(other.rename_file("m.bin", &ok, "m.bin", false, None).err(), Some(FsError::CrossDevice));
-    hook::clear();
-    assert!(other.stat("m.bin").unwrap().is_some(), "the file did not move");
+    assert!(b.anchor.child("sub").is_ok());
 }
 
 // ---- rename ---------------------------------------------------------------------------------------------------------------------
-
-#[test]
-fn rename_preserves_identity_is_exclusive_unless_replacing_and_checks_the_expectation() {
-    let b = bed();
-    let src = b.anchor.create_child("src").unwrap();
-    let dst = b.anchor.create_child("dst").unwrap();
-    let id = put(&src, "a.bin", b"one");
-    // wrong expectation: nothing moves
-    let wrong = Identity { volume: id.volume, object: id.object ^ 0xFFFF };
-    assert_eq!(src.rename_file("a.bin", &dst, "a.bin", false, Some(wrong)).err(), Some(FsError::Changed));
-    assert!(src.stat("a.bin").unwrap().is_some() && dst.stat("a.bin").unwrap().is_none());
-    // move across folders; the identity follows the file
-    src.rename_file("a.bin", &dst, "a.bin", false, Some(id)).unwrap();
-    assert_eq!(dst.stat("a.bin").unwrap().unwrap().identity, id);
-    assert!(src.stat("a.bin").unwrap().is_none());
-    // exclusive: an existing destination is refused and untouched
-    put(&src, "b.bin", b"two");
-    assert_eq!(src.rename_file("b.bin", &dst, "a.bin", false, None).err(), Some(FsError::Exists));
-    assert_eq!(fs::read(b.base.join("dst/a.bin")).unwrap(), b"one");
-    // replacing is atomic: afterwards the destination is the moved file
-    let id_b = src.stat("b.bin").unwrap().unwrap().identity;
-    src.rename_file("b.bin", &dst, "a.bin", true, Some(id_b)).unwrap();
-    assert_eq!(fs::read(b.base.join("dst/a.bin")).unwrap(), b"two");
-    assert_eq!(dst.stat("a.bin").unwrap().unwrap().identity, id_b);
-    // a folder is not moved as a file
-    src.create_child("f").unwrap();
-    assert!(src.rename_file("f", &dst, "f", false, None).is_err());
-}
 
 #[test]
 fn removing_a_folder_is_never_recursive() {
@@ -490,4 +456,247 @@ fn the_layer_has_no_path_based_mutation_no_recursion_no_process_and_no_network()
     for needle in needles {
         assert!(!text.contains(needle), "{needle} must not appear in the file-system layer");
     }
+}
+
+// ---- RT-3C-01: atomic no-clobber and restricted replacement ------------------------------------------------------------------------
+
+fn dest_hook_creating(kind: &'static str, dest: PathBuf, outside: PathBuf) -> impl FnMut(&str) + 'static {
+    move |stage| {
+        if stage == "before-rename" {
+            // another process creates the destination in the gap between the preliminary check and the move
+            match kind {
+                "file" => fs::write(&dest, b"user data created in the gap").unwrap(),
+                "dir" => {
+                    fs::create_dir(&dest).unwrap();
+                    fs::write(dest.join("inner.txt"), b"nested user data").unwrap();
+                }
+                _ => {
+                    let _ = make_file_link(&dest, &outside);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_move_never_replaces_anything_that_is_at_the_destination() {
+    let b = bed();
+    let src = b.anchor.create_child("src").unwrap();
+    let dst = b.anchor.create_child("dst").unwrap();
+    let id = put(&src, "a.bin", b"payload");
+    // 1. a file with unrelated user data is there already
+    fs::write(b.base.join("dst/a.bin"), b"unrelated user data").unwrap();
+    for _ in 0..3 {
+        // 10. repeated retries never overwrite it
+        assert_eq!(src.move_file("a.bin", &dst, "a.bin", Some(id)).err(), Some(FsError::Exists));
+        assert_eq!(fs::read(b.base.join("dst/a.bin")).unwrap(), b"unrelated user data");
+        assert_eq!(fs::read(b.base.join("src/a.bin")).unwrap(), b"payload", "the source is intact");
+    }
+    fs::remove_file(b.base.join("dst/a.bin")).unwrap();
+    // 5. a directory (with data) is there
+    fs::create_dir(b.base.join("dst/a.bin")).unwrap();
+    fs::write(b.base.join("dst/a.bin/inner.txt"), b"nested").unwrap();
+    assert_eq!(src.move_file("a.bin", &dst, "a.bin", Some(id)).err(), Some(FsError::Exists));
+    assert_eq!(fs::read(b.base.join("dst/a.bin/inner.txt")).unwrap(), b"nested");
+    fs::remove_file(b.base.join("dst/a.bin/inner.txt")).unwrap();
+    fs::remove_dir(b.base.join("dst/a.bin")).unwrap();
+    // 4. a symlink (pointing at an outside file) is there: it is neither followed nor removed
+    fs::write(b.base.join("outside.txt"), b"outside").unwrap();
+    if make_file_link(&b.base.join("dst/a.bin"), &b.base.join("outside.txt")) {
+        assert_eq!(src.move_file("a.bin", &dst, "a.bin", Some(id)).err(), Some(FsError::Exists));
+        assert!(fs::symlink_metadata(b.base.join("dst/a.bin")).unwrap().file_type().is_symlink(), "the link itself is untouched");
+        assert_eq!(fs::read(b.base.join("outside.txt")).unwrap(), b"outside");
+        let _ = fs::remove_file(b.base.join("dst/a.bin"));
+    }
+    // 6. the source identity is not the expected one: nothing moves
+    let wrong = Identity { volume: id.volume, object: id.object ^ 0xFFFF };
+    assert_eq!(src.move_file("a.bin", &dst, "a.bin", Some(wrong)).err(), Some(FsError::Changed));
+    assert!(dst.stat("a.bin").unwrap().is_none());
+    // 8. a legitimate no-clobber move succeeds, and the identity follows the file
+    src.move_file("a.bin", &dst, "a.bin", Some(id)).unwrap();
+    assert_eq!(dst.stat("a.bin").unwrap().unwrap().identity, id);
+    assert!(src.stat("a.bin").unwrap().is_none());
+    // a folder is not moved as a file
+    src.create_child("f").unwrap();
+    assert!(src.move_file("f", &dst, "f", None).is_err());
+}
+
+#[test]
+fn a_destination_created_in_the_gap_between_the_check_and_the_move_is_never_overwritten() {
+    for kind in ["file", "dir", "link"] {
+        let b = bed();
+        let src = b.anchor.create_child("src").unwrap();
+        let dst = b.anchor.create_child("dst").unwrap();
+        let id = put(&src, "a.bin", b"payload");
+        fs::write(b.base.join("outside.txt"), b"outside").unwrap();
+        let outside = b.base.join("outside.txt");
+        if kind == "link" {
+            if !make_file_link(&b.base.join("probe-link"), &outside) {
+                eprintln!("file symlinks need a privilege that is not available here; case not exercised");
+                continue;
+            }
+            let _ = fs::remove_file(b.base.join("probe-link"));
+        }
+        hook::set(dest_hook_creating(kind, b.base.join("dst/a.bin"), outside.clone()));
+        let r = src.move_file("a.bin", &dst, "a.bin", Some(id));
+        hook::clear();
+        assert_eq!(r.err(), Some(FsError::Exists), "{kind}: the operating system refused atomically");
+        assert_eq!(fs::read(b.base.join("src/a.bin")).unwrap(), b"payload", "{kind}: the source is intact");
+        match kind {
+            "file" => assert_eq!(fs::read(b.base.join("dst/a.bin")).unwrap(), b"user data created in the gap"),
+            "dir" => assert_eq!(fs::read(b.base.join("dst/a.bin/inner.txt")).unwrap(), b"nested user data"),
+            _ => {
+                assert!(fs::symlink_metadata(b.base.join("dst/a.bin")).unwrap().file_type().is_symlink());
+                assert_eq!(fs::read(&outside).unwrap(), b"outside");
+            }
+        }
+        // once the owner has resolved it, the same move works
+        if kind == "dir" {
+            fs::remove_file(b.base.join("dst/a.bin/inner.txt")).unwrap();
+            fs::remove_dir(b.base.join("dst/a.bin")).unwrap();
+        } else {
+            fs::remove_file(b.base.join("dst/a.bin")).unwrap();
+        }
+        src.move_file("a.bin", &dst, "a.bin", Some(id)).unwrap();
+        assert_eq!(fs::read(b.base.join("dst/a.bin")).unwrap(), b"payload");
+    }
+}
+
+#[test]
+fn a_source_swapped_in_the_gap_never_lands_at_the_destination_as_the_expected_file() {
+    let b = bed();
+    let src = b.anchor.create_child("src").unwrap();
+    let dst = b.anchor.create_child("dst").unwrap();
+    let id = put(&src, "a.bin", b"payload");
+    let (name, moved) = (b.base.join("src/a.bin"), b.base.join("src/original-moved.bin"));
+    hook::set(move |stage| {
+        if stage == "before-rename" {
+            let _ = fs::rename(&name, &moved);
+            let _ = fs::write(&name, b"alien newcomer");
+        }
+    });
+    let r = src.move_file("a.bin", &dst, "a.bin", Some(id));
+    hook::clear();
+    #[cfg(unix)]
+    {
+        // the name was moved first and verified afterwards: the alien is put back where it was, nothing is left at the destination
+        assert_eq!(r.err(), Some(FsError::Changed));
+        assert_eq!(fs::read(b.base.join("src/a.bin")).unwrap(), b"alien newcomer");
+        assert!(dst.stat("a.bin").unwrap().is_none());
+        assert_eq!(fs::read(b.base.join("src/original-moved.bin")).unwrap(), b"payload");
+    }
+    #[cfg(windows)]
+    {
+        // the verified object itself is moved (it is pinned by the handle): the newcomer under the old name is untouched
+        r.unwrap();
+        assert_eq!(fs::read(b.base.join("dst/a.bin")).unwrap(), b"payload");
+        assert_eq!(fs::read(b.base.join("src/a.bin")).unwrap(), b"alien newcomer");
+    }
+}
+
+#[test]
+fn only_a_specific_known_file_can_be_replaced_and_everything_else_is_refused_untouched() {
+    let b = bed();
+    let src = b.anchor.create_child("src").unwrap();
+    let dst = b.anchor.create_child("dst").unwrap();
+    let new = put(&src, "new.bin", b"new content");
+    let old = put(&dst, "target.bin", b"old content");
+
+    // 9. the legitimate reviewed replacement: the destination is the file we know
+    let wrong = Identity { volume: old.volume, object: old.object ^ 0xFFFF };
+    assert_eq!(
+        src.replace_owned_file("new.bin", &dst, "target.bin", new, wrong).err(),
+        Some(FsError::Changed),
+        "another file than the known one"
+    );
+    assert_eq!(fs::read(b.base.join("dst/target.bin")).unwrap(), b"old content");
+    assert_eq!(fs::read(b.base.join("src/new.bin")).unwrap(), b"new content", "nothing changed on either side");
+    assert_eq!(
+        src.replace_owned_file("new.bin", &dst, "target.bin", wrong, old).err(),
+        Some(FsError::Changed),
+        "the source is not the expected file"
+    );
+    assert_eq!(fs::read(b.base.join("dst/target.bin")).unwrap(), b"old content");
+    assert_eq!(src.replace_owned_file("new.bin", &dst, "missing.bin", new, old).err(), Some(FsError::NotFound), "nothing to replace");
+    // a hard-linked destination is not a single-owner file
+    fs::hard_link(b.base.join("dst/target.bin"), b.base.join("alias.bin")).unwrap();
+    assert_eq!(src.replace_owned_file("new.bin", &dst, "target.bin", new, old).err(), Some(FsError::Changed));
+    assert_eq!(fs::read(b.base.join("alias.bin")).unwrap(), b"old content");
+    fs::remove_file(b.base.join("alias.bin")).unwrap();
+    // a folder or a link at the destination
+    fs::create_dir(b.base.join("dst/folder")).unwrap();
+    assert!(src.replace_owned_file("new.bin", &dst, "folder", new, old).is_err());
+    assert!(b.base.join("dst/folder").is_dir());
+    fs::write(b.base.join("outside.txt"), b"outside").unwrap();
+    if make_file_link(&b.base.join("dst/lnk"), &b.base.join("outside.txt")) {
+        assert_eq!(src.replace_owned_file("new.bin", &dst, "lnk", new, old).err(), Some(FsError::Link));
+        assert_eq!(fs::read(b.base.join("outside.txt")).unwrap(), b"outside");
+        let _ = fs::remove_file(b.base.join("dst/lnk"));
+    }
+    // the replacement itself
+    assert_eq!(src.replace_owned_file("new.bin", &dst, "target.bin", new, old).unwrap(), ReplaceOutcome::Done);
+    assert_eq!(fs::read(b.base.join("dst/target.bin")).unwrap(), b"new content");
+    assert_eq!(dst.stat("target.bin").unwrap().unwrap().identity, new);
+    assert!(src.stat("new.bin").unwrap().is_none(), "the displaced old file does not linger under the source name");
+    assert_eq!(fs::read_dir(b.base.join("src")).unwrap().count(), 0);
+}
+
+#[test]
+fn a_destination_swapped_in_the_gap_before_a_replacement_is_not_clobbered_where_the_platform_can_tell() {
+    let b = bed();
+    let src = b.anchor.create_child("src").unwrap();
+    let dst = b.anchor.create_child("dst").unwrap();
+    let new = put(&src, "new.bin", b"new content");
+    let old = put(&dst, "target.bin", b"old content");
+    let target = b.base.join("dst/target.bin");
+    hook::set(move |stage| {
+        if stage == "before-rename" {
+            let _ = fs::remove_file(&target);
+            let _ = fs::write(&target, b"alien created in the gap");
+        }
+    });
+    let r = src.replace_owned_file("new.bin", &dst, "target.bin", new, old);
+    hook::clear();
+    #[cfg(unix)]
+    {
+        // atomic exchange, then verification of what was displaced: the alien is swapped back, byte-identical
+        assert_eq!(r.err(), Some(FsError::Changed));
+        assert_eq!(fs::read(b.base.join("dst/target.bin")).unwrap(), b"alien created in the gap");
+        assert_eq!(fs::read(b.base.join("src/new.bin")).unwrap(), b"new content");
+    }
+    #[cfg(windows)]
+    {
+        // KNOWN, DOCUMENTED WINDOW: Windows cannot pin a destination against deletion and replace it at the same time, so a file
+        // created at the transaction-owned name in the instant between the check and the rename is replaced. Recorded, not hidden.
+        let content = fs::read(b.base.join("dst/target.bin")).unwrap();
+        assert!(content == b"alien created in the gap" || content == b"new content", "{r:?}");
+    }
+}
+
+#[test]
+fn moves_and_replacements_between_volumes_are_refused_and_nothing_moves() {
+    let b = bed();
+    let src = b.anchor.create_child("src").unwrap();
+    let dst = b.anchor.create_child("dst").unwrap();
+    let id = put(&src, "m.bin", b"1");
+    let old = put(&dst, "t.bin", b"0");
+    let dst_object = dst.identity().object;
+    // SIMULATED: a real mount needs a second volume
+    hook::set_volume(move |object| (object == dst_object).then_some(0xDEAD_BEEF));
+    assert_eq!(src.move_file("m.bin", &dst, "m.bin", Some(id)).err(), Some(FsError::CrossDevice));
+    assert_eq!(src.replace_owned_file("m.bin", &dst, "t.bin", id, old).err(), Some(FsError::CrossDevice));
+    hook::clear();
+    assert!(src.stat("m.bin").unwrap().is_some() && dst.stat("m.bin").unwrap().is_none());
+    assert_eq!(fs::read(b.base.join("dst/t.bin")).unwrap(), b"0");
+}
+
+#[test]
+fn the_unix_layer_has_no_unchecked_rename_and_no_general_overwrite_flag() {
+    let unix = include_str!("managed_fs_unix.rs").split("#[cfg(test)]").next().unwrap();
+    assert!(!unix.contains("libc::renameat("), "an ordinary renameat replaces an existing destination: it must never be called");
+    assert!(unix.contains("renameatx_np"));
+    assert!(unix.contains("RENAME_EXCL") && unix.contains("RENAME_SWAP"));
+    let common = include_str!("managed_fs.rs").split("#[cfg(test)]").next().unwrap();
+    assert!(!common.contains("replace: bool"), "there is no boolean overwrite flag");
+    assert!(!common.contains("pub fn rename_file"), "the generic rename that could overwrite does not exist any more");
 }

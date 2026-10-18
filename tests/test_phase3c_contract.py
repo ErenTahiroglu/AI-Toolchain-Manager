@@ -81,8 +81,20 @@ class SourceInvariants(unittest.TestCase):
                 self.assertEqual(text.count(needle), 1)
             else:
                 self.assertNotIn(needle, text)
-        for needle in ["openat", "mkdirat", "unlinkat", "renameat", "fstatat", "O_NOFOLLOW"]:
+        for needle in ["openat", "mkdirat", "unlinkat", "renameatx_np", "RENAME_EXCL", "RENAME_SWAP", "fstatat", "O_NOFOLLOW"]:
             self.assertIn(needle, text)
+        # an ordinary renameat replaces an existing destination: it must never be called (no-clobber is the OS primitive's job)
+        self.assertNotIn("libc::renameat(", text)
+
+    def test_there_is_no_general_overwrite_switch_and_replacement_is_limited_to_three_owned_transitions(self):
+        common = production_text("managed_fs.rs")
+        self.assertNotIn("replace: bool", common)
+        self.assertNotIn("pub fn rename_file", common)
+        self.assertIn("pub fn move_file", common)
+        self.assertIn("pub fn replace_owned_file", common)
+        adapter = production_text("adapter.rs")
+        self.assertNotIn("rename_file", adapter)
+        self.assertEqual(adapter.count("replace_owned_file"), 3)
 
 
 class ManagedRootsMigration(unittest.TestCase):
@@ -136,6 +148,9 @@ class Documents(unittest.TestCase):
         self.assertIn("declared, not verified", jq)
         self.assertGreaterEqual(jq.count("**not done**"), 10)
         self.assertIn("nothing was added", jq)
+        closure = (ROOT / "docs" / "PHASE-3C-CLOSURE.md").read_text(encoding="utf-8")
+        for needle in ["RT-3C-01", "RT-3C-02", "RENAME_EXCL", "installed_artifact_drift", "Issue #14 remains"]:
+            self.assertIn(needle, closure)
 
 
 if __name__ == "__main__":

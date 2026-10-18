@@ -1303,3 +1303,325 @@ fn the_adapter_does_not_use_the_path_based_engine_and_has_no_process_network_env
     assert!(production.contains("#[cfg(test)]\n    pub fn test_mode"), "the acting constructor exists in test builds only");
     assert_eq!(production.matches("mode: Mode::TestSynthetic").count(), 1, "the acting mode is constructed in exactly one place");
 }
+
+// ---- RT-3C-02: "already installed" is a statement about the installed file, not about a self-consistent receipt ----------------------
+
+/// Everything below the managed root (relative path -> content), plus the audit trail and the approval ledger state.
+type Snapshot = (std::collections::BTreeMap<String, Vec<u8>>, usize);
+
+fn snapshot(l: &Lab) -> Snapshot {
+    fn walk(base: &std::path::Path, dir: &std::path::Path, out: &mut std::collections::BTreeMap<String, Vec<u8>>) {
+        for e in fs::read_dir(dir).into_iter().flatten().flatten() {
+            let p = e.path();
+            let rel = p.strip_prefix(base).unwrap().to_string_lossy().replace('\\', "/");
+            if p.is_dir() {
+                out.insert(format!("{rel}/"), vec![]);
+                walk(base, &p, out);
+            } else {
+                out.insert(rel, fs::read(&p).unwrap_or_default());
+            }
+        }
+    }
+    let mut files = std::collections::BTreeMap::new();
+    walk(&l.root_path(), &l.root_path(), &mut files);
+    (files, l.audit.events.lock().unwrap().len())
+}
+
+fn installed(l: &Lab) -> std::path::PathBuf {
+    l.p(&format!("versions/{TOOL}/1.0.0/artifact.bin"))
+}
+
+/// The drift codes are the same for an install and an update request, and nothing is repaired, replaced, adopted or consumed.
+fn assert_refused_without_touching(l: &Lab, code: &str) {
+    let before = snapshot(l);
+    let (v, dev) = l.auth(&l.v1, Action::Install, None);
+    let c = clock();
+    let r = l.adapter(&c, None).install(&Authority { recipe: &l.v1.valid, approval: &v }, &dev, &l.v1.sc.bytes);
+    assert_eq!(refused(r), code);
+    let pre = l.adapter(&c, None).preflight(&Authority { recipe: &l.v1.valid, approval: &v }, Action::Install, Some(&l.v1.sc.bytes));
+    assert!(matches!(pre, Err(TxnError::Refused(c2)) if c2 == code), "{pre:?}");
+    // the only change is the approval this check itself issued (audit event + ledger); no journal, file or folder moved
+    let after = snapshot(l);
+    assert_eq!(before.0, after.0, "{code}: nothing under the managed root changed");
+    assert_eq!(
+        l.ledger.status(&dev.approval.approval_id).unwrap(),
+        Some(device_trust::LedgerStatus::Issued),
+        "{code}: the approval was not consumed"
+    );
+    assert!(l.files("locks").is_empty() && l.files("staging").is_empty() && l.files("snapshots").is_empty(), "{code}");
+}
+
+#[test]
+fn a_genuine_unchanged_installation_is_idempotent_and_mutates_nothing() {
+    let l = lab();
+    let first = l.install(&l.v1, None).unwrap();
+    let (v, dev) = l.auth(&l.v1, Action::Install, None);
+    let before = snapshot(&l);
+    let c = clock();
+    let a = l.adapter(&c, None);
+    for _ in 0..3 {
+        let again = a.install(&Authority { recipe: &l.v1.valid, approval: &v }, &dev, &l.v1.sc.bytes).unwrap();
+        assert!(again.already_applied && again.receipt == first.receipt);
+    }
+    let pf = a.preflight(&Authority { recipe: &l.v1.valid, approval: &v }, Action::Install, Some(&l.v1.sc.bytes)).unwrap();
+    assert!(pf.already_applied);
+    // no new journal, file, folder or audit record (the extra approvals above were only issued, never used)
+    let after = snapshot(&l);
+    assert_eq!(before.0, after.0);
+    assert_eq!(
+        l.ledger.status(&dev.approval.approval_id).unwrap(),
+        Some(device_trust::LedgerStatus::Issued),
+        "the approval was not consumed"
+    );
+    assert_eq!(l.journals().len(), 1);
+}
+
+#[test]
+fn a_missing_installed_artifact_is_reported_as_absence_not_as_success_and_not_reinstalled() {
+    let l = lab();
+    l.install(&l.v1, None).unwrap();
+    fs::remove_file(installed(&l)).unwrap();
+    assert_refused_without_touching(&l, "installed_artifact_missing");
+    assert!(!installed(&l).exists(), "nothing was reinstalled");
+    // the version folder or the tool folder gone as well
+    fs::remove_dir(l.p(&format!("versions/{TOOL}/1.0.0"))).unwrap();
+    assert_refused_without_touching(&l, "installed_artifact_missing");
+    fs::remove_dir(l.p(&format!("versions/{TOOL}"))).unwrap();
+    assert_refused_without_touching(&l, "installed_artifact_missing");
+    assert_eq!(l.active().as_deref(), Some("1.0.0"), "the pointer is not silently repaired either");
+}
+
+#[test]
+fn modified_or_replaced_installed_content_is_drift_whatever_the_size_or_bytes() {
+    // same size, other bytes, same file
+    let l = lab();
+    l.install(&l.v1, None).unwrap();
+    let len = l.v1.sc.bytes.len();
+    {
+        let mut f = fs::OpenOptions::new().write(true).open(installed(&l)).unwrap();
+        std::io::Write::write_all(&mut f, &vec![b'X'; len]).unwrap();
+    }
+    assert_refused_without_touching(&l, "installed_artifact_drift");
+    assert_eq!(fs::read(installed(&l)).unwrap(), vec![b'X'; len], "the drifted file was left exactly as found");
+
+    // a different size
+    let l = lab();
+    l.install(&l.v1, None).unwrap();
+    fs::write(installed(&l), b"short").unwrap();
+    assert_refused_without_touching(&l, "installed_artifact_drift");
+
+    // identical bytes, but a different file (new identity): only the journal-recorded identity can tell
+    let l = lab();
+    l.install(&l.v1, None).unwrap();
+    let bytes = l.v1.sc.bytes.clone();
+    replace_file(&installed(&l), &bytes);
+    assert_refused_without_touching(&l, "installed_artifact_drift");
+    assert_eq!(fs::read(installed(&l)).unwrap(), bytes);
+
+    // a hard-linked alias of the right bytes
+    let l = lab();
+    l.install(&l.v1, None).unwrap();
+    if fs::hard_link(installed(&l), l.base.join("alias.bin")).is_ok() {
+        assert_refused_without_touching(&l, "installed_artifact_drift");
+        assert_eq!(fs::read(l.base.join("alias.bin")).unwrap(), l.v1.sc.bytes);
+    }
+}
+
+#[test]
+fn a_link_or_junction_in_place_of_the_artifact_or_its_folder_is_drift_and_is_never_followed() {
+    // a file symlink under the artifact name, pointing at a perfect copy elsewhere
+    let l = lab();
+    l.install(&l.v1, None).unwrap();
+    let copy = l.base.join("copy.bin");
+    fs::write(&copy, &l.v1.sc.bytes).unwrap();
+    fs::remove_file(installed(&l)).unwrap();
+    let linked = {
+        #[cfg(windows)]
+        {
+            std::os::windows::fs::symlink_file(&copy, installed(&l)).is_ok()
+        }
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&copy, installed(&l)).is_ok()
+        }
+    };
+    if linked {
+        assert_refused_without_touching(&l, "installed_artifact_drift");
+        assert_eq!(fs::read(&copy).unwrap(), l.v1.sc.bytes, "the link target is untouched");
+        let _ = fs::remove_file(installed(&l));
+    }
+
+    // the version folder replaced by a link to a perfect copy of the folder
+    let l = lab();
+    l.install(&l.v1, None).unwrap();
+    let vdir = l.p(&format!("versions/{TOOL}/1.0.0"));
+    let copy_dir = l.base.join("copy-dir");
+    fs::create_dir(&copy_dir).unwrap();
+    fs::write(copy_dir.join("artifact.bin"), &l.v1.sc.bytes).unwrap();
+    fs::remove_file(vdir.join("artifact.bin")).unwrap();
+    fs::remove_dir(&vdir).unwrap();
+    if make_dir_link(&vdir, &copy_dir) {
+        assert_refused_without_touching(&l, "installed_artifact_drift");
+        assert_eq!(fs::read(copy_dir.join("artifact.bin")).unwrap(), l.v1.sc.bytes);
+        remove_dir_link(&vdir);
+    }
+}
+
+#[test]
+fn an_unexpected_second_entry_in_the_installed_version_folder_is_reported_and_left_alone() {
+    let l = lab();
+    l.install(&l.v1, None).unwrap();
+    let extra = l.p(&format!("versions/{TOOL}/1.0.0/notes.txt"));
+    fs::write(&extra, b"mine").unwrap();
+    assert_refused_without_touching(&l, "installed_folder_has_unexpected_entries");
+    assert_eq!(fs::read(&extra).unwrap(), b"mine");
+    fs::remove_file(&extra).unwrap();
+    fs::create_dir(l.p(&format!("versions/{TOOL}/1.0.0/cache"))).unwrap();
+    assert_refused_without_touching(&l, "installed_folder_has_unexpected_entries");
+    fs::remove_dir(l.p(&format!("versions/{TOOL}/1.0.0/cache"))).unwrap();
+    // with the folder as installed, the same request is the genuine no-op again
+    assert!(l.install(&l.v1, None).unwrap().already_applied);
+}
+
+fn rewrite_pointer(l: &Lab, edit: impl Fn(&mut serde_json::Value)) {
+    let path = l.p(&format!("state/{TOOL}.json"));
+    let mut v: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    edit(&mut v);
+    fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
+}
+
+fn rewrite_receipt(l: &Lab, txn: &str, edit: impl Fn(&mut Receipt), redigest: bool) {
+    let path = l.p(&format!("receipts/{txn}.json"));
+    let mut r: Receipt = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    edit(&mut r);
+    if redigest {
+        r.receipt_digest = receipt_digest(&r);
+    }
+    fs::write(&path, serde_json::to_vec(&r).unwrap()).unwrap();
+}
+
+#[test]
+fn a_pointer_that_does_not_bind_to_its_receipt_tool_version_and_platform_is_refused() {
+    // a pointer that names another tool
+    let l = lab();
+    l.install(&l.v1, None).unwrap();
+    rewrite_pointer(&l, |v| v["tool"] = serde_json::json!("synthetic-other"));
+    assert_refused_without_touching(&l, "installed_state_pointer_mismatch");
+
+    // a stale receipt: the pointer says 2.0.0 but names the transaction that installed 1.0.0
+    let l = lab();
+    let first = l.install(&l.v1, None).unwrap();
+    l.update(&l.v2, "1.0.0", None).unwrap();
+    rewrite_pointer(&l, |v| v["txn"] = serde_json::json!(first.receipt.txn_id));
+    let before = snapshot(&l);
+    let (v, dev) = l.auth(&l.v2, Action::Update, Some("1.0.0"));
+    let c = clock();
+    let r = l.adapter(&c, None).update(&Authority { recipe: &l.v2.valid, approval: &v }, &dev, &l.v2.sc.bytes);
+    assert_eq!(refused(r), "installed_state_receipt_mismatch");
+    assert_eq!(before.0, snapshot(&l).0);
+
+    // forged receipts whose digest IS valid but whose content does not bind: wrong tool, version, platform, computer, action
+    type Edit = Box<dyn Fn(&mut Receipt)>;
+    let edits: Vec<(&str, Edit)> = vec![
+        ("tool", Box::new(|r: &mut Receipt| r.tool_id = "synthetic-other".into())),
+        ("version", Box::new(|r: &mut Receipt| r.to_version = Some("6.6.6".into()))),
+        ("platform", Box::new(|r: &mut Receipt| r.platform_target = other_platform().into())),
+        ("computer", Box::new(|r: &mut Receipt| r.computer_id = "synthetic-computer-2".into())),
+        ("action", Box::new(|r: &mut Receipt| r.action = Action::Uninstall)),
+        ("artifact", Box::new(|r: &mut Receipt| r.artifact_sha256 = Some("0".repeat(64)))),
+    ];
+    for (what, edit) in edits {
+        let l = lab();
+        let out = l.install(&l.v1, None).unwrap();
+        rewrite_receipt(&l, &out.receipt.txn_id, edit, true);
+        assert_refused_without_touching(&l, "installed_state_receipt_mismatch");
+        let _ = what;
+    }
+
+    // an altered receipt whose digest no longer matches
+    let l = lab();
+    let out = l.install(&l.v1, None).unwrap();
+    rewrite_receipt(&l, &out.receipt.txn_id, |r| r.kept = vec!["tampered".into()], false);
+    assert_refused_without_touching(&l, "installed_state_has_no_valid_receipt");
+    // a missing receipt
+    fs::remove_file(l.p(&format!("receipts/{}.json", out.receipt.txn_id))).unwrap();
+    assert_refused_without_touching(&l, "installed_state_has_no_valid_receipt");
+}
+
+#[test]
+fn without_the_installing_journal_the_file_identity_cannot_be_proven_and_the_adapter_says_so() {
+    let l = lab();
+    let out = l.install(&l.v1, None).unwrap();
+    fs::remove_file(l.p(&format!("journal/{}.json", out.receipt.txn_id))).unwrap();
+    assert_refused_without_touching(&l, "installed_identity_unprovable");
+}
+
+#[test]
+fn drift_messages_contain_no_paths_and_no_artifact_content() {
+    let l = lab();
+    l.install(&l.v1, None).unwrap();
+    fs::write(installed(&l), b"SECRET-CONTENT-9f3a").unwrap();
+    let (v, dev) = l.auth(&l.v1, Action::Install, None);
+    let c = clock();
+    let r = l.adapter(&c, None).install(&Authority { recipe: &l.v1.valid, approval: &v }, &dev, &l.v1.sc.bytes);
+    let text = format!("{r:?}");
+    for needle in [l.base.to_string_lossy().as_ref(), "SECRET-CONTENT", "C:\\", "/Users/", "/private/", "appdata"] {
+        assert!(!text.contains(needle), "{needle}: {text}");
+    }
+    let audit = format!("{:?}", l.audit.events.lock().unwrap());
+    assert!(!audit.contains("SECRET-CONTENT") && !audit.contains(l.base.to_string_lossy().as_ref()));
+}
+
+// ---- RT-3C-01 through the adapter: every overwrite is of a known, transaction-owned file ------------------------------------
+
+#[test]
+fn a_journal_that_was_replaced_by_another_file_is_never_overwritten_by_the_next_save() {
+    let l = lab();
+    let alien = std::sync::atomic::AtomicBool::new(false);
+    let jroot = l.p("journal");
+    let hook = |p: Point| {
+        if p == Point::AfterLock && !alien.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            let journal =
+                fs::read_dir(&jroot).unwrap().flatten().find(|e| e.file_name().to_string_lossy().ends_with(".json")).unwrap().path();
+            replace_file(&journal, b"alien journal content");
+        }
+        None
+    };
+    let r = l.install(&l.v1, Some(&hook));
+    assert!(matches!(r, Err(TxnError::Failed { .. }) | Err(TxnError::Refused(_))), "{r:?}");
+    let journal =
+        fs::read_dir(l.p("journal")).unwrap().flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|x| x == "json")).unwrap();
+    assert_eq!(fs::read(journal).unwrap(), b"alien journal content", "the foreign file under the journal name was not overwritten");
+    assert!(l.artifact_of("1.0.0").is_none() && l.active().is_none(), "nothing was installed on top of a record that could not be written");
+}
+
+#[test]
+fn a_pointer_swapped_for_another_file_before_the_switch_is_never_replaced() {
+    let l = lab();
+    l.install(&l.v1, None).unwrap();
+    let ptr = l.p(&format!("state/{TOOL}.json"));
+    let hook = {
+        let ptr = ptr.clone();
+        move |p: Point| {
+            if p == Point::PointerAfterSync {
+                replace_file(&ptr, b"{\"alien\":true}");
+            }
+            None
+        }
+    };
+    let (_, report) = failed(l.update(&l.v2, "1.0.0", Some(&hook)));
+    // the alien pointer was swapped in BEFORE the switch: the replacement checks the known identity and refuses, byte-identical
+    assert_eq!(fs::read(&ptr).unwrap(), b"{\"alien\":true}");
+    assert!(report.not_undone.iter().any(|n| n.what == "active-version pointer" || n.what.contains("version folder")), "{report:?}");
+}
+
+#[test]
+fn the_adapter_never_asks_for_an_unrestricted_overwrite() {
+    let production = include_str!("adapter.rs").split("#[cfg(test)]\n#[path").next().unwrap();
+    assert!(!production.contains("rename_file"), "only move_file (no-clobber) and replace_owned_file (one known file) exist");
+    assert_eq!(
+        production.matches("replace_owned_file").count(),
+        3,
+        "journal write, pointer switch, pointer restore: nothing else may overwrite"
+    );
+}

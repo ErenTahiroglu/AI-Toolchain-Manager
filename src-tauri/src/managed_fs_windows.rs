@@ -235,6 +235,15 @@ pub fn sync_file(f: &std::fs::File) -> Result<(), FsError> {
     f.sync_all().map_err(|e| map_io(&e))
 }
 
+/// How a move treats an existing destination.
+#[derive(Clone, Copy)]
+pub enum Mode {
+    /// An existing destination of any kind is refused.
+    NoReplace,
+    /// Only a plain single-link file with exactly this identity may be replaced.
+    Replace { dest: Identity },
+}
+
 pub struct DirImp {
     h: Handle,
     pub identity: Identity,
@@ -550,7 +559,8 @@ impl DirImp {
         r
     }
 
-    pub fn rename_file(&self, from: &str, to_dir: &DirImp, to: &str, replace: bool, expect: Option<Identity>) -> Result<(), FsError> {
+    /// Returns whether the displaced destination still exists under the source name (never on Windows: a replaced file is gone).
+    pub fn rename_file(&self, from: &str, to_dir: &DirImp, to: &str, mode: Mode, expect: Option<Identity>) -> Result<bool, FsError> {
         let h = nt_open(
             self.h,
             &wide(from),
@@ -561,6 +571,7 @@ impl DirImp {
             0,
             null(),
         )?;
+        let mut dest_handle: Option<Handle> = None;
         let r = (|| {
             let s = handle_stat(h)?;
             if s.kind == Kind::Link {
@@ -572,14 +583,45 @@ impl DirImp {
             if expect.is_some_and(|i| i != s.identity) {
                 return Err(FsError::Changed);
             }
+            // a replacement is allowed over ONE specific file only: the destination is opened (without following links) and
+            // must be a plain single-link file with exactly the expected identity. (It cannot be pinned against deletion: Windows
+            // refuses to replace a file that is open without delete sharing, which was tried and fails with a sharing violation. A
+            // window between this check and the rename therefore remains, documented in docs/phase-3c.)
+            let replace = match mode {
+                Mode::NoReplace => false,
+                Mode::Replace { dest } => {
+                    let hd = nt_open(
+                        to_dir.h,
+                        &wide(to),
+                        DELETE | SYNCHRONIZE | FILE_READ_ATTRIBUTES,
+                        SHARE_ALL,
+                        FILE_OPEN,
+                        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT,
+                        0,
+                        null(),
+                    )?;
+                    dest_handle = Some(hd);
+                    let ds = handle_stat(hd)?;
+                    if ds.kind == Kind::Link {
+                        return Err(FsError::Link);
+                    }
+                    if ds.kind != Kind::File || ds.links != 1 || ds.identity != dest {
+                        return Err(FsError::Changed);
+                    }
+                    true
+                }
+            };
+            hook::fire("before-rename");
             let name = wide(to);
             // FILE_RENAME_INFORMATION_EX: Flags (u32, padded), RootDirectory (HANDLE), FileNameLength (u32), FileName[]
             let header = 20usize;
             let total = header + name.len() * 2;
             let mut buf = vec![0u64; total.div_ceil(8)];
             let base = buf.as_mut_ptr() as *mut u8;
-            let flags: u32 = 0x2 | if replace { 0x1 } else { 0 }; // POSIX_SEMANTICS [| REPLACE_IF_EXISTS]
-                                                                  // SAFETY: `buf` is large enough and 8-byte aligned; the offsets follow the documented structure layout (x64).
+            // POSIX_SEMANTICS, plus REPLACE_IF_EXISTS only for a verified replacement. Without the replace flag the operating
+            // system refuses an existing destination (STATUS_OBJECT_NAME_COLLISION) atomically with the rename.
+            let flags: u32 = 0x2 | if replace { 0x1 } else { 0 };
+            // SAFETY: `buf` is large enough and 8-byte aligned; the offsets follow the documented structure layout (x64).
             unsafe {
                 (base as *mut u32).write(flags);
                 (base.add(8) as *mut Handle).write(to_dir.h);
@@ -590,11 +632,14 @@ impl DirImp {
             // SAFETY: handle valid; the buffer holds a complete FILE_RENAME_INFORMATION_EX.
             let st = unsafe { NtSetInformationFile(h, &mut iosb, base as *const c_void, total as u32, FILE_RENAME_INFORMATION_EX) };
             if st >= 0 {
-                Ok(())
+                Ok(false)
             } else {
                 Err(map_status(st))
             }
         })();
+        if let Some(hd) = dest_handle {
+            close(hd);
+        }
         close(h);
         r
     }

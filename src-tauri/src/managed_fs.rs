@@ -99,6 +99,13 @@ impl FsError {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplaceOutcome {
+    Done,
+    /// The replacement happened, but the displaced old file could not be removed and is still present under the source name.
+    DisplacedKept,
+}
+
 /// What a file must be to be deleted by [`Dir::remove_file_verified`] (the link count must always be exactly 1).
 #[derive(Debug, Clone, Default)]
 pub struct Expect {
@@ -381,16 +388,44 @@ impl Dir {
         self.imp.remove_empty_dir(name)
     }
 
-    /// Moves a plain file into `to_dir` under `to` (atomically replacing an existing file only if `replace`). If `expect` is
-    /// given, the file being moved must have that identity.
-    pub fn rename_file(&self, from: &str, to_dir: &Dir, to: &str, replace: bool, expect: Option<Identity>) -> Result<(), FsError> {
+    /// Moves a plain file into `to_dir` under `to` and REFUSES (with [`FsError::Exists`]) if anything at all already exists there --
+    /// a file, a folder, a link, a special entry. The refusal is made by the operating system atomically with the move
+    /// (`FILE_RENAME_INFORMATION_EX` without the replace flag on Windows, `renameatx_np(RENAME_EXCL)` on macOS), never by a
+    /// preliminary check alone. Where the platform cannot do that the result is [`FsError::Unsupported`]: there is no fallback to an
+    /// ordinary rename. If `expect` is given, the file being moved must have that identity.
+    pub fn move_file(&self, from: &str, to_dir: &Dir, to: &str, expect: Option<Identity>) -> Result<(), FsError> {
         if !valid_name(from) || !valid_name(to) {
             return Err(FsError::InvalidName);
         }
         if hook::volume_of(self.imp.identity) != hook::volume_of(to_dir.imp.identity) {
             return Err(FsError::CrossDevice);
         }
-        self.imp.rename_file(from, &to_dir.imp, to, replace, expect)
+        self.imp.rename_file(from, &to_dir.imp, to, imp::Mode::NoReplace, expect).map(|_| ())
+    }
+
+    /// Replaces ONE specific, already-known file: the destination must be a plain single-link file with exactly the identity `dest`
+    /// (the caller's own previous transaction-owned file, for example the active pointer it is switching), and the file moved in must
+    /// have the identity `src`. Anything else at the destination -- another file, a link, a folder -- is refused and left untouched.
+    /// This is the only way to overwrite anything; there is no general `replace` flag.
+    ///
+    /// Windows verifies the destination through an open handle immediately before the replacing rename. macOS exchanges the two
+    /// names atomically (`RENAME_SWAP`), verifies what was displaced and, if it is not `dest`, swaps back. The displaced old file is
+    /// then removed with a verified deletion; if that fails it stays where it is and [`ReplaceOutcome::DisplacedKept`] says so.
+    pub fn replace_owned_file(&self, from: &str, to_dir: &Dir, to: &str, src: Identity, dest: Identity) -> Result<ReplaceOutcome, FsError> {
+        if !valid_name(from) || !valid_name(to) {
+            return Err(FsError::InvalidName);
+        }
+        if hook::volume_of(self.imp.identity) != hook::volume_of(to_dir.imp.identity) {
+            return Err(FsError::CrossDevice);
+        }
+        let remains = self.imp.rename_file(from, &to_dir.imp, to, imp::Mode::Replace { dest }, Some(src))?;
+        if !remains {
+            return Ok(ReplaceOutcome::Done);
+        }
+        match self.remove_file_verified(from, &Expect { identity: Some(dest), size: None, sha256: None }) {
+            Ok(()) => Ok(ReplaceOutcome::Done),
+            Err(_) => Ok(ReplaceOutcome::DisplacedKept),
+        }
     }
 
     /// Flushes the folder's entries (best effort: returns whether the platform accepted the request).
