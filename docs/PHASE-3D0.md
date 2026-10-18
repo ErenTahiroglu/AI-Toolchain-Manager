@@ -42,7 +42,7 @@ See the delivery report for counts. **Not run:** anything on a second Windows co
 
 ## 6. Real-device status
 
-Only the existing development PC has a probe result (see DEVICE-TEST-PLAN §6). The probe code, its CI run on both runners and the procedure exist; the second PC and the Mac runs are the open items of Issue #14.
+Real-device probe results exist only for the existing development PC; the CI runners (Windows NTFS, macOS APFS) also produced clean probe results for the release binaries (DEVICE-TEST-PLAN §6) — runner evidence, not clean-machine or Mac-desktop evidence. The probe code, its CI run on both runners and the procedure exist; the second PC and the Mac runs are the open items of Issue #14.
 
 ## 7. Pilot decision matrix — five separate permissions
 

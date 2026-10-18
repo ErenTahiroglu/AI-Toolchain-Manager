@@ -54,5 +54,7 @@ A device run is entered into the repository only as: date, OS and version, archi
 ## 6. Current status (this phase)
 
 * Development PC (Windows 11 x64, NTFS): probe run through the built debug binary — 13 checks pass, 1 not exercised (link creation needs a privilege), 3 observed (held folder prevented, open file locked, folder flushed); `failed: 0`.
-* Windows and macOS CI: the same probe runs inside `--self-check` of the **release** binary on each runner and is validated by `tests/test_phase3d0_contract.py`.
+* Windows CI runner (`windows-latest`, NTFS), release binary, exact SHA `84d1dfb`: `failed: 0`, 14 pass (including link refusal: the runner may create symlinks), 3 observed (held folder prevented by the OS, open file locked, folder flushed).
+* macOS CI runner (`macos-14`, Apple Silicon, **APFS** — a headless runner, not a Mac desktop), release binary, same SHA: `failed: 0`, 14 pass — `renameatx_np(RENAME_EXCL)` refused an existing destination atomically and left it unchanged, `RENAME_SWAP` replaced the known file, links were refused — and 3 observed (a held folder **can** be removed by another process while the held descriptor is not redirected; an open file's name **can** be removed while the holder is unaffected; folder flush supported). This is the first evidence that both Apple primitives exist on APFS; it says nothing about external volumes.
+* Validated by `tests/test_phase3d0_contract.py` against the self-check output on both runners.
 * Second Windows PC and real Mac: **not run** (no such device was available to this session).
