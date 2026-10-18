@@ -44,7 +44,21 @@ const SUBDIRS: &[&str] = &["staging", "versions", "state", "journal", "receipts"
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Point {
     AfterLock,
+    /// Snapshot pointer file: intent journalled; exclusive create not yet done.
+    SnapshotBeforeCreate,
+    /// ... file exists, its identity is not yet in the journal (the irreducible window).
+    SnapshotAfterCreate,
+    /// ... half of the data is written.
+    SnapshotDuringWrite,
+    /// ... data is on disk (fsync done), the final record is not.
+    SnapshotAfterSync,
+    /// ... the final record is durable.
+    SnapshotAfterRecord,
     AfterSnapshot,
+    /// Staged artifact: the same five steps.
+    StageBeforeCreate,
+    StageAfterCreate,
+    StageAfterSync,
     DuringStageWrite,
     AfterStageWrite,
     AfterVerify,
@@ -158,6 +172,22 @@ impl TxnState {
     }
 }
 
+/// The three durable stages of a file the transaction creates. Intent is journalled BEFORE the file exists, the observed identity
+/// right after the exclusive create and BEFORE any data is written, the finalized content identity after the data is on disk.
+/// A file that exists where only an intent is recorded is an AMBIGUOUS ORPHAN: the crash happened between `create_new` and the
+/// durable identity record (an irreducible window), so ownership cannot be proven and the file is never deleted on a guess.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Phase {
+    Intended,
+    Created,
+    Final,
+}
+
+fn final_phase() -> Phase {
+    Phase::Final
+}
+
 /// A file this transaction created (or, for an uninstall, verified and moved), as recorded in the journal BEFORE it is needed.
 /// Cleanup deletes a file only if it matches its record: still the same file (device/volume + file index), a single link, and --
 /// when the content is known -- the same size and SHA-256. A different file under an expected name is foreign, whatever it holds.
@@ -165,6 +195,9 @@ impl TxnState {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OwnedFile {
     pub role: String,
+    /// How far the creation got, as far as the journal knows (see [`Phase`]).
+    #[serde(default = "final_phase")]
+    pub phase: Phase,
     /// Every sandbox-relative place the file may legitimately be at (a rename in flight is written ahead).
     pub rels: Vec<String>,
     /// `None` while the content is still being written (a partial file can only be recognised by identity).
@@ -540,6 +573,9 @@ enum Verify {
     Unrecorded,
     /// A record exists, but what is there now is not that file.
     Changed(String),
+    /// Only an intent is recorded and something exists at that place: it may be this transaction's file (crash between create and
+    /// record) or a foreign one that made the create fail. Not provable, therefore never deleted.
+    Ambiguous,
 }
 
 const VERIFY_LIMIT: u64 = 1 << 30;
@@ -554,6 +590,9 @@ fn verify_owned(root: &Path, path: &Path, owned: &[OwnedFile]) -> Result<(), Ver
     if entry_kind(path) != "file" {
         return Err(changed("not a plain file any more"));
     }
+    if entry.phase == Phase::Intended {
+        return Err(Verify::Ambiguous);
+    }
     let mut f = fs::File::open(path).map_err(|_| changed("cannot be opened"))?;
     let (identity, links) = identity_and_links(&f).ok_or_else(|| changed("identity cannot be read"))?;
     if links != 1 {
@@ -561,6 +600,9 @@ fn verify_owned(root: &Path, path: &Path, owned: &[OwnedFile]) -> Result<(), Ver
     }
     if entry.identity != Some(identity) {
         return Err(changed("is a different file than the one this transaction created"));
+    }
+    if entry.phase == Phase::Created {
+        return Ok(()); // identity and link count are all that is known while the data is still being written
     }
     if let Some(size) = entry.size {
         if f.metadata().map(|m| m.len()).ok() != Some(size) {
@@ -576,8 +618,13 @@ fn verify_owned(root: &Path, path: &Path, owned: &[OwnedFile]) -> Result<(), Ver
 }
 
 /// Why nothing was deleted, without any name.
-fn refusal(unexpected: &[&(String, &'static str)], changed: usize) -> String {
+fn refusal(unexpected: &[&(String, &'static str)], changed: usize, ambiguous: usize) -> String {
     let mut parts: Vec<String> = Vec::new();
+    if ambiguous > 0 {
+        parts.push(format!(
+            "{ambiguous} ambiguous orphan file(s): a crash left a file where this transaction only recorded the intent to create one, so it cannot be proven to be this transaction's; it was left untouched and nothing was deleted"
+        ));
+    }
     if !unexpected.is_empty() {
         parts.push(unexpected_description(unexpected));
     }
@@ -594,6 +641,7 @@ fn owned_files_of(root: &Path, dir: &Path, owned: &[OwnedFile]) -> Result<Vec<Pa
     let entries = list_entries(dir)?;
     let mut unexpected: Vec<&(String, &'static str)> = Vec::new();
     let mut changed = 0usize;
+    let mut ambiguous = 0usize;
     let mut files = Vec::new();
     for e in &entries {
         if e.1 != "file" {
@@ -605,10 +653,11 @@ fn owned_files_of(root: &Path, dir: &Path, owned: &[OwnedFile]) -> Result<Vec<Pa
             Ok(()) => files.push(path),
             Err(Verify::Unrecorded) => unexpected.push(e),
             Err(Verify::Changed(_)) => changed += 1,
+            Err(Verify::Ambiguous) => ambiguous += 1,
         }
     }
-    if !unexpected.is_empty() || changed > 0 {
-        return Err(refusal(&unexpected, changed));
+    if !unexpected.is_empty() || changed > 0 || ambiguous > 0 {
+        return Err(refusal(&unexpected, changed, ambiguous));
     }
     Ok(files)
 }
@@ -641,10 +690,12 @@ fn remove_snapshot(root: &Path, dir: &Path, owned: &[OwnedFile]) -> Result<(), S
     let mut files: Vec<PathBuf> = Vec::new();
     let mut unexpected: Vec<(String, &'static str)> = Vec::new();
     let mut changed = 0usize;
+    let mut ambiguous = 0usize;
     let mut check = |path: PathBuf, entry: (String, &'static str)| match verify_owned(root, &path, owned) {
         Ok(()) => files.push(path),
         Err(Verify::Unrecorded) => unexpected.push(entry),
         Err(Verify::Changed(_)) => changed += 1,
+        Err(Verify::Ambiguous) => ambiguous += 1,
     };
     if top.iter().any(|(n, _)| n == "pointer.json") {
         check(dir.join("pointer.json"), ("pointer.json".to_string(), "file"));
@@ -665,9 +716,9 @@ fn remove_snapshot(root: &Path, dir: &Path, owned: &[OwnedFile]) -> Result<(), S
             version_dirs.push(vd);
         }
     }
-    if !unexpected.is_empty() || changed > 0 {
+    if !unexpected.is_empty() || changed > 0 || ambiguous > 0 {
         let refs: Vec<&(String, &'static str)> = unexpected.iter().collect();
-        return Err(refusal(&refs, changed));
+        return Err(refusal(&refs, changed, ambiguous));
     }
     for f in &files {
         retry_io(|| fs::remove_file(f)).map_err(|e| format!("cannot remove a file this module created: {e}"))?;
@@ -962,27 +1013,81 @@ impl<'a> Engine<'a> {
         self.read_receipt(txn).ok_or(TxnError::Refused("installed_state_has_no_valid_receipt"))
     }
 
+    /// Step 1 of creating a file the transaction will own: the INTENT (role and every place it may be at) is made durable before the
+    /// file exists.
+    fn intend(&self, j: &mut Journal, role: &str, rels: Vec<String>) -> Result<(), TxnError> {
+        j.owned.push(OwnedFile { role: role.to_string(), phase: Phase::Intended, rels, sha256: None, size: None, identity: None });
+        self.save(j)
+    }
+
+    fn mark(
+        &self,
+        j: &mut Journal,
+        role: &str,
+        phase: Phase,
+        identity: Option<[u64; 2]>,
+        content: Option<(String, u64)>,
+    ) -> Result<(), TxnError> {
+        if let Some(e) = j.owned.iter_mut().find(|e| e.role == role) {
+            e.phase = phase;
+            if identity.is_some() {
+                e.identity = identity;
+            }
+            if let Some((sha, size)) = content {
+                e.sha256 = Some(sha);
+                e.size = Some(size);
+            }
+        }
+        self.save(j)
+    }
+
+    /// Step 2: exclusive create (it fails if anything is there), the identity is read from the OPEN HANDLE and made durable before
+    /// any data is written. `after_create` is the injection point inside the irreducible window between the create and the record:
+    /// a simulated crash there leaves an ambiguous orphan (nothing is recorded); a plain failure still records what the engine
+    /// holds in memory, so the in-process rollback can prove ownership.
+    fn create_owned(&self, j: &mut Journal, role: &str, path: &Path, after_create: Point) -> Result<fs::File, TxnError> {
+        let file = fs::OpenOptions::new().write(true).create_new(true).open(path).map_err(io)?;
+        let identity = identity_and_links(&file).ok_or(TxnError::Refused("identity_unavailable"))?.0;
+        if let Err(e) = self.hit(after_create) {
+            if matches!(e, TxnError::Refused(_)) {
+                let _ = self.mark(j, role, Phase::Created, Some(identity), None);
+            }
+            return Err(e);
+        }
+        self.mark(j, role, Phase::Created, Some(identity), None)?;
+        Ok(file)
+    }
+
     fn run_apply(&self, a: &Authority, j: &mut Journal, artifact: &[u8], had_pointer: bool) -> Result<Receipt, TxnError> {
         let tool = j.tool_id.clone();
         let version = a.recipe.recipe().version.clone();
         self.hit(Point::AfterLock)?;
         // 1. snapshot of the managed state this transaction may change
         let snap = self.root.join("snapshots", &[&j.txn_id])?;
+        j.intents.push("snapshot_dir".to_string());
+        self.save(j)?;
         fs::create_dir(&snap).map_err(io)?;
         if had_pointer {
             let src = self.root.join("state", &[&format!("{tool}.json")])?;
             let bytes = fs::read(&src).map_err(io)?;
-            let mut f = fs::OpenOptions::new().write(true).create_new(true).open(snap.join("pointer.json")).map_err(io)?;
+            // intent (durable) -> exclusive create -> identity from the handle (durable) -> data -> fsync -> final record (durable)
+            self.intend(j, "snapshot_pointer", vec![format!("snapshots/{}/pointer.json", j.txn_id)])?;
+            self.hit(Point::SnapshotBeforeCreate)?;
+            let mut f = self.create_owned(j, "snapshot_pointer", &snap.join("pointer.json"), Point::SnapshotAfterCreate)?;
+            if let Some(fault) = self.fault.and_then(|h| h(Point::SnapshotDuringWrite)) {
+                f.write_all(&bytes[..bytes.len() / 2]).map_err(io)?;
+                return Err(if fault == Fault::Crash {
+                    TxnError::Interrupted(Point::SnapshotDuringWrite)
+                } else {
+                    TxnError::Refused("injected_failure")
+                });
+            }
             f.write_all(&bytes).map_err(io)?;
             f.sync_all().map_err(io)?;
-            let (identity, _) = identity_and_links(&f).ok_or(TxnError::Refused("identity_unavailable"))?;
-            j.owned.push(OwnedFile {
-                role: "snapshot_pointer".to_string(),
-                rels: vec![format!("snapshots/{}/pointer.json", j.txn_id)],
-                sha256: Some(sha256_hex_bytes(&bytes)),
-                size: Some(bytes.len() as u64),
-                identity: Some(identity),
-            });
+            drop(f);
+            self.hit(Point::SnapshotAfterSync)?;
+            self.mark(j, "snapshot_pointer", Phase::Final, None, Some((sha256_hex_bytes(&bytes), bytes.len() as u64)))?;
+            self.hit(Point::SnapshotAfterRecord)?;
         }
         j.state = TxnState::Snapshotted;
         self.save(j)?;
@@ -993,20 +1098,17 @@ impl<'a> Engine<'a> {
         let stage = self.root.join("staging", &[&j.txn_id])?;
         fs::create_dir(&stage).map_err(io)?;
         let part = stage.join("artifact.bin.part");
-        // The staged file is created exclusively, its identity is read from the handle and recorded in the journal BEFORE any
-        // data is written, so that even a crash in the middle leaves a file the recovery can prove is ours. The same file may
-        // later be at any of the listed places (renames preserve identity).
-        let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&part).map_err(io)?;
-        let (identity, _) = identity_and_links(&file).ok_or(TxnError::Refused("identity_unavailable"))?;
+        // Same discipline as the snapshot: the intent is durable before the file exists, the identity read from the exclusive
+        // create's handle is durable before any data is written. The same file may later be at any of the listed places
+        // (renames preserve identity).
         let version_artifact = format!("versions/{tool}/{version}/artifact.bin");
-        j.owned.push(OwnedFile {
-            role: "staged_artifact".to_string(),
-            rels: vec![format!("staging/{}/artifact.bin.part", j.txn_id), format!("staging/{}/artifact.bin", j.txn_id), version_artifact],
-            sha256: None,
-            size: None,
-            identity: Some(identity),
-        });
-        self.save(j)?;
+        self.intend(
+            j,
+            "staged_artifact",
+            vec![format!("staging/{}/artifact.bin.part", j.txn_id), format!("staging/{}/artifact.bin", j.txn_id), version_artifact],
+        )?;
+        self.hit(Point::StageBeforeCreate)?;
+        let mut file = self.create_owned(j, "staged_artifact", &part, Point::StageAfterCreate)?;
         match self.fault.and_then(|f| f(Point::DuringStageWrite)) {
             Some(f) => {
                 file.write_all(&artifact[..artifact.len() / 2]).map_err(io)?;
@@ -1022,11 +1124,9 @@ impl<'a> Engine<'a> {
             }
         }
         drop(file);
-        // the content is complete: from now on it is recognised by digest as well
-        if let Some(entry) = j.owned.iter_mut().find(|e| e.role == "staged_artifact") {
-            entry.sha256 = Some(a.recipe.recipe().artifact.sha256.clone());
-            entry.size = Some(artifact.len() as u64);
-        }
+        self.hit(Point::StageAfterSync)?;
+        // the content is complete: from now on it is recognised by digest as well (durable before the rename)
+        self.mark(j, "staged_artifact", Phase::Final, None, Some((a.recipe.recipe().artifact.sha256.clone(), artifact.len() as u64)))?;
         fs::rename(&part, stage.join("artifact.bin")).map_err(io)?;
         j.state = TxnState::Staged;
         self.save(j)?;
@@ -1195,6 +1295,7 @@ impl<'a> Engine<'a> {
         let psha = sha256_of_open_file(&mut pf, VERIFY_LIMIT).map_err(|_| TxnError::Refused("unrecognised_installed_content"))?;
         owned.push(OwnedFile {
             role: "snapshot_pointer".to_string(),
+            phase: Phase::Final,
             rels: vec![format!("state/{tool}.json"), format!("snapshots/{txn}/pointer.json")],
             sha256: Some(psha),
             size: Some(psize),
@@ -1225,6 +1326,7 @@ impl<'a> Engine<'a> {
                 }
                 owned.push(OwnedFile {
                     role: "removed_version_artifact".to_string(),
+                    phase: Phase::Final,
                     rels: vec![
                         format!("versions/{tool}/{version}/artifact.bin"),
                         format!("snapshots/{txn}/versions/{version}/artifact.bin"),
@@ -1260,6 +1362,8 @@ impl<'a> Engine<'a> {
     fn run_uninstall(&self, j: &mut Journal, tool: &str) -> Result<Receipt, TxnError> {
         self.hit(Point::AfterLock)?;
         let snap = self.root.join("snapshots", &[&j.txn_id])?;
+        j.intents.push("snapshot_dir".to_string());
+        self.save(j)?;
         fs::create_dir(&snap).map_err(io)?;
         j.state = TxnState::Snapshotted;
         self.save(j)?;
@@ -1328,6 +1432,12 @@ impl<'a> Engine<'a> {
                 "stage_dir" => match self.undo_stage(j) {
                     Ok(()) => undone.push("staging folder removed".to_string()),
                     Err(why) => not_undone.push(NotUndone { what: "staging folder".to_string(), why }),
+                },
+                // the snapshot is what a retry of an earlier, failed undo would restore from: it goes only when nothing else failed
+                "snapshot_dir" if !not_undone.is_empty() => {}
+                "snapshot_dir" => match self.undo_snapshot(j) {
+                    Ok(()) => undone.push("snapshot folder removed".to_string()),
+                    Err(why) => not_undone.push(NotUndone { what: "snapshot folder".to_string(), why }),
                 },
                 other if other.starts_with("version_dir:") => {
                     let version = &other["version_dir:".len()..];
@@ -1407,6 +1517,19 @@ impl<'a> Engine<'a> {
             fs::rename(&snap, &vroot).map_err(|e| format!("cannot put the version folders back: {e}"))?;
         }
         Ok(())
+    }
+
+    /// Last step of a rollback (the snapshot is needed by the earlier steps): the snapshot folder goes only if everything in it is
+    /// manifest-verified; an ambiguous orphan, a substituted or foreign file keeps it, and the rollback says so.
+    fn undo_snapshot(&self, j: &Journal) -> Result<(), String> {
+        let snap = self.root.join("snapshots", &[&j.txn_id]).map_err(|_| "path refused".to_string())?;
+        if fs::symlink_metadata(&snap).is_err() {
+            return Ok(());
+        }
+        if entry_kind(&snap) != "folder" {
+            return Err("the snapshot path is not a plain folder; it was left untouched".to_string());
+        }
+        remove_snapshot(self.root.path(), &snap, &j.owned)
     }
 
     fn undo_stage(&self, j: &Journal) -> Result<(), String> {
@@ -1499,9 +1622,12 @@ impl<'a> Engine<'a> {
                     // try again; the previous failure may have been transient
                     let report = self.roll_back(&mut j);
                     if report.not_undone.is_empty() {
-                        let _ = self.cleanup_after_commit(&j);
+                        let leftovers = self.cleanup_after_commit(&j);
                         self.unlock(&j.tool_id, &j.txn_id);
                         out.push(Recovered::RolledBack(j.txn_id.clone()));
+                        if let Some(why) = leftovers {
+                            out.push(Recovered::LeftoversRetained(j.txn_id.clone(), why));
+                        }
                     } else {
                         out.push(Recovered::NeedsAttention(j.txn_id.clone(), report));
                     }
@@ -1510,15 +1636,21 @@ impl<'a> Engine<'a> {
                     if self.complete_except_bookkeeping(&j) {
                         j.state = TxnState::Committed;
                         let _ = self.save(&mut j);
-                        let _ = self.cleanup_after_commit(&j);
+                        let leftovers = self.cleanup_after_commit(&j);
                         self.unlock(&j.tool_id, &j.txn_id);
                         out.push(Recovered::RolledForward(j.txn_id.clone()));
+                        if let Some(why) = leftovers {
+                            out.push(Recovered::LeftoversRetained(j.txn_id.clone(), why));
+                        }
                     } else {
                         let report = self.roll_back(&mut j);
                         if report.not_undone.is_empty() {
-                            let _ = self.cleanup_after_commit(&j);
+                            let leftovers = self.cleanup_after_commit(&j);
                             self.unlock(&j.tool_id, &j.txn_id);
                             out.push(Recovered::RolledBack(j.txn_id.clone()));
+                            if let Some(why) = leftovers {
+                                out.push(Recovered::LeftoversRetained(j.txn_id.clone(), why));
+                            }
                         } else {
                             out.push(Recovered::NeedsAttention(j.txn_id.clone(), report));
                         }

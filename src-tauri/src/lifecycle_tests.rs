@@ -1396,6 +1396,7 @@ fn owned_artifact(base: &Path, dir: &Path, content: &[u8]) -> Vec<OwnedFile> {
     let (identity, _) = identity_and_links(&f).unwrap();
     vec![OwnedFile {
         role: "t".into(),
+        phase: Phase::Final,
         rels: vec![rel_of(base, &dir.join("artifact.bin")).unwrap()],
         sha256: Some(sha256_hex_bytes(content)),
         size: Some(content.len() as u64),
@@ -1427,7 +1428,14 @@ fn verified_directory_removal_never_recurses_and_never_follows_links() {
     }
     // the recorded name present as a FOLDER is not the recorded file
     fs::create_dir_all(dir.join("artifact.bin")).unwrap();
-    let owned = vec![OwnedFile { role: "t".into(), rels: vec!["d/artifact.bin".into()], sha256: None, size: None, identity: None }];
+    let owned = vec![OwnedFile {
+        role: "t".into(),
+        phase: Phase::Final,
+        rels: vec!["d/artifact.bin".into()],
+        sha256: None,
+        size: None,
+        identity: None,
+    }];
     assert!(remove_verified_dir(&base, &dir, &owned).is_err() && dir.join("artifact.bin").is_dir());
 }
 
@@ -1777,4 +1785,209 @@ fn an_in_place_edit_that_keeps_the_size_and_the_identity_is_still_detected_by_th
     only_partial_failure(&report);
     assert_not_ours(&report, "version folder 1.0.0");
     assert_eq!(l.artifact_of("1.0.0").unwrap(), vec![b'X'; len]);
+}
+
+// =====================================================================================================================
+// Phase 3C (Issue #15): creation of a file the transaction will own is journalled step by step -- intent (durable) ->
+// exclusive create -> identity from the handle (durable) -> data -> fsync -> final record (durable) -- and a crash at any
+// of those steps ends in a truthful, fail-closed state
+// =====================================================================================================================
+
+const SNAPSHOT_POINTS: [Point; 5] = [
+    Point::SnapshotBeforeCreate,
+    Point::SnapshotAfterCreate,
+    Point::SnapshotDuringWrite,
+    Point::SnapshotAfterSync,
+    Point::SnapshotAfterRecord,
+];
+
+fn owned_role(l: &Lab, role: &str) -> OwnedFile {
+    l.journals().into_iter().rev().flat_map(|j| j.owned).find(|e| e.role == role).unwrap_or_else(|| panic!("no manifest entry {role}"))
+}
+
+fn lab_with_v1() -> (Lab, Vec<u8>) {
+    let l = lab();
+    l.install(&l.v1, None).unwrap();
+    let before = fs::read(l.p(&format!("state/{TOOL}.json"))).unwrap();
+    (l, before)
+}
+
+fn the_orphan_in_the_snapshot(l: &Lab) -> PathBuf {
+    let dir = l.files("snapshots").into_iter().map(|n| l.p(&format!("snapshots/{n}"))).find(|p| p.is_dir()).expect("a snapshot folder");
+    dir.join("pointer.json")
+}
+
+#[test]
+fn every_crash_point_of_the_snapshot_pointer_creation_ends_in_a_truthful_fail_closed_state() {
+    for point in SNAPSHOT_POINTS {
+        let (l, before) = lab_with_v1();
+        let foreign = l.p("snapshots/foreign-note.txt");
+        fs::write(&foreign, b"not mine").unwrap();
+        let r = l.update(&l.v2, "1.0.0", Some(&at(point, Fault::Crash)));
+        assert!(matches!(r, Err(TxnError::Interrupted(p)) if p == point), "{point:?}: {r:?}");
+        let entry = owned_role(&l, "snapshot_pointer");
+        let expected_phase = match point {
+            Point::SnapshotBeforeCreate | Point::SnapshotAfterCreate => Phase::Intended,
+            Point::SnapshotDuringWrite | Point::SnapshotAfterSync => Phase::Created,
+            _ => Phase::Final,
+        };
+        assert_eq!(entry.phase, expected_phase, "{point:?}");
+        assert_eq!(entry.identity.is_some(), expected_phase != Phase::Intended, "{point:?}: identity is durable before data exists");
+        // the pointer the tool is installed with was never touched
+        assert_eq!(fs::read(l.p(&format!("state/{TOOL}.json"))).unwrap(), before, "{point:?}");
+
+        if point == Point::SnapshotAfterCreate {
+            // the irreducible window: the file exists, its identity was never recorded => not provably ours => kept
+            let orphan = the_orphan_in_the_snapshot(&l);
+            assert!(orphan.exists());
+            for round in 0..3 {
+                let rec = l.recover(None);
+                match &rec[..] {
+                    [Recovered::NeedsAttention(_, report)] => assert!(
+                        report.not_undone.iter().any(|n| n.what == "snapshot folder" && n.why.contains("ambiguous orphan")),
+                        "round {round}: {report:?}"
+                    ),
+                    other => panic!("round {round}: {other:?}"),
+                }
+                assert!(orphan.exists(), "an orphan is never deleted on a guess");
+                assert_eq!(l.files("locks").len(), 1, "the tool stays locked");
+                assert_eq!(l.active().as_deref(), Some("1.0.0"));
+                assert_eq!(fs::read(l.p(&format!("state/{TOOL}.json"))).unwrap(), before);
+            }
+            assert!(matches!(l.update(&l.v2, "1.0.0", None), Err(TxnError::Busy)));
+            // explicit resolution by the owner, then everything resumes
+            fs::remove_file(&orphan).unwrap();
+            assert!(matches!(&l.recover(None)[..], [Recovered::RolledBack(_)]));
+        } else {
+            let rec = l.recover(None);
+            assert!(matches!(&rec[..], [Recovered::RolledBack(_)]), "{point:?}: {rec:?}");
+        }
+        assert_eq!(fs::read(&foreign).unwrap(), b"not mine", "{point:?}: a foreign file next to the snapshots is never touched");
+        assert!(l.files("staging").is_empty() && l.files("locks").is_empty(), "{point:?}");
+        assert_eq!(l.files("snapshots"), vec!["foreign-note.txt".to_string()], "{point:?}");
+        assert_eq!(l.active().as_deref(), Some("1.0.0"));
+        assert_eq!(fs::read(l.p(&format!("state/{TOOL}.json"))).unwrap(), before);
+        // repeating recovery changes nothing, and the next retry works
+        assert!(l.recover(None).is_empty(), "{point:?}");
+        assert_eq!(l.update(&l.v2, "1.0.0", None).unwrap().receipt.to_version.as_deref(), Some("2.0.0"), "{point:?}");
+        l.outside_is_untouched();
+    }
+}
+
+#[test]
+fn a_plain_failure_at_any_snapshot_step_is_rolled_back_in_process_without_leftovers() {
+    for point in SNAPSHOT_POINTS {
+        let (l, before) = lab_with_v1();
+        let (code, report) = failed(l.update(&l.v2, "1.0.0", Some(&at(point, Fault::Fail))));
+        assert_eq!(code, "injected_failure", "{point:?}");
+        assert_eq!(report.status, "restored", "{point:?}: {report:?}");
+        l.assert_clean();
+        assert_eq!(fs::read(l.p(&format!("state/{TOOL}.json"))).unwrap(), before, "{point:?}");
+        assert_eq!(l.active().as_deref(), Some("1.0.0"));
+        assert_eq!(l.update(&l.v2, "1.0.0", None).unwrap().receipt.to_version.as_deref(), Some("2.0.0"), "{point:?}");
+    }
+}
+
+#[test]
+fn a_foreign_file_already_at_the_intended_snapshot_name_makes_the_create_fail_and_is_never_deleted() {
+    let (l, before) = lab_with_v1();
+    let snaps = l.p("snapshots");
+    let hook = move |p: Point| {
+        if p == Point::SnapshotBeforeCreate {
+            let dir = fs::read_dir(&snaps).unwrap().flatten().next().unwrap().path();
+            fs::write(dir.join("pointer.json"), b"a foreign file with the intended name").unwrap();
+        }
+        None
+    };
+    let (code, report) = failed(l.update(&l.v2, "1.0.0", Some(&hook)));
+    assert_eq!(code, "io_error", "the exclusive create refuses to adopt it");
+    assert!(report.not_undone.iter().any(|n| n.what == "snapshot folder" && n.why.contains("ambiguous orphan")), "{report:?}");
+    let orphan = the_orphan_in_the_snapshot(&l);
+    assert_eq!(fs::read(&orphan).unwrap(), b"a foreign file with the intended name");
+    for _ in 0..2 {
+        assert!(matches!(&l.recover(None)[..], [Recovered::NeedsAttention(..)]));
+        assert_eq!(fs::read(&orphan).unwrap(), b"a foreign file with the intended name");
+    }
+    assert_eq!(fs::read(l.p(&format!("state/{TOOL}.json"))).unwrap(), before);
+    fs::remove_file(&orphan).unwrap();
+    assert!(matches!(&l.recover(None)[..], [Recovered::RolledBack(_)]));
+    l.assert_clean();
+    assert!(l.update(&l.v2, "1.0.0", None).is_ok());
+}
+
+#[test]
+fn a_partial_snapshot_file_replaced_by_another_file_after_a_crash_is_kept() {
+    for point in [Point::SnapshotDuringWrite, Point::SnapshotAfterSync] {
+        let (l, before) = lab_with_v1();
+        assert!(matches!(l.update(&l.v2, "1.0.0", Some(&at(point, Fault::Crash))), Err(TxnError::Interrupted(_))));
+        let orphan = the_orphan_in_the_snapshot(&l);
+        replace_file(&orphan, b"alien after the crash");
+        let rec = l.recover(None);
+        match &rec[..] {
+            [Recovered::NeedsAttention(_, report)] => assert_not_ours(report, "snapshot folder"),
+            other => panic!("{point:?}: {other:?}"),
+        }
+        assert_eq!(fs::read(&orphan).unwrap(), b"alien after the crash");
+        assert_eq!(fs::read(l.p(&format!("state/{TOOL}.json"))).unwrap(), before);
+    }
+}
+
+#[test]
+fn the_staged_artifact_follows_the_same_discipline_at_every_crash_point() {
+    for point in [Point::StageBeforeCreate, Point::StageAfterCreate, Point::DuringStageWrite, Point::StageAfterSync, Point::AfterStageWrite]
+    {
+        let l = lab();
+        let r = l.install(&l.v1, Some(&at(point, Fault::Crash)));
+        assert!(matches!(r, Err(TxnError::Interrupted(p)) if p == point), "{point:?}: {r:?}");
+        let entry = owned_role(&l, "staged_artifact");
+        match point {
+            Point::StageBeforeCreate | Point::StageAfterCreate => {
+                assert_eq!((entry.phase, entry.identity), (Phase::Intended, None), "{point:?}")
+            }
+            Point::DuringStageWrite | Point::StageAfterSync => {
+                assert!(entry.phase == Phase::Created && entry.identity.is_some(), "{point:?}: {entry:?}")
+            }
+            _ => assert!(entry.phase == Phase::Final && entry.sha256.is_some(), "{point:?}: {entry:?}"),
+        }
+        if point == Point::StageAfterCreate {
+            let stage = l.p(&format!("staging/{}", l.files("staging")[0]));
+            for _ in 0..2 {
+                match &l.recover(None)[..] {
+                    [Recovered::NeedsAttention(_, report)] => {
+                        assert!(
+                            report.not_undone.iter().any(|n| n.what == "staging folder" && n.why.contains("ambiguous orphan")),
+                            "{report:?}"
+                        )
+                    }
+                    other => panic!("{other:?}"),
+                }
+                assert!(stage.join("artifact.bin.part").exists());
+            }
+            fs::remove_file(stage.join("artifact.bin.part")).unwrap();
+        }
+        assert!(matches!(&l.recover(None)[..], [Recovered::RolledBack(_)]), "{point:?}");
+        l.assert_clean();
+        assert_eq!(l.active(), None);
+        assert!(l.recover(None).is_empty());
+        assert!(l.install(&l.v1, None).is_ok(), "{point:?}: a retry works");
+        l.outside_is_untouched();
+    }
+}
+
+#[test]
+fn leftovers_after_a_recovered_rollback_are_reported_not_dropped() {
+    let (l, _) = lab_with_v1();
+    // a crash after the snapshot exists but before the update did anything else
+    assert!(matches!(l.update(&l.v2, "1.0.0", Some(&at(Point::AfterSnapshot, Fault::Crash))), Err(TxnError::Interrupted(_))));
+    let dir = l.p(&format!("snapshots/{}", l.files("snapshots")[0]));
+    fs::write(dir.join("extra.txt"), b"mine").unwrap();
+    let rec = l.recover(None);
+    match &rec[..] {
+        [Recovered::NeedsAttention(_, report)] => assert!(report.not_undone.iter().any(|n| n.what == "snapshot folder"), "{report:?}"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(fs::read(dir.join("extra.txt")).unwrap(), b"mine");
+    fs::remove_file(dir.join("extra.txt")).unwrap();
+    assert!(matches!(&l.recover(None)[..], [Recovered::RolledBack(_)]));
+    l.assert_clean();
 }
