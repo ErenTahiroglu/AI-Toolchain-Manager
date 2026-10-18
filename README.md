@@ -2,7 +2,7 @@
 
 Yapay zekâ kodlama ajanları (Claude Code, Antigravity) için geliştirici araçlarını **ileride** kurmayı, yapılandırmayı, güncellemeyi ve yönetmeyi hedefleyen bir masaüstü uygulaması (Tauri 2 + Rust + React/TypeScript + SQLite).
 
-> **Durum: Phase 3C — geliştirme aşaması. Uygulama yayın için hazır DEĞİLDİR.** Bugün hiçbir araç kurmaz, indirmez, çalıştırmaz veya güncellemez; ajan ayarlarını değiştirmez; ağa kendiliğinden bağlanmaz. Yalnızca **salt okunur** işler yapar; kurulum yaşam döngüsünün (kur/güncelle/kaldır/geri al/çökme kurtarma) dürüst biçimde yapılabildiği, **yalnızca sentetik test dizinlerinde** ve **hiçbir düğmeye/komuta bağlı olmadan** kanıtlandı. Phase 3B/3C yalnızca araştırma, tasarım, yalıtılmış test kipli bağdaştırıcı ve çalıştırmasız doğrulama içerir (gerçek kurulum yoktur; jq dahil hiçbir üçüncü taraf program indirilmedi): dosya sahipliği sertleştirmesi (Issue #14), güvenilir kaynak kanıtı karşılaştırması, pilot aday seçimi, arşiv/açma şartnamesi ve gerçek onay tasarımı. İmzalı bir dağıtım paketi, otomatik güncelleyici veya kurucu henüz yoktur.
+> **Durum: Phase 3D-0 — geliştirme aşaması. Uygulama yayın için hazır DEĞİLDİR.** Bugün hiçbir araç kurmaz, indirmez, çalıştırmaz veya güncellemez; ajan ayarlarını değiştirmez; ağa kendiliğinden bağlanmaz. Yalnızca **salt okunur** işler yapar; kurulum yaşam döngüsünün (kur/güncelle/kaldır/geri al/çökme kurtarma) dürüst biçimde yapılabildiği, **yalnızca sentetik test dizinlerinde** ve **hiçbir düğmeye/komuta bağlı olmadan** kanıtlandı. Phase 3B/3C yalnızca araştırma, tasarım, yalıtılmış test kipli bağdaştırıcı ve çalıştırmasız doğrulama içerir (gerçek kurulum yoktur; jq dahil hiçbir üçüncü taraf program indirilmedi): dosya sahipliği sertleştirmesi (Issue #14), güvenilir kaynak kanıtı karşılaştırması, pilot aday seçimi, arşiv/açma şartnamesi ve gerçek onay tasarımı. İmzalı bir dağıtım paketi, otomatik güncelleyici veya kurucu henüz yoktur.
 
 Bu proje bir kullanıcı (programcı olmayan bir kişi) tarafından, bağımsız bir "Red Team" incelemesi eşliğinde adım adım geliştirilir. Her aşama ayrı raporlanır; hiçbir aşama bir önceki aşamanın yetkisini genişletmez.
 
@@ -77,7 +77,7 @@ ATM_SELFCHECK_JSON=out.json python -m unittest discover -s tests -v
 ## Test ve CI kanıtı
 
 - Her `development` itme işlemi GitHub Actions'ta Windows x64 ve macOS arm64 üzerinde şunları çalıştırır: Rust biçim/lint (`-D warnings`) ve testler, ön yüz tip denetimi/testi/derlemesi, Python sözleşme testleri, derlenen ikilinin başsız `--self-check` çalıştırması. Kesin SHA ve sonuçlar için [Actions sayfasına](https://github.com/ErenTahiroglu/AI-Toolchain-Manager/actions) bakın; yeşil bir CI yalnızca o koşucunun gerçekten yaptığını kanıtlar.
-- Phase 3C yerel sonuçları (Windows 11 x64): Rust 527 test, ön yüz 72 test, Python sözleşme 90 test, hata ayıklama derlemesi ve WebView2 üzerinde elle arayüz denemesi. Sayılar aşama raporlarında güncellenir; bu satır bir sürüm vaadi değildir.
+- Phase 3C yerel sonuçları (Windows 11 x64): Rust 530 test, ön yüz 72 test, Python sözleşme 100 test, hata ayıklama derlemesi ve WebView2 üzerinde elle arayüz denemesi. Sayılar aşama raporlarında güncellenir; bu satır bir sürüm vaadi değildir.
 - Kanıt sınırı: macOS CI'ı gerçek Mac masaüstü testi değildir; Windows release derlemesinin yerel doğrulaması yoktur.
 
 ## Aşama raporları ve belgeler
@@ -88,6 +88,7 @@ ATM_SELFCHECK_JSON=out.json python -m unittest discover -s tests -v
 - [Phase 2A](docs/PHASE-2A.md), [Phase 2B](docs/PHASE-2B.md) — salt okunur envanter, geçiş ve gizlilik kapısı, kanıt merdiveni
 - [Phase 2C](docs/PHASE-2C.md) — güvenli yedek incelemesi, pasif artefakt kimliği, güven sözleşmesi
 - [Phase 2D](docs/PHASE-2D.md) — kurulum planı önizlemesi, taşınabilirlik, evrensel Mach-O doğrulaması
+- [Phase 3D-0](docs/PHASE-3D0.md) — ilk gerçek pilot (jq 1.8.2) hazırlık kapısı: çevrimdışı doğrulanmış yayıncı attestation kanıtı, Issue #14 kalan pencereler, gerçek onay tasarımı, gerçek cihaz test planı (indirme/kurulum yok)
 - [Phase 3C kapanışı](docs/PHASE-3C-CLOSURE.md) — Issue #16: macOS'ta atomik "üzerine yazma yok" taşıma (`RENAME_EXCL`), yalnızca bilinen dosyanın değiştirilmesi, kurulu dosya kayması denetimi
 - [Phase 3C](docs/PHASE-3C.md) — Issue #14/#15: tutamaç-göreli, bağlantı izlemeyen dosya sistemi katmanı (Windows + macOS), SQLite'ta kayıtlı yönetici kökü, yalnızca test kipinde tek-dosyalı bağdaştırıcı, sahte anahtar/onay arayüzleri, jq inceleme paketi (gerçek kurulum yok)
 - [Phase 3B](docs/PHASE-3B.md) — dosya sahipliği (Issue #14), kaynak kanıtı kararı, pilot karşılaştırması (jq / ripgrep / Gitleaks), arşiv şartnamesi, onay ve denetim tasarımı, taşınabilirlik ve elle test listeleri (gerçek kurulum yok)

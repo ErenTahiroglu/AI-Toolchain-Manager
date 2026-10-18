@@ -435,6 +435,22 @@ impl DirImp {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    pub fn filesystem_name(&self) -> Option<String> {
+        // SAFETY: zeroed statfs is a valid out-parameter; `self.fd` is a valid descriptor.
+        let mut sf: libc::statfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::fstatfs(self.fd, &mut sf) } != 0 {
+            return None;
+        }
+        let bytes: Vec<u8> = sf.f_fstypename.iter().take_while(|c| **c != 0).map(|c| *c as u8).collect();
+        Some(String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn filesystem_name(&self) -> Option<String> {
+        None
+    }
+
     pub fn sync(&self) -> bool {
         #[cfg(target_os = "macos")]
         {

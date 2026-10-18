@@ -644,6 +644,28 @@ impl DirImp {
         r
     }
 
+    pub fn filesystem_name(&self) -> Option<String> {
+        let mut name = [0u16; 64];
+        // SAFETY: the buffer is live and its length is passed; the other out-parameters are optional (null).
+        let ok = unsafe {
+            windows_sys::Win32::Storage::FileSystem::GetVolumeInformationByHandleW(
+                self.h,
+                null_mut(),
+                0,
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                name.as_mut_ptr(),
+                name.len() as u32,
+            )
+        };
+        if ok == 0 {
+            return None;
+        }
+        let len = name.iter().position(|c| *c == 0).unwrap_or(name.len());
+        Some(String::from_utf16_lossy(&name[..len]))
+    }
+
     pub fn sync(&self) -> bool {
         // SAFETY: valid handle opened with write access to the directory.
         unsafe { FlushFileBuffers(self.h) != 0 }

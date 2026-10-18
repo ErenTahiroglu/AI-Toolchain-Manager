@@ -1,0 +1,171 @@
+{
+  "ok": true,
+  "checks": [
+    {
+      "check": "bundle media type is a Sigstore bundle v0.3",
+      "ok": true,
+      "detail": "application/vnd.dev.sigstore.bundle.v0.3+json"
+    },
+    {
+      "check": "DSSE envelope signature verifies with the leaf certificate key",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "leaf certificate chains to a Sigstore public-good Fulcio CA valid at the log time",
+      "ok": true,
+      "detail": "3 certificates, anchored at the trusted root"
+    },
+    {
+      "check": "leaf certificate was valid at the log time (short-lived)",
+      "ok": true,
+      "detail": "2026-06-20T14:10:23+00:00 .. 2026-06-20T14:20:23+00:00 ; logged 2026-06-20T14:10:23+00:00"
+    },
+    {
+      "check": "certificate subject alternative name is the expected workflow identity",
+      "ok": true,
+      "detail": "['https://github.com/jqlang/jq/.github/workflows/ci.yml@refs/tags/jq-1.8.2'] vs https://github.com/jqlang/jq/.github/workflows/ci.yml@refs/tags/jq-1.8.2"
+    },
+    {
+      "check": "OIDC issuer is the expected one",
+      "ok": true,
+      "detail": "https://token.actions.githubusercontent.com"
+    },
+    {
+      "check": "source repository is the expected one",
+      "ok": true,
+      "detail": "https://github.com/jqlang/jq"
+    },
+    {
+      "check": "source repository digest is the expected commit",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108"
+    },
+    {
+      "check": "source repository ref is the expected ref",
+      "ok": true,
+      "detail": "refs/tags/jq-1.8.2"
+    },
+    {
+      "check": "build signer is the expected workflow at the expected ref",
+      "ok": true,
+      "detail": "https://github.com/jqlang/jq/.github/workflows/ci.yml@refs/tags/jq-1.8.2"
+    },
+    {
+      "check": "build signer digest is the expected commit",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108"
+    },
+    {
+      "check": "runner environment is github-hosted",
+      "ok": true,
+      "detail": "github-hosted"
+    },
+    {
+      "check": "repository id matches",
+      "ok": true,
+      "detail": "5101141"
+    },
+    {
+      "check": "repository owner id matches",
+      "ok": true,
+      "detail": "104800540"
+    },
+    {
+      "check": "transparency log id is a log of the trusted root",
+      "ok": true,
+      "detail": "c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d"
+    },
+    {
+      "check": "log key id is the SHA-256 of the log public key",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "signed entry timestamp (SET) verifies with the log key",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "Merkle inclusion proof reproduces the signed root hash",
+      "ok": true,
+      "detail": "index 1762614893 of 1762614898"
+    },
+    {
+      "check": "checkpoint signature verifies with the log key",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "checkpoint size and root hash equal the inclusion proof",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "the logged DSSE entry carries this envelope's signature",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "the logged payload hash equals the envelope payload",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "statement is in-toto v1 with SLSA provenance v1",
+      "ok": true,
+      "detail": "https://slsa.dev/provenance/v1"
+    },
+    {
+      "check": "the expected file name is a subject with the expected SHA-256",
+      "ok": true,
+      "detail": "jq-macos-arm64: 2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e"
+    },
+    {
+      "check": "provenance workflow repository/path/ref match",
+      "ok": true,
+      "detail": "{\"path\": \".github/workflows/ci.yml\", \"ref\": \"refs/tags/jq-1.8.2\", \"repository\": \"https://github.com/jqlang/jq\"}"
+    },
+    {
+      "check": "provenance source commit matches",
+      "ok": true,
+      "detail": "[{\"uri\": \"git+https://github.com/jqlang/jq@refs/tags/jq-1.8.2\", \"digest\": {\"gitCommit\": \"34f7186b86743a083a589741b6cea95293524108\"}}]"
+    },
+    {
+      "check": "builder id is the expected workflow identity",
+      "ok": true,
+      "detail": "https://github.com/jqlang/jq/.github/workflows/ci.yml@refs/tags/jq-1.8.2"
+    },
+    {
+      "check": "provenance runner is github-hosted",
+      "ok": true,
+      "detail": "{'event_name': 'push', 'repository_id': '5101141', 'repository_owner_id': '104800540', 'runner_environment': 'github-hosted'}"
+    }
+  ],
+  "certificateExtensions": {
+    "oidcIssuerV1": "https://token.actions.githubusercontent.com",
+    "githubWorkflowTrigger": "push",
+    "githubWorkflowSha": "34f7186b86743a083a589741b6cea95293524108",
+    "githubWorkflowName": "CI",
+    "githubWorkflowRepository": "jqlang/jq",
+    "githubWorkflowRef": "refs/tags/jq-1.8.2",
+    "oidcIssuer": "https://token.actions.githubusercontent.com",
+    "buildSignerUri": "https://github.com/jqlang/jq/.github/workflows/ci.yml@refs/tags/jq-1.8.2",
+    "buildSignerDigest": "34f7186b86743a083a589741b6cea95293524108",
+    "runnerEnvironment": "github-hosted",
+    "sourceRepositoryUri": "https://github.com/jqlang/jq",
+    "sourceRepositoryDigest": "34f7186b86743a083a589741b6cea95293524108",
+    "sourceRepositoryRef": "refs/tags/jq-1.8.2",
+    "sourceRepositoryIdentifier": "5101141",
+    "sourceRepositoryOwnerUri": "https://github.com/jqlang",
+    "sourceRepositoryOwnerIdentifier": "104800540",
+    "buildConfigUri": "https://github.com/jqlang/jq/.github/workflows/ci.yml@refs/tags/jq-1.8.2",
+    "buildConfigDigest": "34f7186b86743a083a589741b6cea95293524108",
+    "buildTrigger": "push",
+    "runInvocationUri": "https://github.com/jqlang/jq/actions/runs/27872779544/attempts/1"
+  },
+  "subjectCount": 27,
+  "logIndex": "1884519155",
+  "integratedTime": "2026-06-20T14:10:23+00:00",
+  "invocation": "https://github.com/jqlang/jq/actions/runs/27872779544/attempts/1"
+}

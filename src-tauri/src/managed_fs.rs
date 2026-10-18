@@ -165,6 +165,19 @@ pub(crate) mod hook {
         VOLUME.with(|h| h.borrow().as_ref().and_then(|f| f(id.object))).unwrap_or(id.volume)
     }
 
+    thread_local! {
+        static UNSUPPORTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    /// Pretend the volume offers no atomic no-clobber primitive: every `move_file` / `replace_owned_file` then fails `Unsupported`.
+    pub fn set_unsupported(on: bool) {
+        UNSUPPORTED.with(|u| u.set(on));
+    }
+
+    pub fn unsupported() -> bool {
+        UNSUPPORTED.with(|u| u.get())
+    }
+
     pub fn fire(stage: &str) {
         if let Some(mut f) = HOOK.with(|h| h.borrow_mut().take()) {
             f(stage);
@@ -183,6 +196,11 @@ pub(crate) mod hook {
     #[inline(always)]
     pub fn volume_of(id: Identity) -> u64 {
         id.volume
+    }
+
+    #[inline(always)]
+    pub fn unsupported() -> bool {
+        false
     }
 }
 
@@ -397,6 +415,9 @@ impl Dir {
         if !valid_name(from) || !valid_name(to) {
             return Err(FsError::InvalidName);
         }
+        if hook::unsupported() {
+            return Err(FsError::Unsupported);
+        }
         if hook::volume_of(self.imp.identity) != hook::volume_of(to_dir.imp.identity) {
             return Err(FsError::CrossDevice);
         }
@@ -415,6 +436,9 @@ impl Dir {
         if !valid_name(from) || !valid_name(to) {
             return Err(FsError::InvalidName);
         }
+        if hook::unsupported() {
+            return Err(FsError::Unsupported);
+        }
         if hook::volume_of(self.imp.identity) != hook::volume_of(to_dir.imp.identity) {
             return Err(FsError::CrossDevice);
         }
@@ -426,6 +450,49 @@ impl Dir {
             Ok(()) => Ok(ReplaceOutcome::Done),
             Err(_) => Ok(ReplaceOutcome::DisplacedKept),
         }
+    }
+
+    /// Proves, with scratch files in a new uniquely named folder below this one, that THIS volume supports everything the adapter
+    /// depends on: exclusive creation, an atomic no-clobber move (`Exists` when the destination is taken, destination untouched) and
+    /// the replacement of one known file. Anything else -- in particular [`FsError::Unsupported`] -- is a refusal: a volume that
+    /// cannot do it is never used for managed state. It removes what it created and nothing else; a leftover after a crash is a
+    /// folder named `capprobe-<random>` that is reported, never adopted.
+    pub fn probe_atomic_rename(&self) -> Result<(), FsError> {
+        let name = format!("capprobe-{}", &uuid::Uuid::new_v4().simple().to_string()[..16]);
+        let d = self.create_child(&name)?;
+        let write = |n: &str| -> Result<Identity, FsError> {
+            let mut f = d.create_file(n)?;
+            f.write_all(b"probe")?;
+            f.sync_all()?;
+            Ok(f.stat()?.identity)
+        };
+        let outcome = (|| {
+            let (a, b) = (write("a.bin")?, write("b.bin")?);
+            d.move_file("a.bin", &d, "c.bin", Some(a))?;
+            if d.move_file("b.bin", &d, "c.bin", Some(b)) != Err(FsError::Exists) {
+                return Err(FsError::Changed); // the destination was not protected
+            }
+            if d.stat("c.bin")?.map(|s| s.identity) != Some(a) {
+                return Err(FsError::Changed);
+            }
+            d.replace_owned_file("b.bin", &d, "c.bin", b, a)?;
+            if d.stat("c.bin")?.map(|s| s.identity) != Some(b) {
+                return Err(FsError::Changed);
+            }
+            Ok(())
+        })();
+        for n in ["a.bin", "b.bin", "c.bin"] {
+            let _ = d.remove_file_verified(n, &Expect::default());
+        }
+        drop(d);
+        let _ = self.remove_dir(&name);
+        outcome
+    }
+
+    /// The name of the file system this folder lives on (`ntfs`, `apfs`, ...), when the platform reports it. Used only to record on
+    /// which kind of volume a real-device acceptance run happened.
+    pub fn filesystem_name(&self) -> Option<String> {
+        self.imp.filesystem_name()
     }
 
     /// Flushes the folder's entries (best effort: returns whether the platform accepted the request).

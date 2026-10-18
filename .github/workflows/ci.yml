@@ -114,3 +114,19 @@ jobs:
           name: selfcheck-${{ matrix.name }}
           path: ${{ runner.temp }}/selfcheck-${{ matrix.name }}.json
           if-no-files-found: warn
+
+      # For real-device acceptance only (docs/phase-3d0/DEVICE-TEST-PLAN.md): the UNSIGNED, un-notarised binary of this exact SHA,
+      # kept for 3 days, with its SHA-256. It is run only with --self-check and an isolated ATM_DATA_DIR. It is not a release.
+      - name: Record the SHA-256 of the unsigned device-test binary
+        run: |
+          BIN="src-tauri/target/${{ matrix.target }}/release/${{ matrix.exe }}"
+          mkdir -p "${{ runner.temp }}/device-test"
+          cp "$BIN" "${{ runner.temp }}/device-test/${{ matrix.exe }}"
+          (cd "${{ runner.temp }}/device-test" && (sha256sum "${{ matrix.exe }}" 2>/dev/null || shasum -a 256 "${{ matrix.exe }}") > SHA256.txt && echo "commit ${{ github.sha }}" >> SHA256.txt && cat SHA256.txt)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: device-test-unsigned-${{ matrix.name }}-${{ github.sha }}
+          path: ${{ runner.temp }}/device-test/
+          retention-days: 3
+          if-no-files-found: error

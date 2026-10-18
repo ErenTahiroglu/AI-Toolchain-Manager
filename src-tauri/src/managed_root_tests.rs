@@ -227,3 +227,26 @@ fn no_command_or_start_up_code_can_name_a_writable_root() {
         }
     }
 }
+
+#[test]
+fn a_volume_without_the_atomic_primitives_is_refused_and_nothing_is_left_behind() {
+    let b = bed();
+    let m = ManagedRoot::establish(&b.anchor, &b.conn, COMPUTER, NOW).unwrap();
+    let staging = root_dir(&b, &m).join("staging");
+    drop(m);
+    assert_eq!(fs::read_dir(&staging).unwrap().count(), 0, "the capability probe cleaned up after itself");
+    // the same root later found on (or moved to) a volume that cannot do an atomic no-clobber move: refused, fail closed
+    crate::managed_fs::hook::set_unsupported(true);
+    let r = ManagedRoot::open(&b.anchor, &b.conn, COMPUTER);
+    crate::managed_fs::hook::set_unsupported(false);
+    assert_eq!(r.err(), Some(RootError::Fs(FsError::Unsupported)));
+    assert_eq!(fs::read_dir(&staging).unwrap().count(), 0, "a refused probe leaves nothing either");
+    assert!(ManagedRoot::open(&b.anchor, &b.conn, COMPUTER).is_ok());
+    // establishing on such a volume is refused as well (and stays on record as unfinished: nothing is adopted)
+    let b2 = bed();
+    crate::managed_fs::hook::set_unsupported(true);
+    let r = ManagedRoot::establish(&b2.anchor, &b2.conn, COMPUTER, NOW);
+    crate::managed_fs::hook::set_unsupported(false);
+    assert_eq!(r.err(), Some(RootError::Fs(FsError::Unsupported)));
+    assert_eq!(ManagedRoot::establish(&b2.anchor, &b2.conn, COMPUTER, NOW).err(), Some(RootError::Unfinished));
+}

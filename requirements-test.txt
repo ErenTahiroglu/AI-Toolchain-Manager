@@ -2,3 +2,6 @@
 # This dependency was already available to the system Python used for validation.
 # It was not installed or added to the Pylance-selected interpreter in this task.
 jsonschema==4.23.0
+
+# Phase 3D-0: offline verification of the jq release attestation evidence (tools/verify_sigstore_bundle.py). Test/reviewer tool only.
+cryptography==50.0.2

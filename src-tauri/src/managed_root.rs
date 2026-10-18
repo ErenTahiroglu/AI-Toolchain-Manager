@@ -134,6 +134,8 @@ impl ManagedRoot {
         for name in LAYOUT {
             root.create_child(name)?;
         }
+        // a volume without the atomic no-clobber / replacement primitives is never used for managed state
+        root.child("staging")?.probe_atomic_rename()?;
         let id = root.identity();
         let changed = conn.execute(
             "UPDATE managed_roots SET volume_id = ?2, object_id = ?3, state = 'active', activated_at = ?4 WHERE root_id = ?1 AND state = 'creating'",
@@ -181,6 +183,7 @@ impl ManagedRoot {
         if names != LAYOUT || listing.iter().any(|(_, k)| *k != Kind::Dir) {
             return Err(RootError::Layout);
         }
+        root.child("staging")?.probe_atomic_rename()?;
         Ok(ManagedRoot { dir: root, root_id, computer_id: computer_id.to_string() })
     }
 }

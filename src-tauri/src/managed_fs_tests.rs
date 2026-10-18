@@ -700,3 +700,18 @@ fn the_unix_layer_has_no_unchecked_rename_and_no_general_overwrite_flag() {
     assert!(!common.contains("replace: bool"), "there is no boolean overwrite flag");
     assert!(!common.contains("pub fn rename_file"), "the generic rename that could overwrite does not exist any more");
 }
+
+#[test]
+fn the_capability_probe_proves_the_volume_and_leaves_nothing_and_a_missing_primitive_is_a_refusal() {
+    let b = bed();
+    b.anchor.probe_atomic_rename().unwrap();
+    assert!(b.anchor.list().unwrap().is_empty(), "nothing is left behind");
+    hook::set_unsupported(true);
+    assert_eq!(b.anchor.probe_atomic_rename().err(), Some(FsError::Unsupported));
+    hook::set_unsupported(false);
+    assert!(b.anchor.list().unwrap().is_empty(), "nothing is left behind after a refusal either");
+    // a user file the probe could collide with is never touched
+    fs::write(b.base.join("keep.txt"), b"user").unwrap();
+    b.anchor.probe_atomic_rename().unwrap();
+    assert_eq!(fs::read(b.base.join("keep.txt")).unwrap(), b"user");
+}
