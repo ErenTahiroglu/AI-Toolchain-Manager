@@ -36,3 +36,7 @@ Status: **assessment, not permission.** Gitleaks is *not* pre-approved. Nothing 
 ## Verdict
 
 **Not eligible today.** The blocking items are (1) no independent authentication of any digest, (2) archive-only artifacts with no authenticated inner-file digest, (3) no verified rollback on real targets, and (4) no running-process safety. Gitleaks remains the *shape* of tool the first pilot should have (single static binary, no integration), so Phase 3B should build the missing authentication path generically and then re-evaluate the candidate with fresh evidence.
+
+## Update (Phase 3B, 2026-10-18)
+
+The evidence above was re-read and compared with two other candidates in [phase-3b/PILOT-COMPARISON.md](phase-3b/PILOT-COMPARISON.md). Result: Gitleaks remains **not eligible**, and is **not recommended** as the first pilot (weakest provenance, archive-only artifacts, prints secrets); the proposed pilot is jq 1.8.2 (raw single executables with publisher build attestations), pending the Red Team's decision and the NO-GO conditions listed there. The trust model that would make any pilot possible is in [phase-3b/PROVENANCE-DECISION.md](phase-3b/PROVENANCE-DECISION.md).

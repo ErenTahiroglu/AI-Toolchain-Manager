@@ -93,3 +93,7 @@ Baseline `0cc5ed6`. Two findings; nothing real was enabled, the recipe list and 
 ### Sandbox boundary review
 
 `SandboxRoot::create` never adopts a folder: it creates `atm-synthetic-<uuid>` directly below a caller-given base that exists, is a directory and is not itself a link — the base is **caller-chosen and its ancestors are not verified**. `SandboxRoot::open` now additionally requires that the marker's `rootId` equals the folder name's suffix (a marker copied elsewhere does not carry over) and that the folder's top level is *exactly* the marker plus the fixed folders, so a populated user folder that merely received a marker and the right folder names is refused. A marker is still only syntactic evidence, not proof of an authorized prior creation. **Future production gates (not done, not claimed):** the base must be derived from the application's own data directory, never from a caller or an IPC argument; its ancestor chain must be verified and opened by handle with link/reparse-point protection (the discovery layer's approach); the sandbox must be authenticated by something the manager keeps (for example a root id recorded in its own database), not by the folder's own marker; and a production adapter must not reuse this module's path-based deletion.
+
+## 10. Follow-up (Phase 3B)
+
+The name-based closed-structure deletion described in section 9 was replaced in Phase 3B by manifest-verified deletion (identity, link count and digest; Issue #14). See [PHASE-3B](PHASE-3B.md) and [phase-3b/FILESYSTEM-OWNERSHIP.md](phase-3b/FILESYSTEM-OWNERSHIP.md).
