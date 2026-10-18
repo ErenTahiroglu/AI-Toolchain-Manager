@@ -16,6 +16,7 @@ mod gate;
 mod github_url;
 mod health;
 mod lifecycle;
+mod managed_fs;
 mod plan;
 mod projects;
 mod recipe;
