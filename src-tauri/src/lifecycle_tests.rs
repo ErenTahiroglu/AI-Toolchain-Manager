@@ -478,10 +478,12 @@ fn rollback_that_cannot_undo_something_says_so_keeps_the_lock_and_can_be_finishe
     assert_eq!(report.status, "partial", "{report:?}");
     assert!(report.not_undone.iter().any(|n| n.what.contains("pointer")), "{report:?}");
     assert!(!report.undone.iter().any(|u| u.contains("pointer")), "it must not claim the pointer was restored");
-    assert!(report.undone.iter().any(|u| u.contains("version folder 2.0.0")), "what was undone is stated: {report:?}");
-    // the truth on disk matches the report: the pointer still points at 2.0.0, whose folder is gone
+    assert!(report.undone.iter().any(|u| u.contains("staging")), "what was undone is stated: {report:?}");
+    // the truth on disk matches the report: the pointer still points at 2.0.0, and that folder is NOT removed under it
+    assert!(!report.undone.iter().any(|u| u.contains("version folder")), "{report:?}");
+    assert!(report.not_undone.iter().any(|n| n.what.contains("version folder 2.0.0")), "{report:?}");
     assert_eq!(l.active().as_deref(), Some("2.0.0"));
-    assert!(l.artifact_of("2.0.0").is_none());
+    assert!(l.artifact_of("2.0.0").is_some(), "no dangling pointer");
     let update_journal = l.journals().into_iter().find(|j| j.action == Action::Update).unwrap();
     assert_eq!(update_journal.state, TxnState::RollbackFailed);
     assert_eq!(l.files("locks"), vec!["synthetic-tool.lock".to_string()], "the lock stays: a person or the next start has to finish this");
@@ -1387,31 +1389,46 @@ fn staging_and_snapshot_cleanup_keep_anything_foreign_and_report_it_on_recovery(
     l.assert_clean();
 }
 
+/// Creates `dir/artifact.bin` the way the engine does (exclusive create) and returns the manifest entry the journal would hold.
+fn owned_artifact(base: &Path, dir: &Path, content: &[u8]) -> Vec<OwnedFile> {
+    let mut f = fs::OpenOptions::new().write(true).create_new(true).open(dir.join("artifact.bin")).unwrap();
+    std::io::Write::write_all(&mut f, content).unwrap();
+    let (identity, _) = identity_and_links(&f).unwrap();
+    vec![OwnedFile {
+        role: "t".into(),
+        rels: vec![rel_of(base, &dir.join("artifact.bin")).unwrap()],
+        sha256: Some(sha256_hex_bytes(content)),
+        size: Some(content.len() as u64),
+        identity: Some(identity),
+    }]
+}
+
 #[test]
-fn closed_directory_removal_never_recurses_and_never_follows_links() {
+fn verified_directory_removal_never_recurses_and_never_follows_links() {
     let tmp = tempfile::tempdir().unwrap();
     let base = tmp.path().canonicalize().unwrap();
     let dir = base.join("d");
     fs::create_dir(&dir).unwrap();
-    fs::write(dir.join("artifact.bin"), b"a").unwrap();
-    // allowed set only: removed, folder gone
-    assert!(remove_closed_dir(&dir, &["artifact.bin"]).is_ok() && !dir.exists());
-    // a file that is not allowed, a sub-folder, a name that merely looks allowed (case), all keep everything
+    let owned = owned_artifact(&base, &dir, b"a");
+    // the recorded file only: removed, folder gone
+    assert!(remove_verified_dir(&base, &dir, &owned).is_ok() && !dir.exists());
+    // a file that is not recorded, a sub-folder, a name that merely looks recorded (case), all keep everything
     for (name, is_dir) in [("other", false), ("sub", true), ("ARTIFACT.BIN.x", false)] {
         fs::create_dir(&dir).unwrap();
-        fs::write(dir.join("artifact.bin"), b"a").unwrap();
+        let owned = owned_artifact(&base, &dir, b"a");
         if is_dir {
             fs::create_dir(dir.join(name)).unwrap();
         } else {
             fs::write(dir.join(name), b"x").unwrap();
         }
-        assert!(remove_closed_dir(&dir, &["artifact.bin"]).is_err(), "{name}");
+        assert!(remove_verified_dir(&base, &dir, &owned).is_err(), "{name}");
         assert!(dir.join("artifact.bin").exists() && dir.join(name).exists(), "{name}: nothing deleted");
         fs::remove_dir_all(&dir).unwrap();
     }
-    // the allowed name present as a FOLDER is not the allowed file
+    // the recorded name present as a FOLDER is not the recorded file
     fs::create_dir_all(dir.join("artifact.bin")).unwrap();
-    assert!(remove_closed_dir(&dir, &["artifact.bin"]).is_err() && dir.join("artifact.bin").is_dir());
+    let owned = vec![OwnedFile { role: "t".into(), rels: vec!["d/artifact.bin".into()], sha256: None, size: None, identity: None }];
+    assert!(remove_verified_dir(&base, &dir, &owned).is_err() && dir.join("artifact.bin").is_dir());
 }
 
 // ---- the sandbox boundary ------------------------------------------------------------------------------------------------------
@@ -1457,4 +1474,307 @@ fn no_recursive_delete_exists_anywhere_in_the_production_engine() {
     let production = include_str!("lifecycle.rs").split("#[cfg(test)]").next().unwrap();
     let needle = format!("{}{}", "remove_dir", "_all");
     assert!(!production.contains(&needle), "the engine must remove named files and then empty folders, never a tree");
+}
+
+// =====================================================================================================================
+// Phase 3B (Issue #14): the engine deletes a file only if it is the very file this transaction created -- same identity,
+// one link, same content -- never merely because a file of an expected name is there
+// =====================================================================================================================
+
+/// What an unrelated program (or an attacker running as the same user) can do to a name: replace the file by another one.
+fn replace_file(path: &Path, content: &[u8]) {
+    fs::remove_file(path).unwrap();
+    fs::write(path, content).unwrap();
+}
+
+fn assert_not_ours(report: &RollbackReport, what: &str) {
+    assert!(
+        report.not_undone.iter().any(|n| n.what.contains(what) && n.why.contains("no longer the file this transaction wrote")),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn the_journal_records_the_identity_and_digest_of_what_the_transaction_created() {
+    let l = lab();
+    let hook = |p: Point| (p == Point::BeforeJournalCommit).then_some(Fault::Crash);
+    assert!(matches!(l.install(&l.v1, Some(&hook)), Err(TxnError::Interrupted(Point::BeforeJournalCommit))));
+    let j = l.journals().remove(0);
+    let staged = j.owned.iter().find(|e| e.role == "staged_artifact").expect("manifest entry");
+    assert!(staged.identity.is_some() && staged.size == Some(l.v1.sc.bytes.len() as u64));
+    assert_eq!(staged.sha256.as_deref(), Some(sha256_hex_bytes(&l.v1.sc.bytes).as_str()));
+    assert!(staged.rels.iter().any(|r| r == &format!("versions/{TOOL}/1.0.0/artifact.bin")));
+    // the manifest holds relative places only: no absolute path, no account name
+    let text = serde_json::to_string(&j.owned).unwrap();
+    assert!(!text.contains(l.base.to_string_lossy().as_ref()), "{text}");
+}
+
+#[test]
+fn a_replacement_with_identical_content_is_a_different_file_and_is_not_deleted() {
+    let l = lab();
+    let bytes = l.v1.sc.bytes.clone();
+    let (_, report) = failed(install_with_obstruction(&l, |d| replace_file(&d.join("artifact.bin"), &bytes), Fault::Fail));
+    only_partial_failure(&report);
+    assert_not_ours(&report, "version folder 1.0.0");
+    assert_eq!(l.artifact_of("1.0.0").unwrap(), bytes, "left exactly where it is");
+    assert_eq!(l.journals().remove(0).state, TxnState::RollbackFailed);
+    l.outside_is_untouched();
+}
+
+#[test]
+fn a_hard_linked_alias_of_the_artifact_is_never_deleted_through() {
+    let l = lab();
+    let alias = l.base.join("alias.bin");
+    let a2 = alias.clone();
+    let linked = std::sync::atomic::AtomicBool::new(true);
+    let (_, report) = failed(install_with_obstruction(
+        &l,
+        |d| {
+            if fs::hard_link(d.join("artifact.bin"), &a2).is_err() {
+                linked.store(false, Ordering::SeqCst);
+            }
+        },
+        Fault::Fail,
+    ));
+    if !linked.load(Ordering::SeqCst) {
+        eprintln!("hard links are not available here; case not exercised");
+        return;
+    }
+    only_partial_failure(&report);
+    assert_not_ours(&report, "version folder 1.0.0");
+    assert_eq!(fs::read(&alias).unwrap(), l.v1.sc.bytes);
+    assert!(l.artifact_of("1.0.0").is_some());
+}
+
+#[test]
+fn a_file_substituted_under_the_expected_name_in_staging_is_refused_and_survives() {
+    let l = lab();
+    let stage_root = l.p("staging");
+    let hook = move |p: Point| {
+        if p == Point::AfterVerify {
+            let dir = fs::read_dir(&stage_root).unwrap().flatten().next().unwrap().path();
+            replace_file(&dir.join("artifact.bin"), b"alien content under an expected name");
+        }
+        None
+    };
+    let (code, report) = failed(l.install(&l.v1, Some(&hook)));
+    assert_eq!(code, "staged_file_is_not_the_file_this_transaction_wrote");
+    assert_not_ours(&report, "staging folder");
+    let staged = l.p(&format!("staging/{}", l.files("staging")[0]));
+    assert_eq!(fs::read(staged.join("artifact.bin")).unwrap(), b"alien content under an expected name");
+    assert!(l.artifact_of("1.0.0").is_none(), "the alien file never became an installed version");
+    assert_eq!(l.active(), None);
+    // the owner removes it; the next recovery completes the cleanup
+    fs::remove_file(staged.join("artifact.bin")).unwrap();
+    assert!(matches!(&l.recover(None)[..], [Recovered::RolledBack(_)]));
+    l.assert_clean();
+    l.outside_is_untouched();
+}
+
+#[test]
+fn a_swap_between_the_check_and_the_activation_is_caught_by_the_second_check() {
+    let l = lab();
+    let stage_root = l.p("staging");
+    let hook = move |p: Point| {
+        if p == Point::AfterVersionDirCreate {
+            let dir = fs::read_dir(&stage_root).unwrap().flatten().next().unwrap().path();
+            replace_file(&dir.join("artifact.bin"), b"swapped in after the first check");
+        }
+        None
+    };
+    let (code, report) = failed(l.install(&l.v1, Some(&hook)));
+    assert_eq!(code, "staged_file_is_not_the_file_this_transaction_wrote");
+    assert_not_ours(&report, "staging folder");
+    assert!(l.artifact_of("1.0.0").is_none(), "nothing was activated");
+    assert_eq!(l.active(), None);
+}
+
+#[test]
+fn a_crashed_install_leaves_a_partial_file_that_recovery_deletes_only_while_it_is_still_the_same_file() {
+    // owned partial file: recovery removes it and the staging folder
+    let l = lab();
+    let r = l.install(&l.v1, Some(&at(Point::DuringStageWrite, Fault::Crash)));
+    assert!(matches!(r, Err(TxnError::Interrupted(Point::DuringStageWrite))), "{r:?}");
+    let stage = l.p(&format!("staging/{}", l.files("staging")[0]));
+    assert!(stage.join("artifact.bin.part").exists());
+    assert!(matches!(&l.recover(None)[..], [Recovered::RolledBack(_)]));
+    l.assert_clean();
+
+    // substituted partial file: kept, reported on every recovery, nothing else touched
+    let l = lab();
+    let sentinel = l.base.join("sentinel.bin");
+    fs::write(&sentinel, [9u8; 32]).unwrap();
+    let r = l.install(&l.v1, Some(&at(Point::DuringStageWrite, Fault::Crash)));
+    assert!(matches!(r, Err(TxnError::Interrupted(Point::DuringStageWrite))), "{r:?}");
+    let stage = l.p(&format!("staging/{}", l.files("staging")[0]));
+    replace_file(&stage.join("artifact.bin.part"), b"alien");
+    for _ in 0..3 {
+        match &l.recover(None)[..] {
+            [Recovered::NeedsAttention(_, report)] => assert_not_ours(report, "staging folder"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(fs::read(stage.join("artifact.bin.part")).unwrap(), b"alien");
+    }
+    assert_eq!(fs::read(&sentinel).unwrap(), [9u8; 32]);
+    fs::remove_file(stage.join("artifact.bin.part")).unwrap();
+    assert!(matches!(&l.recover(None)[..], [Recovered::RolledBack(_)]));
+    l.assert_clean();
+    l.outside_is_untouched_except(&["sentinel.bin"]);
+}
+
+#[test]
+fn a_staging_folder_replaced_by_a_link_is_refused_and_the_outside_stays_byte_identical() {
+    let l = lab();
+    let outside = l.base.join("outside-dir");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("keep.txt"), b"outside content").unwrap();
+    let made = std::sync::atomic::AtomicBool::new(true);
+    let o2 = outside.clone();
+    let stage_root = l.p("staging");
+    let hook = |p: Point| {
+        if p == Point::AfterVerify {
+            let dir = fs::read_dir(&stage_root).unwrap().flatten().next().unwrap().path();
+            fs::remove_dir_all(&dir).unwrap();
+            if !make_dir_link(&dir, &o2) {
+                made.store(false, Ordering::SeqCst);
+            }
+            return Some(Fault::Fail);
+        }
+        None
+    };
+    let (_, report) = failed(l.install(&l.v1, Some(&hook)));
+    assert!(report.not_undone.iter().any(|n| n.what == "staging folder") || !made.load(Ordering::SeqCst), "{report:?}");
+    assert_eq!(fs::read(outside.join("keep.txt")).unwrap(), b"outside content");
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 1);
+    let names = l.files("staging");
+    if let Some(n) = names.first() {
+        let link = l.p(&format!("staging/{n}"));
+        if fs::symlink_metadata(&link).is_ok() {
+            remove_dir_link(&link);
+        }
+    }
+}
+
+#[test]
+fn a_substituted_file_in_the_snapshot_of_a_committed_update_or_uninstall_is_kept() {
+    // update: the saved pointer is replaced before the cleanup
+    let l = lab();
+    l.install(&l.v1, None).unwrap();
+    let snaps = l.p("snapshots");
+    let hook = move |p: Point| {
+        if p == Point::BeforeJournalCommit {
+            let dir = fs::read_dir(&snaps).unwrap().flatten().next().unwrap().path();
+            replace_file(&dir.join("pointer.json"), b"not the pointer this transaction saved");
+        }
+        None
+    };
+    l.update(&l.v2, "1.0.0", Some(&hook)).unwrap();
+    let snap_dir = l.p(&format!("snapshots/{}", l.files("snapshots")[0]));
+    assert_eq!(fs::read(snap_dir.join("pointer.json")).unwrap(), b"not the pointer this transaction saved");
+    for _ in 0..2 {
+        let rec = l.recover(None);
+        assert!(
+            matches!(&rec[..], [Recovered::LeftoversRetained(_, why)] if why.contains("snapshot") && why.contains("no longer the file")),
+            "{rec:?}"
+        );
+    }
+    assert_eq!(l.active().as_deref(), Some("2.0.0"));
+
+    // uninstall: a version artifact in the snapshot is replaced; the pointer beside it stays as well (all or nothing)
+    let l = lab();
+    l.install(&l.v1, None).unwrap();
+    let snaps = l.p("snapshots");
+    let hook = move |p: Point| {
+        if p == Point::BeforeJournalCommit {
+            let dir = fs::read_dir(&snaps).unwrap().flatten().next().unwrap().path();
+            replace_file(&dir.join("versions/1.0.0/artifact.bin"), b"alien in the snapshot");
+        }
+        None
+    };
+    l.uninstall(&l.v1, Some(&hook)).unwrap();
+    let snap_dir = l.p(&format!("snapshots/{}", l.files("snapshots")[0]));
+    assert_eq!(fs::read(snap_dir.join("versions/1.0.0/artifact.bin")).unwrap(), b"alien in the snapshot");
+    assert!(snap_dir.join("pointer.json").exists(), "all or nothing");
+    let rec = l.recover(None);
+    assert!(matches!(&rec[..], [Recovered::LeftoversRetained(_, why)] if why.contains("snapshot")), "{rec:?}");
+    l.outside_is_untouched();
+}
+
+#[test]
+fn a_saved_pointer_that_is_not_the_one_the_transaction_saved_is_never_restored_as_the_active_pointer() {
+    let l = lab();
+    l.install(&l.v1, None).unwrap();
+    let snaps = l.p("snapshots");
+    let hook = move |p: Point| {
+        if p == Point::AfterPointerSwitch {
+            let dir = fs::read_dir(&snaps).unwrap().flatten().next().unwrap().path();
+            replace_file(&dir.join("pointer.json"), b"{\"forged\":true}");
+            return Some(Fault::Fail);
+        }
+        None
+    };
+    let (_, report) = failed(l.update(&l.v2, "1.0.0", Some(&hook)));
+    assert!(
+        report.not_undone.iter().any(|n| n.what == "active-version pointer" && n.why.contains("not the file this transaction wrote")),
+        "{report:?}"
+    );
+    assert_eq!(l.active().as_deref(), Some("2.0.0"), "the forged pointer was not made active");
+    assert!(l.artifact_of("2.0.0").is_some(), "the version the pointer still names was not removed");
+    assert!(report.not_undone.iter().any(|n| n.what.contains("version folder 2.0.0")), "{report:?}");
+    assert!(!fs::read_to_string(l.p(&format!("state/{TOOL}.json"))).unwrap().contains("forged"));
+}
+
+#[test]
+fn an_uninstall_is_refused_before_anything_moves_when_the_installed_content_is_not_what_a_receipt_vouches_for() {
+    let setup = || {
+        let l = lab();
+        l.install(&l.v1, None).unwrap();
+        l.update(&l.v2, "1.0.0", None).unwrap();
+        l
+    };
+    let untouched = |l: &Lab| {
+        assert_eq!(l.active().as_deref(), Some("2.0.0"));
+        assert!(l.artifact_of("1.0.0").is_some() && l.artifact_of("2.0.0").is_some());
+        assert!(l.files("snapshots").is_empty() && l.files("locks").is_empty(), "nothing was started");
+    };
+    // an older version's artifact was changed
+    let l = setup();
+    fs::write(l.p(&format!("versions/{TOOL}/1.0.0/artifact.bin")), b"tampered").unwrap();
+    assert_eq!(refused(l.uninstall(&l.v2, None)), "installed_content_has_no_matching_receipt");
+    untouched(&l);
+    // a foreign file next to an artifact
+    let l = setup();
+    fs::write(l.p(&format!("versions/{TOOL}/2.0.0/notes.txt")), b"mine").unwrap();
+    assert_eq!(refused(l.uninstall(&l.v2, None)), "unrecognised_installed_content");
+    untouched(&l);
+    // a version folder nobody installed
+    let l = setup();
+    fs::create_dir(l.p(&format!("versions/{TOOL}/9.9.9"))).unwrap();
+    fs::write(l.p(&format!("versions/{TOOL}/9.9.9/artifact.bin")), b"handmade").unwrap();
+    assert_eq!(refused(l.uninstall(&l.v2, None)), "installed_content_has_no_matching_receipt");
+    // a hard-linked artifact
+    let l = setup();
+    let alias = l.base.join("alias.bin");
+    if fs::hard_link(l.p(&format!("versions/{TOOL}/2.0.0/artifact.bin")), &alias).is_ok() {
+        assert_eq!(refused(l.uninstall(&l.v2, None)), "installed_content_has_no_matching_receipt");
+        assert_eq!(fs::read(&alias).unwrap(), l.v2.sc.bytes);
+    }
+}
+
+#[test]
+fn an_in_place_edit_that_keeps_the_size_and_the_identity_is_still_detected_by_the_digest() {
+    let l = lab();
+    let len = l.v1.sc.bytes.len();
+    let (_, report) = failed(install_with_obstruction(
+        &l,
+        |d| {
+            // same file, same length, other bytes
+            let mut f = fs::OpenOptions::new().write(true).open(d.join("artifact.bin")).unwrap();
+            std::io::Write::write_all(&mut f, &vec![b'X'; len]).unwrap();
+        },
+        Fault::Fail,
+    ));
+    only_partial_failure(&report);
+    assert_not_ours(&report, "version folder 1.0.0");
+    assert_eq!(l.artifact_of("1.0.0").unwrap(), vec![b'X'; len]);
 }

@@ -158,6 +158,21 @@ impl TxnState {
     }
 }
 
+/// A file this transaction created (or, for an uninstall, verified and moved), as recorded in the journal BEFORE it is needed.
+/// Cleanup deletes a file only if it matches its record: still the same file (device/volume + file index), a single link, and --
+/// when the content is known -- the same size and SHA-256. A different file under an expected name is foreign, whatever it holds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OwnedFile {
+    pub role: String,
+    /// Every sandbox-relative place the file may legitimately be at (a rename in flight is written ahead).
+    pub rels: Vec<String>,
+    /// `None` while the content is still being written (a partial file can only be recognised by identity).
+    pub sha256: Option<String>,
+    pub size: Option<u64>,
+    pub identity: Option<[u64; 2]>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Journal {
@@ -177,6 +192,9 @@ pub struct Journal {
     pub intents: Vec<String>,
     pub started_at: String,
     pub rollback: Option<RollbackReport>,
+    /// The manifest of files this transaction owns (see [`OwnedFile`]).
+    #[serde(default)]
+    pub owned: Vec<OwnedFile>,
     pub journal_digest: String,
 }
 
@@ -466,27 +484,152 @@ fn unexpected_description(unexpected: &[&(String, &'static str)]) -> String {
     )
 }
 
-/// Removes the regular files named in `allowed` that sit directly in `dir`, and then `dir` itself WITHOUT recursion. All or
-/// nothing: if anything else is present (another file, a folder, a link of any kind) nothing is deleted. Entries are judged
-/// by `symlink_metadata`, so a link is never followed. A remaining window exists between the listing and the removal; it can
-/// only ever delete one of the named files (or a link that replaced it, not its target) and the final non-recursive
-/// `remove_dir` fails if anything else appeared.
-fn remove_closed_dir(dir: &Path, allowed: &[&str]) -> Result<(), String> {
-    let entries = list_entries(dir)?;
-    let unexpected: Vec<&(String, &'static str)> =
-        entries.iter().filter(|(n, k)| !(allowed.contains(&n.as_str()) && *k == "file")).collect();
-    if !unexpected.is_empty() {
-        return Err(unexpected_description(&unexpected));
+/// Device/volume and file index of an OPEN file, and its number of hard links. This is the file's identity: a different file
+/// with the same name has a different one. (Windows: `GetFileInformationByHandle`; Unix: `st_dev`, `st_ino`, `st_nlink`.)
+#[cfg(unix)]
+fn identity_and_links(f: &fs::File) -> Option<([u64; 2], u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let m = f.metadata().ok()?;
+    Some(([m.dev(), m.ino()], m.nlink()))
+}
+
+#[cfg(windows)]
+fn identity_and_links(f: &fs::File) -> Option<([u64; 2], u64)> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION};
+    // SAFETY: `info` is plain data that the call fills in; the handle belongs to the open `File` borrowed for the whole call.
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    let ok = unsafe { GetFileInformationByHandle(f.as_raw_handle() as _, &mut info) };
+    if ok == 0 {
+        return None;
     }
-    for (n, _) in &entries {
-        retry_io(|| fs::remove_file(dir.join(n))).map_err(|e| format!("cannot remove a file this module created: {e}"))?;
+    Some((
+        [u64::from(info.dwVolumeSerialNumber), (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow)],
+        u64::from(info.nNumberOfLinks),
+    ))
+}
+
+fn sha256_of_open_file(f: &mut fs::File, limit: u64) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut total = 0u64;
+    loop {
+        let n = f.read(&mut buf).map_err(|e| format!("cannot read a recorded file to check it: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        total += n as u64;
+        if total > limit {
+            return Err("a recorded file is larger than any file this module writes".to_string());
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+fn rel_of(root: &Path, p: &Path) -> Option<String> {
+    let rel = p.strip_prefix(root).ok()?;
+    Some(rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/"))
+}
+
+#[derive(Debug)]
+enum Verify {
+    /// No record says this transaction created a file here.
+    Unrecorded,
+    /// A record exists, but what is there now is not that file.
+    Changed(String),
+}
+
+const VERIFY_LIMIT: u64 = 1 << 30;
+
+/// Does `path` hold exactly the file the journal says this transaction created? Same identity (never just the same name), one
+/// hard link, a regular file (not a link), and -- if the content was recorded -- the same size and SHA-256 read through the very
+/// handle whose identity was checked.
+fn verify_owned(root: &Path, path: &Path, owned: &[OwnedFile]) -> Result<(), Verify> {
+    let rel = rel_of(root, path).ok_or(Verify::Unrecorded)?;
+    let entry = owned.iter().find(|e| e.rels.contains(&rel)).ok_or(Verify::Unrecorded)?;
+    let changed = |why: &str| Verify::Changed(why.to_string());
+    if entry_kind(path) != "file" {
+        return Err(changed("not a plain file any more"));
+    }
+    let mut f = fs::File::open(path).map_err(|_| changed("cannot be opened"))?;
+    let (identity, links) = identity_and_links(&f).ok_or_else(|| changed("identity cannot be read"))?;
+    if links != 1 {
+        return Err(changed("has other hard links"));
+    }
+    if entry.identity != Some(identity) {
+        return Err(changed("is a different file than the one this transaction created"));
+    }
+    if let Some(size) = entry.size {
+        if f.metadata().map(|m| m.len()).ok() != Some(size) {
+            return Err(changed("has another size"));
+        }
+    }
+    if let Some(sha) = &entry.sha256 {
+        if sha256_of_open_file(&mut f, VERIFY_LIMIT).map_err(Verify::Changed)? != *sha {
+            return Err(changed("has other content"));
+        }
+    }
+    Ok(())
+}
+
+/// Why nothing was deleted, without any name.
+fn refusal(unexpected: &[&(String, &'static str)], changed: usize) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if !unexpected.is_empty() {
+        parts.push(unexpected_description(unexpected));
+    }
+    if changed > 0 {
+        parts.push(format!(
+            "{changed} recorded file(s) are no longer the file this transaction wrote (identity, links or content differ); they were left untouched and nothing was deleted"
+        ));
+    }
+    parts.join("; ")
+}
+
+/// Checks every entry of `dir` against the journal's manifest; returns the files to delete, or why nothing may be deleted.
+fn owned_files_of(root: &Path, dir: &Path, owned: &[OwnedFile]) -> Result<Vec<PathBuf>, String> {
+    let entries = list_entries(dir)?;
+    let mut unexpected: Vec<&(String, &'static str)> = Vec::new();
+    let mut changed = 0usize;
+    let mut files = Vec::new();
+    for e in &entries {
+        if e.1 != "file" {
+            unexpected.push(e);
+            continue;
+        }
+        let path = dir.join(&e.0);
+        match verify_owned(root, &path, owned) {
+            Ok(()) => files.push(path),
+            Err(Verify::Unrecorded) => unexpected.push(e),
+            Err(Verify::Changed(_)) => changed += 1,
+        }
+    }
+    if !unexpected.is_empty() || changed > 0 {
+        return Err(refusal(&unexpected, changed));
+    }
+    Ok(files)
+}
+
+/// Removes the files in `dir` that the journal records as created by this transaction -- each verified by identity (and content
+/// where known) -- and then `dir` itself WITHOUT recursion. All or nothing: if anything else is present (an unrecorded file, a
+/// folder, a link of any kind) or a recorded file was replaced, nothing is deleted. Links are never followed. A window remains
+/// between the check and the unlink; the removal is `remove_file` of the verified name (a link that replaced it would be removed
+/// itself, never its target) and the final `remove_dir` fails if anything else appeared.
+fn remove_verified_dir(root: &Path, dir: &Path, owned: &[OwnedFile]) -> Result<(), String> {
+    let files = owned_files_of(root, dir, owned)?;
+    for f in &files {
+        retry_io(|| fs::remove_file(f)).map_err(|e| format!("cannot remove a file this module created: {e}"))?;
     }
     retry_io(|| fs::remove_dir(dir)).map_err(|e| format!("the folder is not empty or cannot be removed: {e}"))
 }
 
-/// Removes a transaction snapshot (`pointer.json`, and `versions/<version>/artifact.bin` after an uninstall). The whole
-/// structure is validated first; any foreign entry anywhere keeps everything in place.
-fn remove_snapshot(dir: &Path) -> Result<(), String> {
+/// Removes a transaction snapshot (`pointer.json`, and `versions/<version>/artifact.bin` after an uninstall). The whole structure
+/// and every file are validated against the manifest first; any foreign entry, replaced file or hard-linked file anywhere keeps
+/// everything in place.
+fn remove_snapshot(root: &Path, dir: &Path, owned: &[OwnedFile]) -> Result<(), String> {
     let top = list_entries(dir)?;
     let foreign: Vec<&(String, &'static str)> =
         top.iter().filter(|(n, k)| !((n == "pointer.json" && *k == "file") || (n == "versions" && *k == "folder"))).collect();
@@ -495,30 +638,47 @@ fn remove_snapshot(dir: &Path) -> Result<(), String> {
     }
     let versions = dir.join("versions");
     let mut version_dirs: Vec<PathBuf> = Vec::new();
+    let mut files: Vec<PathBuf> = Vec::new();
+    let mut unexpected: Vec<(String, &'static str)> = Vec::new();
+    let mut changed = 0usize;
+    let mut check = |path: PathBuf, entry: (String, &'static str)| match verify_owned(root, &path, owned) {
+        Ok(()) => files.push(path),
+        Err(Verify::Unrecorded) => unexpected.push(entry),
+        Err(Verify::Changed(_)) => changed += 1,
+    };
+    if top.iter().any(|(n, _)| n == "pointer.json") {
+        check(dir.join("pointer.json"), ("pointer.json".to_string(), "file"));
+    }
     if top.iter().any(|(n, _)| n == "versions") {
         for (n, k) in list_entries(&versions)? {
             let vd = versions.join(&n);
             if k != "folder" || !safe_component(&n) {
                 return Err(unexpected_description(&[&(n, k)]));
             }
-            let inner = list_entries(&vd)?;
-            let bad: Vec<&(String, &'static str)> = inner.iter().filter(|(n, k)| !(n == "artifact.bin" && *k == "file")).collect();
-            if !bad.is_empty() {
-                return Err(unexpected_description(&bad));
+            for (inner, ik) in list_entries(&vd)? {
+                if inner == "artifact.bin" && ik == "file" {
+                    check(vd.join("artifact.bin"), (inner, ik));
+                } else {
+                    return Err(unexpected_description(&[&(inner, ik)]));
+                }
             }
             version_dirs.push(vd);
         }
     }
+    if !unexpected.is_empty() || changed > 0 {
+        let refs: Vec<&(String, &'static str)> = unexpected.iter().collect();
+        return Err(refusal(&refs, changed));
+    }
+    for f in &files {
+        retry_io(|| fs::remove_file(f)).map_err(|e| format!("cannot remove a file this module created: {e}"))?;
+    }
     for vd in &version_dirs {
-        remove_closed_dir(vd, &["artifact.bin"])?;
+        retry_io(|| fs::remove_dir(vd)).map_err(|e| format!("cannot remove a version folder of the snapshot: {e}"))?;
     }
     if top.iter().any(|(n, _)| n == "versions") {
-        fs::remove_dir(&versions).map_err(|e| format!("cannot remove the versions folder: {e}"))?;
+        retry_io(|| fs::remove_dir(&versions)).map_err(|e| format!("cannot remove the versions folder: {e}"))?;
     }
-    if top.iter().any(|(n, _)| n == "pointer.json") {
-        fs::remove_file(dir.join("pointer.json")).map_err(|e| format!("cannot remove the snapshot file: {e}"))?;
-    }
-    fs::remove_dir(dir).map_err(|e| format!("the snapshot folder is not empty or cannot be removed: {e}"))
+    retry_io(|| fs::remove_dir(dir)).map_err(|e| format!("the snapshot folder is not empty or cannot be removed: {e}"))
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -698,6 +858,7 @@ impl<'a> Engine<'a> {
             intents: Vec::new(),
             started_at: self.now(),
             rollback: None,
+            owned: Vec::new(),
             journal_digest: String::new(),
         }
     }
@@ -810,7 +971,18 @@ impl<'a> Engine<'a> {
         fs::create_dir(&snap).map_err(io)?;
         if had_pointer {
             let src = self.root.join("state", &[&format!("{tool}.json")])?;
-            fs::copy(&src, snap.join("pointer.json")).map_err(io)?;
+            let bytes = fs::read(&src).map_err(io)?;
+            let mut f = fs::OpenOptions::new().write(true).create_new(true).open(snap.join("pointer.json")).map_err(io)?;
+            f.write_all(&bytes).map_err(io)?;
+            f.sync_all().map_err(io)?;
+            let (identity, _) = identity_and_links(&f).ok_or(TxnError::Refused("identity_unavailable"))?;
+            j.owned.push(OwnedFile {
+                role: "snapshot_pointer".to_string(),
+                rels: vec![format!("snapshots/{}/pointer.json", j.txn_id)],
+                sha256: Some(sha256_hex_bytes(&bytes)),
+                size: Some(bytes.len() as u64),
+                identity: Some(identity),
+            });
         }
         j.state = TxnState::Snapshotted;
         self.save(j)?;
@@ -821,9 +993,23 @@ impl<'a> Engine<'a> {
         let stage = self.root.join("staging", &[&j.txn_id])?;
         fs::create_dir(&stage).map_err(io)?;
         let part = stage.join("artifact.bin.part");
+        // The staged file is created exclusively, its identity is read from the handle and recorded in the journal BEFORE any
+        // data is written, so that even a crash in the middle leaves a file the recovery can prove is ours. The same file may
+        // later be at any of the listed places (renames preserve identity).
+        let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&part).map_err(io)?;
+        let (identity, _) = identity_and_links(&file).ok_or(TxnError::Refused("identity_unavailable"))?;
+        let version_artifact = format!("versions/{tool}/{version}/artifact.bin");
+        j.owned.push(OwnedFile {
+            role: "staged_artifact".to_string(),
+            rels: vec![format!("staging/{}/artifact.bin.part", j.txn_id), format!("staging/{}/artifact.bin", j.txn_id), version_artifact],
+            sha256: None,
+            size: None,
+            identity: Some(identity),
+        });
+        self.save(j)?;
         match self.fault.and_then(|f| f(Point::DuringStageWrite)) {
             Some(f) => {
-                fs::write(&part, &artifact[..artifact.len() / 2]).map_err(io)?;
+                file.write_all(&artifact[..artifact.len() / 2]).map_err(io)?;
                 return Err(if f == Fault::Crash {
                     TxnError::Interrupted(Point::DuringStageWrite)
                 } else {
@@ -831,10 +1017,15 @@ impl<'a> Engine<'a> {
                 });
             }
             None => {
-                let mut f = fs::File::create(&part).map_err(io)?;
-                f.write_all(artifact).map_err(io)?;
-                f.sync_all().map_err(io)?;
+                file.write_all(artifact).map_err(io)?;
+                file.sync_all().map_err(io)?;
             }
+        }
+        drop(file);
+        // the content is complete: from now on it is recognised by digest as well
+        if let Some(entry) = j.owned.iter_mut().find(|e| e.role == "staged_artifact") {
+            entry.sha256 = Some(a.recipe.recipe().artifact.sha256.clone());
+            entry.size = Some(artifact.len() as u64);
         }
         fs::rename(&part, stage.join("artifact.bin")).map_err(io)?;
         j.state = TxnState::Staged;
@@ -844,6 +1035,9 @@ impl<'a> Engine<'a> {
         let staged = fs::read(stage.join("artifact.bin")).map_err(io)?;
         if sha256_hex_bytes(&staged) != a.recipe.recipe().artifact.sha256 {
             return Err(TxnError::Refused("staged_content_does_not_match"));
+        }
+        if verify_owned(self.root.path(), &stage.join("artifact.bin"), &j.owned).is_err() {
+            return Err(TxnError::Refused("staged_file_is_not_the_file_this_transaction_wrote"));
         }
         j.state = TxnState::Verified;
         self.save(j)?;
@@ -862,6 +1056,10 @@ impl<'a> Engine<'a> {
         self.save(j)?;
         fs::create_dir_all(&vdir).map_err(io)?;
         self.hit(Point::AfterVersionDirCreate)?;
+        // the file about to be activated must still be the one that was staged and verified
+        if verify_owned(self.root.path(), &stage.join("artifact.bin"), &j.owned).is_err() {
+            return Err(TxnError::Refused("staged_file_is_not_the_file_this_transaction_wrote"));
+        }
         fs::rename(stage.join("artifact.bin"), vdir.join("artifact.bin")).map_err(io)?;
         self.hit(Point::BeforePointerWrite)?;
         j.intents.push("pointer_switch".to_string());
@@ -926,14 +1124,14 @@ impl<'a> Engine<'a> {
         let mut why: Option<String> = None;
         if let Ok(p) = self.root.join("staging", &[&j.txn_id]) {
             if p.exists() {
-                if let Err(e) = remove_closed_dir(&p, &["artifact.bin", "artifact.bin.part"]) {
+                if let Err(e) = remove_verified_dir(self.root.path(), &p, &j.owned) {
                     why = Some(format!("staging: {e}"));
                 }
             }
         }
         if let Ok(p) = self.root.join("snapshots", &[&j.txn_id]) {
             if p.exists() {
-                if let Err(e) = remove_snapshot(&p) {
+                if let Err(e) = remove_snapshot(self.root.path(), &p, &j.owned) {
                     why.get_or_insert(format!("snapshot: {e}"));
                 }
             }
@@ -957,6 +1155,15 @@ impl<'a> Engine<'a> {
         };
         let mut j = self.new_journal(a, Action::Uninstall, Some(cur.version.clone()), None, Some(cur.artifact_sha256.clone()));
         self.lock(&tool, &j.txn_id)?;
+        // Before anything is moved: everything that would be removed must be recognised -- the active pointer, and every version
+        // folder must hold exactly one artifact whose digest and identity match a committed receipt.
+        match self.uninstall_manifest(&tool, &j.txn_id) {
+            Ok(owned) => j.owned = owned,
+            Err(e) => {
+                self.unlock(&tool, &j.txn_id);
+                return Err(e);
+            }
+        }
         match self.pending_for(&tool) {
             Ok(None) => {}
             Ok(Some(pending)) => {
@@ -974,6 +1181,80 @@ impl<'a> Engine<'a> {
         }
         let result = self.run_uninstall(&mut j, &tool);
         self.finish(j, result)
+    }
+
+    fn uninstall_manifest(&self, tool: &str, txn: &str) -> Result<Vec<OwnedFile>, TxnError> {
+        let mut owned = Vec::new();
+        let ppath = self.root.join("state", &[&format!("{tool}.json")])?;
+        let mut pf = fs::File::open(&ppath).map_err(io)?;
+        let (pid, plinks) = identity_and_links(&pf).ok_or(TxnError::Refused("identity_unavailable"))?;
+        if plinks != 1 || entry_kind(&ppath) != "file" {
+            return Err(TxnError::Refused("unrecognised_installed_content"));
+        }
+        let psize = pf.metadata().map_err(io)?.len();
+        let psha = sha256_of_open_file(&mut pf, VERIFY_LIMIT).map_err(|_| TxnError::Refused("unrecognised_installed_content"))?;
+        owned.push(OwnedFile {
+            role: "snapshot_pointer".to_string(),
+            rels: vec![format!("state/{tool}.json"), format!("snapshots/{txn}/pointer.json")],
+            sha256: Some(psha),
+            size: Some(psize),
+            identity: Some(pid),
+        });
+        let vroot = self.root.join("versions", &[tool])?;
+        if fs::symlink_metadata(&vroot).is_ok() {
+            if entry_kind(&vroot) != "folder" {
+                return Err(TxnError::Refused("unrecognised_installed_content"));
+            }
+            for (version, kind) in list_entries(&vroot).map_err(|_| TxnError::Refused("unrecognised_installed_content"))? {
+                if kind != "folder" || !safe_component(&version) {
+                    return Err(TxnError::Refused("unrecognised_installed_content"));
+                }
+                let vdir = vroot.join(&version);
+                if list_entries(&vdir).map_err(|_| TxnError::Refused("unrecognised_installed_content"))?
+                    != vec![("artifact.bin".to_string(), "file")]
+                {
+                    return Err(TxnError::Refused("unrecognised_installed_content"));
+                }
+                let art = vdir.join("artifact.bin");
+                let mut f = fs::File::open(&art).map_err(io)?;
+                let (id, links) = identity_and_links(&f).ok_or(TxnError::Refused("identity_unavailable"))?;
+                let sha = sha256_of_open_file(&mut f, VERIFY_LIMIT).map_err(|_| TxnError::Refused("unrecognised_installed_content"))?;
+                // the content must be exactly what a committed install/update of this version wrote
+                if links != 1 || !self.receipt_vouches(tool, &version, &sha) {
+                    return Err(TxnError::Refused("installed_content_has_no_matching_receipt"));
+                }
+                owned.push(OwnedFile {
+                    role: "removed_version_artifact".to_string(),
+                    rels: vec![
+                        format!("versions/{tool}/{version}/artifact.bin"),
+                        format!("snapshots/{txn}/versions/{version}/artifact.bin"),
+                    ],
+                    sha256: Some(sha),
+                    size: Some(f.metadata().map_err(io)?.len()),
+                    identity: Some(id),
+                });
+            }
+        }
+        Ok(owned)
+    }
+
+    /// Is there a valid committed install/update receipt for exactly this tool, version and artifact digest?
+    fn receipt_vouches(&self, tool: &str, version: &str, sha: &str) -> bool {
+        let Ok(dir) = self.root.join("receipts", &[]) else { return false };
+        let Ok(read) = fs::read_dir(dir) else { return false };
+        read.flatten().any(|e| {
+            fs::read_to_string(e.path())
+                .ok()
+                .and_then(|t| serde_json::from_str::<Receipt>(&t).ok())
+                .map(|r| {
+                    receipt_digest(&r) == r.receipt_digest
+                        && r.tool_id == tool
+                        && matches!(r.action, Action::Install | Action::Update)
+                        && r.to_version.as_deref() == Some(version)
+                        && r.artifact_sha256.as_deref() == Some(sha)
+                })
+                .unwrap_or(false)
+        })
     }
 
     fn run_uninstall(&self, j: &mut Journal, tool: &str) -> Result<Receipt, TxnError> {
@@ -1025,11 +1306,16 @@ impl<'a> Engine<'a> {
             }
         }
         let intents: Vec<String> = j.intents.iter().rev().cloned().collect();
+        // while the active pointer could not be restored it may still name the new version: that folder must then stay
+        let mut pointer_unrestored = false;
         for intent in intents {
             match intent.as_str() {
                 "pointer_switch" => match self.undo_pointer(j, &tool) {
                     Ok(()) => undone.push("active-version pointer restored".to_string()),
-                    Err(why) => not_undone.push(NotUndone { what: "active-version pointer".to_string(), why }),
+                    Err(why) => {
+                        pointer_unrestored = true;
+                        not_undone.push(NotUndone { what: "active-version pointer".to_string(), why });
+                    }
                 },
                 "pointer_removed" => match self.undo_removed_pointer(j, &tool) {
                     Ok(()) => undone.push("active-version pointer put back".to_string()),
@@ -1045,6 +1331,14 @@ impl<'a> Engine<'a> {
                 },
                 other if other.starts_with("version_dir:") => {
                     let version = &other["version_dir:".len()..];
+                    if pointer_unrestored && j.to_version.as_deref() == Some(version) {
+                        not_undone.push(NotUndone {
+                            what: format!("version folder {version}"),
+                            why: "the active-version pointer could not be restored and may still name this version; the folder was left in place"
+                                .to_string(),
+                        });
+                        continue;
+                    }
                     match self.undo_version_dir(j, &tool, version) {
                         Ok(true) => undone.push(format!("version folder {version} removed")),
                         Ok(false) => {}
@@ -1082,6 +1376,9 @@ impl<'a> Engine<'a> {
         let ppath = self.root.join("state", &[&format!("{tool}.json")]).map_err(|_| "path refused".to_string())?;
         let snap = self.root.join("snapshots", &[&j.txn_id]).map_err(|_| "path refused".to_string())?.join("pointer.json");
         if snap.exists() {
+            // the pointer that is about to become the active one must be the very file this transaction saved
+            verify_owned(self.root.path(), &snap, &j.owned)
+                .map_err(|_| "the saved pointer is not the file this transaction wrote; it was not restored".to_string())?;
             let bytes = fs::read(&snap).map_err(|_| "snapshot unreadable".to_string())?;
             atomic_write(&ppath, &bytes).map_err(|e| format!("cannot restore the pointer: {e}"))?;
         } else if ppath.exists() {
@@ -1095,6 +1392,8 @@ impl<'a> Engine<'a> {
         let ppath = self.root.join("state", &[&format!("{tool}.json")]).map_err(|_| "path refused".to_string())?;
         let snap = self.root.join("snapshots", &[&j.txn_id]).map_err(|_| "path refused".to_string())?.join("pointer.json");
         if snap.exists() {
+            verify_owned(self.root.path(), &snap, &j.owned)
+                .map_err(|_| "the saved pointer is not the file this transaction wrote; it was not put back".to_string())?;
             fs::rename(&snap, &ppath).map_err(|e| format!("cannot put the pointer back: {e}"))?;
         }
         Ok(())
@@ -1117,7 +1416,7 @@ impl<'a> Engine<'a> {
             if entry_kind(&stage) != "folder" {
                 return Err("the staging path is not a plain folder; it was left untouched".to_string());
             }
-            remove_closed_dir(&stage, &["artifact.bin", "artifact.bin.part"])?;
+            remove_verified_dir(self.root.path(), &stage, &j.owned)?;
         }
         Ok(())
     }
@@ -1144,11 +1443,8 @@ impl<'a> Engine<'a> {
                 fs::remove_dir(&vdir).map_err(|e| format!("cannot remove the empty folder: {e}"))?;
             }
             [(name, "file")] if name == "artifact.bin" => {
-                let bytes = fs::read(vdir.join("artifact.bin")).map_err(|e| format!("cannot read the artifact to check it: {e}"))?;
-                if Some(sha256_hex_bytes(&bytes)) != j.artifact_sha256 {
-                    return Err("the artifact no longer is what this transaction wrote; the folder was left untouched".to_string());
-                }
-                remove_closed_dir(&vdir, &["artifact.bin"])?;
+                // identity, links and digest against the journal's manifest, then the file and the (empty) folder
+                remove_verified_dir(self.root.path(), &vdir, &j.owned)?;
             }
             other => {
                 let unexpected: Vec<&(String, &'static str)> =
