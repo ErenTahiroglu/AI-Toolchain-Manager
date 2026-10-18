@@ -1,3 +1,4 @@
+mod adapter;
 mod approval;
 mod archive_check;
 mod audit;
@@ -8,6 +9,7 @@ mod closure_tests;
 mod commands;
 mod crash;
 mod db;
+mod device_trust;
 mod diagnostics;
 mod discovery;
 mod discovery_probe;

@@ -51,6 +51,7 @@ fn kind_of(mode: libc::mode_t) -> Kind {
     }
 }
 
+#[allow(clippy::unnecessary_cast)] // the integer types of `stat` differ between platforms
 fn stat_of(st: &libc::stat) -> Stat {
     Stat {
         kind: kind_of(st.st_mode),

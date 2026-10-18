@@ -179,6 +179,31 @@ pub(crate) mod hook {
     }
 }
 
+/// The judgement behind every verified deletion: a plain file with exactly one link, and (when given) the expected identity, size and
+/// SHA-256 -- all read from the open handle.
+fn verify_expect(file: &mut std::fs::File, stat: &Stat, expect: &Expect) -> Result<(), FsError> {
+    if stat.kind != Kind::File {
+        return Err(FsError::NotFile);
+    }
+    if stat.links != 1 {
+        return Err(FsError::Changed);
+    }
+    if expect.identity.is_some_and(|i| i != stat.identity) {
+        return Err(FsError::Changed);
+    }
+    if expect.size.is_some_and(|s| s != stat.size) {
+        return Err(FsError::Changed);
+    }
+    if let Some(want) = &expect.sha256 {
+        let mut h = FileH { file: file.try_clone().map_err(|e| imp::map_io(&e))? };
+        let (got, _) = h.sha256_bounded(MAX_HASH_BYTES)?;
+        if got != *want {
+            return Err(FsError::Changed);
+        }
+    }
+    Ok(())
+}
+
 /// An open file (regular, created or opened without following links), with bounded helpers.
 pub struct FileH {
     file: std::fs::File,
@@ -321,6 +346,20 @@ impl Dir {
         Ok(out)
     }
 
+    /// Looks at a plain file WITHOUT changing anything: the same judgement as [`Dir::remove_file_verified`], made through an open
+    /// handle. Used to validate a whole set of files before any of them is deleted.
+    pub fn check_file(&self, name: &str, expect: &Expect) -> Result<Stat, FsError> {
+        let mut f = self.open_file(name)?;
+        let stat = f.stat()?;
+        verify_expect(&mut f.file, &stat, expect)?;
+        Ok(stat)
+    }
+
+    /// Opens, reads (bounded) and closes a plain file.
+    pub fn read_file(&self, name: &str, limit: u64) -> Result<Vec<u8>, FsError> {
+        self.open_file(name)?.read_bounded(limit)
+    }
+
     /// Deletes `name` only if it is a plain file that matches `expect`, checked through the very handle used for the deletion.
     /// Windows deletes through that handle; macOS re-confirms `(st_dev, st_ino)` right before `unlinkat`.
     pub fn remove_file_verified(&self, name: &str, expect: &Expect) -> Result<(), FsError> {
@@ -328,26 +367,8 @@ impl Dir {
             return Err(FsError::InvalidName);
         }
         self.imp.remove_file_verified(name, &|file, stat| {
-            if stat.kind != Kind::File {
-                return Err(FsError::NotFile);
-            }
-            if stat.links != 1 {
-                return Err(FsError::Changed);
-            }
-            if expect.identity.is_some_and(|i| i != stat.identity) {
-                return Err(FsError::Changed);
-            }
-            if expect.size.is_some_and(|s| s != stat.size) {
-                return Err(FsError::Changed);
-            }
-            if let Some(want) = &expect.sha256 {
-                let mut h = FileH { file: file.try_clone().map_err(|e| imp::map_io(&e))? };
-                let (got, _) = h.sha256_bounded(MAX_HASH_BYTES)?;
-                if got != *want {
-                    return Err(FsError::Changed);
-                }
-            }
-            Ok(())
+            let mut dup = file.try_clone().map_err(|e| imp::map_io(&e))?;
+            verify_expect(&mut dup, stat, expect)
         })
     }
 

@@ -55,6 +55,12 @@ pub enum Point {
     /// ... the final record is durable.
     SnapshotAfterRecord,
     AfterSnapshot,
+    /// New pointer file (written next to the active one, then renamed over it) and the receipt file: the same discipline.
+    PointerBeforeCreate,
+    PointerAfterCreate,
+    PointerAfterSync,
+    ReceiptAfterCreate,
+    ReceiptAfterSync,
     /// Staged artifact: the same five steps.
     StageBeforeCreate,
     StageAfterCreate,
@@ -123,7 +129,7 @@ pub struct RollbackReport {
 }
 
 impl RollbackReport {
-    fn not_needed() -> RollbackReport {
+    pub(crate) fn not_needed() -> RollbackReport {
         RollbackReport { status: "not_needed".to_string(), undone: vec![], not_undone: vec![], not_covered: vec![] }
     }
 }
@@ -167,7 +173,7 @@ pub enum TxnState {
 }
 
 impl TxnState {
-    fn terminal(self) -> bool {
+    pub(crate) fn terminal(self) -> bool {
         matches!(self, TxnState::Committed | TxnState::RolledBack)
     }
 }
@@ -237,7 +243,7 @@ fn journal_digest(j: &Journal) -> String {
     sha256_hex(&canonical_json(&serde_json::to_value(&blank).unwrap_or(serde_json::Value::Null)))
 }
 
-fn receipt_digest(r: &Receipt) -> String {
+pub(crate) fn receipt_digest(r: &Receipt) -> String {
     let mut blank = r.clone();
     blank.receipt_digest = String::new();
     sha256_hex(&canonical_json(&serde_json::to_value(&blank).unwrap_or(serde_json::Value::Null)))
@@ -754,13 +760,61 @@ pub struct Engine<'a> {
     pub fault: Option<FaultFn<'a>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Pointer {
-    tool: String,
-    version: String,
-    artifact_sha256: String,
-    txn: String,
+pub(crate) struct Pointer {
+    pub(crate) tool: String,
+    pub(crate) version: String,
+    pub(crate) artifact_sha256: String,
+    pub(crate) txn: String,
+}
+
+/// The synthetic-recipe and approval checks shared by the synthetic engine and the isolated test-mode adapter.
+pub(crate) fn check_authority(
+    a: &Authority,
+    action: Action,
+    computer_id: &str,
+    host_platform: &str,
+    now: DateTime<Utc>,
+) -> Result<(), TxnError> {
+    let r = a.recipe.recipe();
+    let ap = a.approval.approval();
+    if !r.synthetic || !r.tool_id.starts_with("synthetic-") {
+        return Err(TxnError::Refused("not_a_synthetic_recipe"));
+    }
+    if ap.action != action
+        || ap.recipe_digest != a.recipe.digest()
+        || ap.tool_id != r.tool_id
+        || ap.version != r.version
+        || ap.computer_id != computer_id
+        || ap.platform_target != host_platform
+        || r.target.platform_target != host_platform
+    {
+        return Err(TxnError::Refused("approval_does_not_match"));
+    }
+    if now >= a.approval.expires_at() {
+        return Err(TxnError::Refused("approval_expired"));
+    }
+    Ok(())
+}
+
+/// The bytes must be exactly what the recipe names AND what the authenticated reference set vouches for on this platform.
+pub(crate) fn check_artifact(refs: &ReferenceSet, host_platform: &str, a: &Authority, bytes: &[u8]) -> Result<String, TxnError> {
+    let r = a.recipe.recipe();
+    let sha = sha256_hex_bytes(bytes);
+    if bytes.len() as u64 != r.artifact.size_bytes || sha != r.artifact.sha256 {
+        return Err(TxnError::Refused("artifact_does_not_match_recipe"));
+    }
+    let format = reference::sniff_reader(&bytes[..bytes.len().min(4096)], bytes.len() as u64, &mut Cursor::new(bytes));
+    if format == ArtifactFormat::Unrecognised || format.as_str() != r.artifact.format {
+        return Err(TxnError::Refused("artifact_format_mismatch"));
+    }
+    let observed = ObservedArtifact { entry_id: &r.tool_id, platform_target: host_platform, format, sha256: &sha };
+    let v = reference::evaluate(&observed, refs);
+    if v.result != MatchResult::MatchesAuthenticated || v.version.as_deref() != Some(r.version.as_str()) {
+        return Err(TxnError::Refused("artifact_not_authenticated_for_this_platform"));
+    }
+    Ok(sha)
 }
 
 impl<'a> Engine<'a> {
@@ -786,43 +840,11 @@ impl<'a> Engine<'a> {
     // ---- authority and preconditions -------------------------------------------------------------------------------
 
     fn authorize(&self, a: &Authority, action: Action) -> Result<(), TxnError> {
-        let r = a.recipe.recipe();
-        let ap = a.approval.approval();
-        if !r.synthetic || !r.tool_id.starts_with("synthetic-") {
-            return Err(TxnError::Refused("not_a_synthetic_recipe"));
-        }
-        if ap.action != action
-            || ap.recipe_digest != a.recipe.digest()
-            || ap.tool_id != r.tool_id
-            || ap.version != r.version
-            || ap.computer_id != self.root.computer_id
-            || ap.platform_target != self.host_platform
-            || r.target.platform_target != self.host_platform
-        {
-            return Err(TxnError::Refused("approval_does_not_match"));
-        }
-        if (self.clock)() >= a.approval.expires_at() {
-            return Err(TxnError::Refused("approval_expired"));
-        }
-        Ok(())
+        check_authority(a, action, &self.root.computer_id, self.host_platform, (self.clock)())
     }
 
     fn check_identity(&self, a: &Authority, bytes: &[u8]) -> Result<String, TxnError> {
-        let r = a.recipe.recipe();
-        let sha = sha256_hex_bytes(bytes);
-        if bytes.len() as u64 != r.artifact.size_bytes || sha != r.artifact.sha256 {
-            return Err(TxnError::Refused("artifact_does_not_match_recipe"));
-        }
-        let format = reference::sniff_reader(&bytes[..bytes.len().min(4096)], bytes.len() as u64, &mut Cursor::new(bytes));
-        if format == ArtifactFormat::Unrecognised || format.as_str() != r.artifact.format {
-            return Err(TxnError::Refused("artifact_format_mismatch"));
-        }
-        let observed = ObservedArtifact { entry_id: &r.tool_id, platform_target: self.host_platform, format, sha256: &sha };
-        let v = reference::evaluate(&observed, self.refs);
-        if v.result != MatchResult::MatchesAuthenticated || v.version.as_deref() != Some(r.version.as_str()) {
-            return Err(TxnError::Refused("artifact_not_authenticated_for_this_platform"));
-        }
-        Ok(sha)
+        check_artifact(self.refs, self.host_platform, a, bytes)
     }
 
     fn read_pointer(&self, tool: &str) -> Result<Option<Pointer>, TxnError> {
@@ -1684,7 +1706,7 @@ impl<'a> Engine<'a> {
     }
 }
 
-fn sha256_hex_bytes(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex_bytes(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
