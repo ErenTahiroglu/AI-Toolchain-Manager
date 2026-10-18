@@ -1,4 +1,5 @@
 mod approval;
+mod archive_check;
 mod audit;
 mod backups;
 mod catalog;
