@@ -1,0 +1,8 @@
+.gitmodules	blob	193b8030465d6545eaf20c0e9eef63fb5ea8df9e
+AUTHORS	blob	93ab6bf9ba5c4313dff3804fa545a1d720866128
+COPYING	blob	c21d3f1645c72de28f3b46f9d8e01f20e0e496c8
+README.md	blob	9ef09cc4f2071afadbe0bdb12a93d77ef710a553
+docs/README.md	blob	133583e83c570f8a9a1c16f24e50538ee466f537
+vendor/decNumber/ICU-license.html	blob	bc99e8bfcce6c313342c35044036f7e6dea440d3
+vendor/decNumber/readme.txt	blob	375623f343ca3326a981a1542dad685837c919ab
+vendor/oniguruma	commit	4ef89209a239c1aea328cf13c05a2807e5c146d1

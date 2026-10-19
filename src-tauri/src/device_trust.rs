@@ -15,6 +15,12 @@
 //! * **audited** before it takes effect: if the audit record cannot be written, nothing is authorized.
 //!
 //! An unkeyed SHA-256 (the Phase 3A `binding`) and a typed confirmation string are tamper evidence, never authentication.
+//!
+//! Phase 3D-1 adds the vocabulary for REAL key stores without enabling one: `KeyProtection` now separates an OS key whose hardware
+//! protection was VERIFIED (`OsProtected`, nothing implements this yet), one the OS merely REPORTS as hardware-backed
+//! (`OsReportedHardware`), and a software-protected OS key (`OsSoftware`). `TrustPolicy::production()` accepts only the first.
+//! A key store may prove user presence by the signing operation itself (`KeyStore::sign_present`, as Windows Hello does); a plain
+//! button click or a flag is never presence.
 #![allow(dead_code)] // test-mode adapter only; no command reaches this module
 
 use crate::{
@@ -27,8 +33,14 @@ use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyProtection {
-    /// A key the operating system protects (DPAPI/CNG, Keychain/Secure Enclave). No implementation exists yet.
+    /// A key the operating system protects (CNG/Windows Hello, Keychain/Secure Enclave) whose HARDWARE protection this program VERIFIED
+    /// (attestation chain checked). No implementation exists yet, so nothing real can be this.
     OsProtected,
+    /// An OS key credential for which the OS REPORTS hardware (TPM) attestation, not validated by this program. Refused by
+    /// [`TrustPolicy::production`]; only a policy the user and the Red Team accept explicitly could take it.
+    OsReportedHardware,
+    /// An OS key credential without hardware attestation (software-protected). Never accepted.
+    OsSoftware,
     /// A test double. Never acceptable to the production policy.
     SoftwareFake,
 }
@@ -36,22 +48,32 @@ pub enum KeyProtection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TrustPolicy {
     accept_fakes: bool,
+    accept_os_reported_hardware: bool,
 }
 
 impl TrustPolicy {
     /// What production will require: an OS-protected key. Fakes are refused.
     pub const fn production() -> TrustPolicy {
-        TrustPolicy { accept_fakes: false }
+        TrustPolicy { accept_fakes: false, accept_os_reported_hardware: false }
     }
 
     /// For the isolated test-mode adapter only.
     pub const fn test_doubles() -> TrustPolicy {
-        TrustPolicy { accept_fakes: true }
+        TrustPolicy { accept_fakes: true, accept_os_reported_hardware: false }
+    }
+
+    /// PROPOSAL for the first Windows pilot, NOT used anywhere: additionally accepts an OS key credential the OS reports as hardware
+    /// backed (Windows Hello with TPM attestation reported). It still refuses fakes and software keys. Whether this is acceptable
+    /// instead of a verified attestation is a decision for the user and the Red Team (docs/phase-3d1/WINDOWS-HELLO-APPROVAL.md).
+    pub const fn pilot_candidate_os_reported_hardware() -> TrustPolicy {
+        TrustPolicy { accept_fakes: false, accept_os_reported_hardware: true }
     }
 
     fn accepts(self, p: KeyProtection) -> bool {
         match p {
             KeyProtection::OsProtected => true,
+            KeyProtection::OsReportedHardware => self.accept_os_reported_hardware,
+            KeyProtection::OsSoftware => false,
             KeyProtection::SoftwareFake => self.accept_fakes,
         }
     }
@@ -101,6 +123,12 @@ pub trait KeyStore {
     fn protection(&self) -> KeyProtection;
     fn sign(&self, message: &[u8]) -> Result<Vec<u8>, TrustError>;
     fn verify(&self, message: &[u8], signature: &[u8]) -> bool;
+    /// Signing that ITSELF demonstrates user presence: the operating system verifies the person (PIN, biometric) as part of the signing
+    /// operation, and no signature exists unless that succeeded. The default says this key store cannot do that. A key store that
+    /// can (Windows Hello) returns `Presence::Confirmed` only when the OS reported a successful user verification for THIS operation.
+    fn sign_present(&self, _message: &[u8]) -> Result<(Vec<u8>, Presence), TrustError> {
+        Err(TrustError::PresenceUnavailable)
+    }
 }
 
 /// What the person is shown when asked to confirm (no paths, no secrets).
@@ -195,6 +223,15 @@ fn unhex(s: &str) -> Option<Vec<u8>> {
     (0..s.len() / 2).map(|i| u8::from_str_radix(&s[2 * i..2 * i + 2], 16).ok()).collect()
 }
 
+/// Where user presence comes from when an approval is issued.
+#[derive(Clone, Copy)]
+pub enum PresenceSource<'a> {
+    /// A separate gate asked first (test doubles; never an OS proof by itself).
+    Separate(&'a dyn PresenceGate),
+    /// The signing operation proves it ([`KeyStore::sign_present`]): no prompt of ours, no flag, no button.
+    SignedByOs,
+}
+
 #[allow(clippy::too_many_arguments)] // the collaborators are separate interfaces on purpose
 /// Issues a device approval from an already-bound Phase 3A approval: the person must be present, the key must sign, the ledger must
 /// record it, and the audit record must be written. Any failure issues nothing.
@@ -204,6 +241,22 @@ pub fn issue(
     effects_digest: &str,
     keys: &dyn KeyStore,
     presence: &dyn PresenceGate,
+    ledger: &dyn ApprovalLedger,
+    audit: &dyn AuditSink,
+    policy: TrustPolicy,
+) -> Result<DeviceApproval, TrustError> {
+    issue_with(approval, artifact_sha256, effects_digest, keys, PresenceSource::Separate(presence), ledger, audit, policy)
+}
+
+#[allow(clippy::too_many_arguments)] // the collaborators are separate interfaces on purpose
+/// [`issue`] with an explicit presence source. With [`PresenceSource::SignedByOs`] presence is whatever the operating system's own
+/// signing operation proved; the signature is also verified against the key before anything is recorded.
+pub fn issue_with(
+    approval: &Approval,
+    artifact_sha256: &str,
+    effects_digest: &str,
+    keys: &dyn KeyStore,
+    presence: PresenceSource,
     ledger: &dyn ApprovalLedger,
     audit: &dyn AuditSink,
     policy: TrustPolicy,
@@ -230,10 +283,12 @@ pub fn issue(
         version: approval.version.clone(),
         platform_target: approval.platform_target.clone(),
     };
-    match presence.confirm(&prompt) {
-        Presence::Confirmed => {}
-        Presence::Declined => return Err(fail(TrustError::NotUserPresent)),
-        Presence::Unavailable => return Err(fail(TrustError::PresenceUnavailable)),
+    if let PresenceSource::Separate(gate) = presence {
+        match gate.confirm(&prompt) {
+            Presence::Confirmed => {}
+            Presence::Declined => return Err(fail(TrustError::NotUserPresent)),
+            Presence::Unavailable => return Err(fail(TrustError::PresenceUnavailable)),
+        }
     }
     let counter = ledger.next_counter().map_err(fail)?;
     let mut d = DeviceApproval {
@@ -245,7 +300,23 @@ pub fn issue(
         presence_confirmed: true,
         signature: String::new(),
     };
-    d.signature = hex(&keys.sign(&payload(&d)).map_err(fail)?);
+    let signature = match presence {
+        PresenceSource::Separate(_) => keys.sign(&payload(&d)).map_err(fail)?,
+        PresenceSource::SignedByOs => {
+            // The claimed presence is part of the signed payload, but it counts only because a signature exists: the OS signs only
+            // after it verified the person, and a decline or an unavailable verifier yields no signature at all.
+            let (sig, p) = keys.sign_present(&payload(&d)).map_err(fail)?;
+            match p {
+                Presence::Confirmed => sig,
+                Presence::Declined => return Err(fail(TrustError::NotUserPresent)),
+                Presence::Unavailable => return Err(fail(TrustError::PresenceUnavailable)),
+            }
+        }
+    };
+    if !keys.verify(&payload(&d), &signature) {
+        return Err(fail(TrustError::SignatureInvalid)); // our own check: never record an approval its own key does not verify
+    }
+    d.signature = hex(&signature);
     ledger.record_issue(&approval.approval_id, counter).map_err(fail)?;
     audit.record(rec("issued", None))?;
     Ok(d)

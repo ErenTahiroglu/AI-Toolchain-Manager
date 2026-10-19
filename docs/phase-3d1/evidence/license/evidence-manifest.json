@@ -1,0 +1,155 @@
+{
+  "note": "Public texts fetched read-only from api.github.com behind tools/egress_guard.py on 2026-10-19; refs resolved to commits: jqlang/jq 34f7186b86743a083a589741b6cea95293524108, kkos/oniguruma 4ef89209a239c1aea328cf13c05a2807e5c146d1; mingw-w64/mingw-w64 and gcc-mirror/gcc and msys2/MINGW-packages resolved from master at fetch time (see source fields).",
+  "files": [
+    {
+      "file": "jq-COPYING.txt",
+      "bytes": 7887,
+      "sha256": "ad2b4a266b2268939c1446979759706077421cf906a203aa188c6f396e8cfd74",
+      "source": "jqlang/jq COPYING @ 34f7186b86743a083a589741b6cea95293524108"
+    },
+    {
+      "file": "jq-tree-license-like-paths.txt",
+      "bytes": 501,
+      "sha256": "9f43192f2d7484a2a621f97a64097e8960a44dba128d74779dcdf35ff0ed5bb8",
+      "source": "git tree of jqlang/jq@34f7186b86743a083a589741b6cea95293524108, license-like paths and submodules"
+    },
+    {
+      "file": "jq-gitmodules.txt",
+      "bytes": 101,
+      "sha256": "76ee60a2ef4d6a2d81b37b1fe56c49f6b245df3bd0220d538d87583881b2964b",
+      "source": "jqlang/jq .gitmodules @ 34f7186b86743a083a589741b6cea95293524108"
+    },
+    {
+      "file": "jq-ci.yml.txt",
+      "bytes": 12911,
+      "sha256": "205d0d7da645af7b402dcfb7270e1d1ed0a4c92fb181923d602b73392e0c509f",
+      "source": "jqlang/jq .github/workflows/ci.yml @ 34f7186b86743a083a589741b6cea95293524108"
+    },
+    {
+      "file": "jq-src-notice-scan.json",
+      "bytes": 25462,
+      "sha256": "f074b491779e75b61ec9e8002842d060540379e0f6e1309080640a05334787e8",
+      "source": "scan of jqlang/jq@34f7186b86743a083a589741b6cea95293524108"
+    },
+    {
+      "file": "jq-decNumber-readme.txt",
+      "bytes": 2801,
+      "sha256": "52c03bd4e4dc7645760c80fa35c7843bb8d7c283729f612255b3bb9488c92d7d",
+      "source": "jqlang/jq vendor/decNumber/readme.txt @ 34f7186b86743a083a589741b6cea95293524108",
+      "originalSha256": "67e6c7036abc5ef35b912caa5c96dccdb16349676e233a6bc15097b5bbdfb020",
+      "originalBytes": 2882,
+      "note": "line endings normalised CRLF -> LF because the repository stores text as LF (.gitattributes); originalSha256 is the hash of the bytes as published upstream"
+    },
+    {
+      "file": "jq-decNumber-ICU-license.html.txt",
+      "bytes": 1977,
+      "sha256": "cfa9e02443fa22a5188409de1701e65927e49fe13faf6bb216c087f65fc7ea1f",
+      "source": "jqlang/jq vendor/decNumber/ICU-license.html @ 34f7186b86743a083a589741b6cea95293524108",
+      "originalSha256": "6173f8134932a9a7d0253d49116733e4035ed119f90b2318e76ade4f000a2c94",
+      "originalBytes": 2022,
+      "note": "line endings normalised CRLF -> LF because the repository stores text as LF (.gitattributes); originalSha256 is the hash of the bytes as published upstream"
+    },
+    {
+      "file": "onig-COPYING.txt",
+      "bytes": 1340,
+      "sha256": "70ba5469ea0bab6e18a32d7009068f996503168d27be57747e08da34337ff26f",
+      "source": "kkos/oniguruma COPYING @ 4ef89209a239c1aea328cf13c05a2807e5c146d1"
+    },
+    {
+      "file": "onig-license-like-paths.txt",
+      "bytes": 48,
+      "sha256": "806945a9414124e47ec6fe6f7491f2df61b328a0b9cbbf6fe2fd7c1c7f8379ba",
+      "source": "kkos/oniguruma tree @ 4ef89209a239c1aea328cf13c05a2807e5c146d1"
+    },
+    {
+      "file": "onig-src-notice-scan.json",
+      "bytes": 34060,
+      "sha256": "081ecfe39b9d2ba43867f41969972c9d6945ab7f3995240106917dbe612c8ef3",
+      "source": "scan of kkos/oniguruma@4ef89209a239c1aea328cf13c05a2807e5c146d1"
+    },
+    {
+      "file": "mingw-w64-COPYING.txt",
+      "bytes": 2326,
+      "sha256": "99a69660981156c21336fdb5661f89341b013c94e4bf9e1c7467b4745718397f",
+      "source": "mingw-w64/mingw-w64 COPYING @ b13721ccf8ba8da2441e059e536f91992109510b"
+    },
+    {
+      "file": "mingw-w64-COPYING.MinGW-w64.txt",
+      "bytes": 5905,
+      "sha256": "f38e6194bd3bfa1b654f118e5acefe0aead437bbe669eee43957ccc65a7127f1",
+      "source": "mingw-w64/mingw-w64 COPYING.MinGW-w64/COPYING.MinGW-w64.txt @ b13721ccf8ba8da2441e059e536f91992109510b"
+    },
+    {
+      "file": "mingw-w64-COPYING.MinGW-w64-runtime.txt",
+      "bytes": 12155,
+      "sha256": "1db8da07b436c68833c0673ffee3d9fcb2526047f3820b81661865dfedc79a1f",
+      "source": "mingw-w64/mingw-w64 COPYING.MinGW-w64-runtime/COPYING.MinGW-w64-runtime.txt @ b13721ccf8ba8da2441e059e536f91992109510b"
+    },
+    {
+      "file": "winpthreads-COPYING.txt",
+      "bytes": 2883,
+      "sha256": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177",
+      "source": "mingw-w64/mingw-w64 mingw-w64-libraries/winpthreads/COPYING @ b13721ccf8ba8da2441e059e536f91992109510b"
+    },
+    {
+      "file": "mingw-w64-license-like-paths.txt",
+      "bytes": 382,
+      "sha256": "0fb6c67d8a5db6a339c5685eae6f810812a8d606003a61d5c9885de3f6e96b94",
+      "source": "mingw-w64/mingw-w64 tree @ b13721ccf8ba8da2441e059e536f91992109510b"
+    },
+    {
+      "file": "gcc-COPYING.RUNTIME.txt",
+      "bytes": 3324,
+      "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74",
+      "source": "gcc-mirror/gcc COPYING.RUNTIME @ 1f5598376a1bff9d4ae17d1b66d6cf9cacaebb00"
+    },
+    {
+      "file": "msys2-mingw-w64-gcc-PKGBUILD-license-lines.txt",
+      "bytes": 389,
+      "sha256": "357f67ceccfd4b618df16d763f949f8b3d7a8fe494a8f8cc72675f9edd7ac1c9",
+      "source": "msys2/MINGW-packages mingw-w64-gcc/PKGBUILD @ fb1bee30b4f11cf4b857197a288466afad49033a (only the license/name/version lines)"
+    },
+    {
+      "file": "pe-static.json",
+      "bytes": 5983,
+      "sha256": "587b3a42e275506eb6d5d9c519f3bfb1188fd788eeeb42d0ccb88f6636616030",
+      "source": "static analysis of the retained jq-windows-amd64.exe bytes (never executed)"
+    },
+    {
+      "file": "guard-report-1.json",
+      "bytes": 617,
+      "sha256": "1b142afd47570ec02ba74d2d006009c8f64d11ebc715443a38706afa7ba0c1c6",
+      "source": "egress guard report, research round 1 (api.github.com only)"
+    },
+    {
+      "file": "guard-report-2.json",
+      "bytes": 621,
+      "sha256": "5b174f4dfdedc39352b410b835bcb3fad52a96f4da4fc22e4b7769dbc3331827",
+      "source": "egress guard report, research round 2 (api.github.com only)"
+    },
+    {
+      "file": "guard-report-3.json",
+      "bytes": 616,
+      "sha256": "498387e38c2dea5c48610020400e2cff10925315f98c4f62387144e756a94366",
+      "source": "egress guard report, source excerpts (api.github.com only)"
+    },
+    {
+      "file": "guard-report-4.json",
+      "bytes": 616,
+      "sha256": "dadf911df50f0cb498f56f114cb0772fe537de2fd57ea22f13da749f7f797f22",
+      "source": "egress guard report, parser header (api.github.com only)"
+    },
+    {
+      "file": "source-excerpts-1.txt",
+      "bytes": 3195,
+      "sha256": "70a4bc4c91b9388905986862ce5af9e8c2f6b2309e45329c1c59c0634eb26e28",
+      "source": "excerpts: jq src/jv.c MurmurHash note, Oniguruma st.c / cp1251.c / euc_jp_prop.c heads"
+    },
+    {
+      "file": "source-excerpts-2.txt",
+      "bytes": 2099,
+      "sha256": "eaf72f192835c0006f7aadcdad09a57f65ef4ba35f9f3a0f7b9fd586c118124a",
+      "source": "excerpt: jq src/parser.c header (Bison exception)"
+    }
+  ]
+}

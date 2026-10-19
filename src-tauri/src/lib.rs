@@ -1,11 +1,14 @@
 mod adapter;
 mod approval;
+mod approval_store;
 mod archive_check;
 mod audit;
 mod backups;
 mod catalog;
 #[cfg(test)]
 mod closure_tests;
+#[cfg(windows)]
+mod cng_verify;
 mod commands;
 mod crash;
 mod db;
@@ -21,6 +24,8 @@ mod lifecycle;
 mod managed_fs;
 mod managed_fs_probe;
 mod managed_root;
+mod os_approval;
+mod os_hello;
 mod plan;
 mod projects;
 mod recipe;

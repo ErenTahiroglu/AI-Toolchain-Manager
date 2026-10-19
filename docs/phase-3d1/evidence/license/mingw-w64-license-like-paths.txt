@@ -1,0 +1,11 @@
+COPYING
+COPYING.MinGW-w64-runtime/COPYING.MinGW-w64-runtime.txt
+COPYING.MinGW-w64/COPYING.MinGW-w64.txt
+mingw-w64-crt/profile/COPYING
+mingw-w64-libraries/libmangle/COPYING
+mingw-w64-libraries/pseh/COPYING
+mingw-w64-libraries/winpthreads/COPYING
+mingw-w64-libraries/winstorecompat/COPYING
+mingw-w64-tools/gendef/COPYING
+mingw-w64-tools/genidl/COPYING
+mingw-w64-tools/genpeimg/COPYING

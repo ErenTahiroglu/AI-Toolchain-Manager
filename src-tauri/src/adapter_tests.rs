@@ -1625,3 +1625,321 @@ fn the_adapter_never_asks_for_an_unrestricted_overwrite() {
         "journal write, pointer switch, pointer restore: nothing else may overwrite"
     );
 }
+
+// =====================================================================================================================================
+// Phase 3D-1: the SYNTHETIC pilot rehearsal. The adapter is driven exactly the way a first real pilot would drive it, but with
+// made-up bytes and FAKE approval credentials: the durable approval ledger and append-only audit journal are real (a SQLite file),
+// the approval key is a fake OS credential backend that proves presence through its signing operation, and nothing is downloaded,
+// started or installed. It is a rehearsal, not a real jq installation.
+// =====================================================================================================================================
+
+use crate::{
+    approval_store::{self, ApprovalStore},
+    device_trust::PresenceSource,
+    os_approval::{self, fakes::FakeOsBackend, Assurance, OsKeyStore},
+};
+
+struct Rehearsal {
+    l: Lab,
+    _ledger_dir: tempfile::TempDir,
+    ledger_path: PathBuf,
+    store: ApprovalStore,
+    backend: FakeOsBackend,
+}
+
+fn rehearsal() -> Rehearsal {
+    let l = lab_in("rehearsal");
+    let dir = tempfile::tempdir().unwrap();
+    let ledger_path = dir.path().join(approval_store::FILE_NAME);
+    let store = ApprovalStore::open(&ledger_path).unwrap();
+    let backend = FakeOsBackend::new(Assurance::Fake);
+    // the person explicitly enables approval security, then the (fake) credential service creates the key once
+    store.enable_approval_security(COMPUTER, &approval_store::enable_phrase(COMPUTER)).unwrap();
+    os_approval::provision(&store, &backend, COMPUTER, "atm-approval-rehearsal").unwrap();
+    Rehearsal { l, _ledger_dir: dir, ledger_path, store, backend }
+}
+
+impl Rehearsal {
+    fn with_adapter<T>(&self, fault: Option<FaultFn>, f: impl FnOnce(&Adapter, &OsKeyStore) -> T) -> T {
+        let keys = OsKeyStore::open(&self.store, &self.backend, &self.backend).unwrap();
+        let c = clock();
+        let a = Adapter::test_mode(
+            &self.l.root,
+            &self.l.refs,
+            this_platform(),
+            &c,
+            fault,
+            Trust { keys: &keys, ledger: &self.store, audit: &self.store, policy: TrustPolicy::test_doubles() },
+        );
+        f(&a, &keys)
+    }
+
+    /// Phase 3A approval + a device approval whose presence was proven by the (fake) OS signing operation.
+    fn auth(&self, f: &Fx, action: Action, from: Option<&str>) -> Auth {
+        let a = make_approval(f, action, from, COMPUTER, t0());
+        let v = verified(f, &a, action, from, COMPUTER, t0());
+        let keys = OsKeyStore::open(&self.store, &self.backend, &self.backend).unwrap();
+        let dev = device_trust::issue_with(
+            &a,
+            &f.valid.recipe().artifact.sha256,
+            &f.valid.permissions_digest(),
+            &keys,
+            PresenceSource::SignedByOs,
+            &self.store,
+            &self.store,
+            TrustPolicy::test_doubles(),
+        )
+        .unwrap();
+        (v, dev)
+    }
+
+    fn install_with(&self, f: &Fx, auth: &Auth, fault: Option<FaultFn>) -> R<Outcome> {
+        self.with_adapter(fault, |a, _| a.install(&Authority { recipe: &f.valid, approval: &auth.0 }, &auth.1, &f.sc.bytes))
+    }
+
+    fn install(&self, f: &Fx, fault: Option<FaultFn>) -> R<Outcome> {
+        let auth = self.auth(f, Action::Install, None);
+        self.install_with(f, &auth, fault)
+    }
+
+    fn update(&self, f: &Fx, from: &str, fault: Option<FaultFn>) -> R<Outcome> {
+        let (v, dev) = self.auth(f, Action::Update, Some(from));
+        self.with_adapter(fault, |a, _| a.update(&Authority { recipe: &f.valid, approval: &v }, &dev, &f.sc.bytes))
+    }
+
+    fn uninstall(&self, f: &Fx, fault: Option<FaultFn>) -> R<Outcome> {
+        let (v, dev) = self.auth(f, Action::Uninstall, None);
+        self.with_adapter(fault, |a, _| a.uninstall(&Authority { recipe: &f.valid, approval: &v }, &dev))
+    }
+
+    /// Every file below the managed root with its content digest: "nothing changed" means this is equal.
+    fn tree(&self) -> Vec<(String, String)> {
+        fn walk(dir: &std::path::Path, base: &std::path::Path, out: &mut Vec<(String, String)>) {
+            if let Ok(rd) = fs::read_dir(dir) {
+                for e in rd.flatten() {
+                    let p = e.path();
+                    if p.is_dir() {
+                        walk(&p, base, out);
+                    } else {
+                        let rel = p.strip_prefix(base).unwrap().to_string_lossy().replace('\\', "/");
+                        out.push((rel, crate::synthetic::sha256_of(&fs::read(&p).unwrap_or_default())));
+                    }
+                }
+            }
+        }
+        let mut v = Vec::new();
+        walk(&self.l.root_path(), &self.l.root_path(), &mut v);
+        v.sort();
+        v
+    }
+
+    fn user_files(&self) -> Vec<(String, String)> {
+        self.tree().into_iter().filter(|(p, _)| p.starts_with("data/")).collect()
+    }
+
+    fn ledger_rows(&self) -> Vec<(String, String)> {
+        let c = rusqlite::Connection::open(&self.ledger_path).unwrap();
+        let mut st = c.prepare("SELECT approval_id, status FROM approvals ORDER BY counter").unwrap();
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|r| r.unwrap()).collect()
+    }
+
+    fn assert_trust_is_consistent(&self) {
+        let events = self.store.audit_events().unwrap();
+        assert_eq!(self.store.verify_audit_chain(), Ok(events.len()), "the audit chain verifies");
+        let consumed = self.ledger_rows().iter().filter(|(_, s)| s == "consumed").count();
+        let authorized = events.iter().filter(|e| e.0 == "approval_use" && e.1 == "authorized").count();
+        assert_eq!(consumed, authorized, "every consumption was audited first, and nothing was consumed unaudited");
+    }
+}
+
+fn seed_user_data(r: &Rehearsal) {
+    for (rel, data) in [
+        (format!("data/{TOOL}/settings.db"), &b"the user data of the tool"[..]),
+        ("data/another-tool/keep.txt".to_string(), &b"unrelated tool data"[..]),
+    ] {
+        let p = r.l.p(&rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, data).unwrap();
+    }
+}
+
+#[test]
+fn the_full_synthetic_pilot_rehearsal_runs_from_preflight_to_recovery_and_touches_nothing_unrelated() {
+    let r = rehearsal();
+    seed_user_data(&r);
+    let user_before = r.user_files();
+    assert_eq!(user_before.len(), 2);
+    let v1 = &r.l.v1;
+
+    // 1. preflight: offline, changes nothing, creates no journal and consumes no approval
+    let before = r.tree();
+    let pre_approval = make_approval(v1, Action::Install, None, COMPUTER, t0());
+    let v = verified(v1, &pre_approval, Action::Install, None, COMPUTER, t0());
+    let pf = r
+        .with_adapter(None, |a, _| a.preflight(&Authority { recipe: &v1.valid, approval: &v }, Action::Install, Some(&v1.sc.bytes)))
+        .unwrap();
+    assert!(!pf.already_applied && pf.installed_version.is_none());
+    assert_eq!(pf.artifact_sha256.as_deref(), Some(v1.valid.recipe().artifact.sha256.as_str()));
+    assert_eq!(r.tree(), before, "preflight changed nothing");
+    assert!(r.ledger_rows().is_empty(), "preflight consumed and issued nothing");
+
+    // 2-3. the reviewed recipe and its canonical plan (the plan itself is not an approval)
+    assert_eq!(v1.valid.digest().len(), 64);
+    assert!(v1.plan.eligibility.blockers.iter().any(|b| b.code == "user_approval_missing"));
+
+    // 4. approval: Phase 3A binding + a device approval proven present by the signing operation; ledger and audit are durable
+    let auth = r.auth(v1, Action::Install, None);
+    assert!(auth.1.presence_confirmed);
+    assert_eq!(r.ledger_rows(), vec![(auth.1.approval.approval_id.clone(), "issued".to_string())]);
+
+    // 5-7. file-system preparation, atomic activation and the receipt, in one transaction
+    let out = r.install_with(v1, &auth, None).unwrap();
+    assert!(!out.already_applied && out.receipt.synthetic);
+    assert_eq!((out.receipt.action, out.receipt.to_version.as_deref()), (Action::Install, Some("1.0.0")));
+    assert_eq!(out.receipt.kept, vec!["user_data".to_string()]);
+    assert_eq!(r.l.artifact_of("1.0.0").unwrap(), v1.sc.bytes);
+    assert_eq!(r.l.files("receipts").len(), 1);
+    r.l.assert_clean();
+    assert_eq!(r.ledger_rows(), vec![(auth.1.approval.approval_id.clone(), "consumed".to_string())]);
+    // presenting the same, used device approval again while the state already matches is an idempotent no-op (nothing can change)
+    let replay_same_state = r.install_with(v1, &auth, None).unwrap();
+    assert!(replay_same_state.already_applied && replay_same_state.receipt == out.receipt);
+    let restarted = ApprovalStore::open(&r.ledger_path).unwrap();
+    assert_eq!(
+        restarted.status(&auth.1.approval.approval_id).unwrap(),
+        Some(device_trust::LedgerStatus::Consumed { txn_id: out.receipt.txn_id.clone() })
+    );
+
+    // 8. idempotence: a fresh, valid approval for the same state changes nothing and returns the same receipt
+    let tree_installed = r.tree();
+    let again = r.install(v1, None).unwrap();
+    assert!(again.already_applied && again.receipt == out.receipt);
+    assert_eq!(r.tree(), tree_installed, "idempotent: not a byte changed");
+
+    // 9. rollback: a failed update (injected at the moment the pointer has switched) puts version 1 back byte-for-byte
+    let pointer = fs::read(r.l.p(&format!("state/{TOOL}.json"))).unwrap();
+    let (code, report) = failed(r.update(&r.l.v2, "1.0.0", Some(&at(Point::AfterPointerSwitch, Fault::Fail))));
+    assert_eq!(code, "injected_failure");
+    assert!(matches!(report.status.as_str(), "restored" | "not_needed") && report.not_undone.is_empty(), "{report:?}");
+    assert_eq!(r.l.active().as_deref(), Some("1.0.0"));
+    assert_eq!(fs::read(r.l.p(&format!("state/{TOOL}.json"))).unwrap(), pointer);
+    let after_rollback: Vec<_> = r.tree().into_iter().filter(|(p, _)| !p.starts_with("journal/")).collect();
+    let installed_wo_journal: Vec<_> = tree_installed.iter().filter(|(p, _)| !p.starts_with("journal/")).cloned().collect();
+    assert_eq!(after_rollback, installed_wo_journal, "the rolled-back update left no trace except its journal record");
+    let update_ok = r.update(&r.l.v2, "1.0.0", None).unwrap();
+    assert_eq!(update_ok.receipt.to_version.as_deref(), Some("2.0.0"));
+
+    // 10. uninstall: the tool's program and pointer go, its user data stays
+    let un = r.uninstall(&r.l.v2, None).unwrap();
+    assert_eq!(un.receipt.action, Action::Uninstall);
+    assert_eq!(r.l.active(), None);
+    assert!(!r.l.p(&format!("versions/{TOOL}")).exists());
+    assert_eq!(r.user_files(), user_before, "user data of every tool is byte-identical");
+    // single use where it matters: the used install approval cannot be replayed to install again once the state has moved on
+    assert!(r.install_with(v1, &auth, None).is_err(), "a consumed approval cannot start a new transaction");
+    assert_eq!(r.l.active(), None);
+
+    // 11. recovery: a crash in the middle of a fresh install is recovered, repeatedly, to a consistent state
+    let crashed = r.install(v1, Some(&at(Point::AfterPointerSwitch, Fault::Crash)));
+    assert!(matches!(crashed, Err(TxnError::Interrupted(Point::AfterPointerSwitch))));
+    assert!(matches!(r.install(v1, None), Err(TxnError::Busy)), "a stale lock blocks new work until recovery");
+    let rec = r.with_adapter(None, |a, _| a.recover()).unwrap();
+    assert!(matches!(&rec[..], [Recovered::RolledBack(_)]), "{rec:?}");
+    assert_eq!(r.l.active(), None);
+    assert!(r.with_adapter(None, |a, _| a.recover()).unwrap().is_empty(), "recovery is idempotent");
+    r.l.assert_clean();
+    assert!(r.install(v1, None).is_ok(), "and the tool can be installed again afterwards");
+
+    // the end: nothing unrelated changed, and the trust trail is whole
+    assert_eq!(r.user_files(), user_before);
+    assert_eq!(fs::read(r.l.base.join("canary.txt")).unwrap(), b"untouched");
+    assert!(r.l.journals().iter().all(|j| j.state.terminal()));
+    r.assert_trust_is_consistent();
+    let rows = r.ledger_rows();
+    let mut ids: Vec<&String> = rows.iter().map(|x| &x.0).collect();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), rows.len(), "every approval id was issued once");
+    // presence was demanded of the (fake) OS operation once for the key and once per issued approval: nothing was approved silently
+    assert_eq!(r.backend.prompts.load(std::sync::atomic::Ordering::SeqCst), 1 + rows.len());
+}
+
+#[test]
+fn a_fault_at_any_point_through_the_durable_trust_path_rolls_back_and_a_used_approval_never_works_twice() {
+    for &point in FRESH_POINTS {
+        let r = rehearsal();
+        seed_user_data(&r);
+        let user_before = r.user_files();
+        let auth = r.auth(&r.l.v1, Action::Install, None);
+        let result = r.install_with(&r.l.v1, &auth, Some(&at(point, Fault::Fail)));
+        let (code, report) = failed(result);
+        assert_eq!(code, "injected_failure", "{point:?}");
+        assert!(matches!(report.status.as_str(), "restored" | "not_needed") && report.not_undone.is_empty(), "{point:?}: {report:?}");
+        assert_eq!(r.l.active(), None, "{point:?}");
+        assert!(r.l.files("receipts").is_empty() && r.l.files("state").is_empty(), "{point:?}");
+        r.l.assert_clean();
+        assert_eq!(r.user_files(), user_before, "{point:?}");
+        // the approval is consumed by the failed transaction (before the first change): it is not a free retry
+        let status = r.store.status(&auth.1.approval.approval_id).unwrap();
+        if matches!(status, Some(device_trust::LedgerStatus::Consumed { .. })) {
+            assert!(r.install_with(&r.l.v1, &auth, None).is_err(), "{point:?}: no replay of a consumed approval");
+        }
+        // a NEW approval (a new, present person) installs fine
+        assert!(r.install(&r.l.v1, None).is_ok(), "{point:?}");
+        r.assert_trust_is_consistent();
+    }
+}
+
+#[test]
+fn a_crash_at_any_point_through_the_durable_trust_path_is_recovered_and_the_ledger_stays_consistent() {
+    for &point in FRESH_POINTS {
+        if ambiguous_window(point) {
+            continue; // covered by the Phase 3C orphan-resolution tests; needs the owner's explicit resolution
+        }
+        let r = rehearsal();
+        seed_user_data(&r);
+        let user_before = r.user_files();
+        let crashed = r.install(&r.l.v1, Some(&at(point, Fault::Crash)));
+        assert!(matches!(crashed, Err(TxnError::Interrupted(p)) if p == point), "{point:?}: {crashed:?}");
+        let out = r.with_adapter(None, |a, _| a.recover()).unwrap();
+        assert_eq!(out.len(), 1, "{point:?}: {out:?}");
+        assert_eq!(r.l.active().is_some(), rolls_forward(point), "{point:?}");
+        r.l.assert_clean();
+        assert_eq!(r.user_files(), user_before, "{point:?}");
+        assert!(r.with_adapter(None, |a, _| a.recover()).unwrap().is_empty());
+        r.assert_trust_is_consistent();
+        // restart: the durable ledger still knows the consumed approval
+        let reopened = ApprovalStore::open(&r.ledger_path).unwrap();
+        let consumed = reopened.audit_events().unwrap().iter().filter(|e| e.0 == "approval_use" && e.1 == "authorized").count();
+        assert!(consumed <= 1, "{point:?}");
+    }
+}
+
+#[test]
+fn the_rehearsal_cannot_authorize_the_production_adapter_and_a_wrong_device_approval_changes_nothing() {
+    let r = rehearsal();
+    seed_user_data(&r);
+    let before = r.tree();
+    // the production adapter refuses everything, whatever approval it is shown
+    let auth = r.auth(&r.l.v1, Action::Install, None);
+    let keys = OsKeyStore::open(&r.store, &r.backend, &r.backend).unwrap();
+    let c = clock();
+    let prod = Adapter::production(
+        &r.l.root,
+        &r.l.refs,
+        this_platform(),
+        &c,
+        Trust { keys: &keys, ledger: &r.store, audit: &r.store, policy: TrustPolicy::production() },
+    );
+    assert_eq!(
+        refused(prod.install(&Authority { recipe: &r.l.v1.valid, approval: &auth.0 }, &auth.1, &r.l.v1.sc.bytes)),
+        "production_adapter_not_enabled"
+    );
+    assert_eq!(r.tree(), before);
+    // a device approval issued for another recipe version cannot install this one
+    let other = r.auth(&r.l.v2, Action::Install, None);
+    let wrong = r.with_adapter(None, |a, _| a.install(&Authority { recipe: &r.l.v1.valid, approval: &auth.0 }, &other.1, &r.l.v1.sc.bytes));
+    assert!(matches!(wrong, Err(TxnError::Refused(_))), "{wrong:?}");
+    assert_eq!(r.l.active(), None);
+    assert_eq!(r.l.files("receipts").len(), 0);
+}

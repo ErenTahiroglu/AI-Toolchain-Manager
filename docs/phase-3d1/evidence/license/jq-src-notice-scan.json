@@ -1,0 +1,1064 @@
+[
+ {
+  "path": "src/builtin.c",
+  "bytes": 66139,
+  "sha256": "0a29617dbf74a6fdabf644f5da82269113fef69bb46efaa3b232515d90305342",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/builtin.h",
+  "bytes": 428,
+  "sha256": "8209acae8137d401e646a509c5c21481547de06b39b8d0597285fe56b2701354",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/builtin.jq",
+  "bytes": 9631,
+  "sha256": "b8a5fd9579be9b51c9a04e6620f8c1655539aa57eea33a84e202a8dea401f2a4",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/bytecode.c",
+  "bytes": 4740,
+  "sha256": "240d60fd0a62588066e13eb7e2961ce341338a33aea14c2e4b91c5be90d2e8bb",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/bytecode.h",
+  "bytes": 1755,
+  "sha256": "503a25b451dd8f5881e3aaf4d60af65f0aae2b2cba69a48ea61be386f5aea2dc",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/compile.c",
+  "bytes": 44648,
+  "sha256": "4ac446f5e38ad723e83cf763a9b7841a38ffdbf995dcf176e69d31ea6eaaa8c8",
+  "licenseLikeLines": [
+   [
+    1031,
+    "* this sequence.  If that code raises an exception, then TRY_END will wrap"
+   ],
+   [
+    1032,
+    "* and re-raise that exception, and TRY_BEGIN will unwrap and re-raise the"
+   ],
+   [
+    1033,
+    "* exception (see jq_next())."
+   ],
+   [
+    1035,
+    "* If <exp> raises then the TRY_BEGIN will see a non-wrapped exception and"
+   ],
+   [
+    1039,
+    "* this case, so if the handler raises an exception, or code past the handler"
+   ],
+   [
+    1040,
+    "* raises an exception, then that exception won't be wrapped and re-raised,"
+   ]
+  ]
+ },
+ {
+  "path": "src/compile.h",
+  "bytes": 3711,
+  "sha256": "77080169fa80ca9bdd6ab26f781a6b643258870534cbddf59d52ab792085c335",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/exec_stack.h",
+  "bytes": 3571,
+  "sha256": "08092864ce27c09ceb3788813a3d9c056aa9130eb513558e30865356a8d7c9a8",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/execute.c",
+  "bytes": 36713,
+  "sha256": "8069c06b05f5220a705977f612ae79557e272fba22bd4fc92e69e35a04ad5a16",
+  "licenseLikeLines": [
+   [
+    885,
+    "// `try EXP ...` exception caught in EXP"
+   ]
+  ]
+ },
+ {
+  "path": "src/inject_errors.c",
+  "bytes": 2858,
+  "sha256": "0f20ba17336fc934dc2c81f99d35c5077b197fd77ab068f2cd389cefe20f8c0d",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/jq.h",
+  "bytes": 2550,
+  "sha256": "976689e8c3dc0b4b7d7bba50dc560277c638694681a356be61ae93787b335f8d",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/jq_parser.h",
+  "bytes": 208,
+  "sha256": "c1913f6d74642ae91113653acb3defbd46482f708a80c309f98a7cb1e44f0483",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/jq_test.c",
+  "bytes": 22279,
+  "sha256": "97977a8e8672e2d8c04b02b73aec0f39e390ec09ffc6e16ad32651c8c8b90598",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/jv.c",
+  "bytes": 57720,
+  "sha256": "a40433614bcf7e344a4256c4aaab7acd4ff3fd09b04e3caefd4e3eb102cbacc2",
+  "licenseLikeLines": [
+   [
+    2,
+    "* Portions Copyright (c) 2016 Kungliga Tekniska H\u00f6gskolan"
+   ],
+   [
+    4,
+    "* All rights reserved."
+   ],
+   [
+    6,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    10,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ],
+   [
+    17,
+    "* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS"
+   ],
+   [
+    21,
+    "* COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,"
+   ],
+   [
+    1247,
+    "in the public domain. */"
+   ]
+  ]
+ },
+ {
+  "path": "src/jv.h",
+  "bytes": 10680,
+  "sha256": "5b3cfa6962768d38a2f205fb51ff3a01aac2a4e5b4136f80fbe795b1e70bc46f",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/jv_alloc.c",
+  "bytes": 4471,
+  "sha256": "5d12924a46e282ea034971432e4598ed249ebf94079750355f97b8daa3db5e59",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/jv_alloc.h",
+  "bytes": 396,
+  "sha256": "f81b21241419331ecbf5ea4298a8947fed87931395641071cbd9694f714d058b",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/jv_aux.c",
+  "bytes": 25365,
+  "sha256": "fb7a4fff8f89ba06e8b9bab4c8047e5f118d971d790060388e028811f6d42cb2",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/jv_dtoa.c",
+  "bytes": 88819,
+  "sha256": "93512a115bb86140a378c118d832d6b35f03d93e50d350500edb213502440f0f",
+  "licenseLikeLines": [
+   [
+    6,
+    "* Copyright (c) 1991, 2000, 2001 by Lucent Technologies."
+   ],
+   [
+    44,
+    "* Point Numbers Accurately\" [Proc. ACM SIGPLAN '90, pp. 92-101]."
+   ],
+   [
+    3439,
+    "* Guy L. Steele, Jr. and Jon L. White [Proc. ACM SIGPLAN '90, pp. 112-126]."
+   ],
+   [
+    4185,
+    "* Copyright (c) 1991, 1996 by Lucent Technologies."
+   ]
+  ]
+ },
+ {
+  "path": "src/jv_dtoa.h",
+  "bytes": 603,
+  "sha256": "e78b44bc56f0e9b3c65acd8703b5e0a20dad2b497a15fa2daee08c9472b4d72b",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/jv_dtoa_tsd.c",
+  "bytes": 1305,
+  "sha256": "8da8837721354c03555b7a13f3f4cf62849a6d0995eb5c2dd83b831f5f5e3afb",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/jv_dtoa_tsd.h",
+  "bytes": 100,
+  "sha256": "48b40d50f36e6aa75ac4cd1b76639b0fb1f0b284ebd21098d91deb62a4bbd76d",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/jv_file.c",
+  "bytes": 2413,
+  "sha256": "8477300403e71ca87b65b8fcd340d63f2a35e8a0498157bde70edc5c26ac2d4c",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/jv_parse.c",
+  "bytes": 27527,
+  "sha256": "3ba36daee76f99543761f1fe6a6f1d261e6ecfecb8578136cd32c76d093ff40b",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/jv_print.c",
+  "bytes": 13112,
+  "sha256": "fc5e327477da85691f79c186507da754b520c77883f8da31a2d8ed63a0a51b45",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/jv_private.h",
+  "bytes": 115,
+  "sha256": "b83327d46a5707bda1b301af4a45fde67963046977bc9843dd4a73bdca8a6563",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/jv_thread.h",
+  "bytes": 1782,
+  "sha256": "a9f8457779813b8766fe72a34d6e2a3e8f11052eaf08bdfe8f3efafff36eb525",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/jv_unicode.c",
+  "bytes": 4735,
+  "sha256": "680110a66a1a119c0a15cbd4a5fb91e9a060c9a33ff23745f33fd188c3a46462",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/jv_unicode.h",
+  "bytes": 447,
+  "sha256": "67f29a42aaa62604633007058e5e3d1169b36166cbba32e9bc200e6e9fd16a0a",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/jv_utf8_tables.h",
+  "bytes": 3367,
+  "sha256": "c46c76aada9e0bd7e48f9daa427ae51ee6688e32872aa61ae624e8d2524108d6",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/lexer.c",
+  "bytes": 73825,
+  "sha256": "570d924dc17f65721fb3e3eaeb880bdf753abc1de07470186b8a2907fed9d2ea",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/lexer.h",
+  "bytes": 16491,
+  "sha256": "2fb94bb1459a1f0de66023a7ffd3543849845acca9fa571cee4cb5487d742426",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/lexer.l",
+  "bytes": 4548,
+  "sha256": "cfb3af17a786df30d7e30dae5861b84747d4904f8ce7ae9ab9b48bde342ee7f3",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/libm.h",
+  "bytes": 3949,
+  "sha256": "13aaee9c9537fdd2acf1105f3bc7de86b953ae4a77bd7a04b07d2ad84ea7e95d",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/linker.c",
+  "bytes": 16589,
+  "sha256": "07592a2aca011fa0ec6c0be9ea2cb280e74cc9db325c15a3688674828bc25c63",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/linker.h",
+  "bytes": 161,
+  "sha256": "08f1df5fcf23171036d0f9636697ed03eb2d5b8feebe743a765732f676effa68",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/locfile.c",
+  "bytes": 2647,
+  "sha256": "0ef8cad81d328b679be805696af0fefcce43e95e231e95b34b6dd8ff5b64f91d",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/locfile.h",
+  "bytes": 578,
+  "sha256": "0cbf98475507e3bb0524c045bb4fe48bb6b2ef5ef9b88840f58ce935c04c0bc2",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/main.c",
+  "bytes": 27018,
+  "sha256": "95606b9e1ae2d29258d153c97c188d59a0ea0b026fedd707022ca13bfa4f5e86",
+  "licenseLikeLines": [
+   [
+    234,
+    "// Uncaught jq exception"
+   ]
+  ]
+ },
+ {
+  "path": "src/opcode_list.h",
+  "bytes": 1242,
+  "sha256": "07fe179fcf4d177a94f08f5fb4e56b077eb98833d0c98aff15970c4ab69542bc",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/parser.c",
+  "bytes": 141640,
+  "sha256": "1a619d4a8e7c46d286165b44f7d380d234eebe61d45bedc0d4f06a00714fd4a9",
+  "licenseLikeLines": [
+   [
+    5,
+    "Copyright (C) 1984, 1989-1990, 2000-2015, 2018-2021 Free Software Foundation,"
+   ],
+   [
+    8,
+    "This program is free software: you can redistribute it and/or modify"
+   ],
+   [
+    9,
+    "it under the terms of the GNU General Public License as published by"
+   ],
+   [
+    10,
+    "the Free Software Foundation, either version 3 of the License, or"
+   ],
+   [
+    16,
+    "GNU General Public License for more details."
+   ],
+   [
+    18,
+    "You should have received a copy of the GNU General Public License"
+   ],
+   [
+    19,
+    "along with this program.  If not, see <https://www.gnu.org/licenses/>.  */"
+   ],
+   [
+    21,
+    "/* As a special exception, you may create a larger work that contains"
+   ],
+   [
+    25,
+    "as a parser skeleton.  Alternatively, if you modify or redistribute"
+   ],
+   [
+    27,
+    "special exception, which will cause the skeleton and the resulting"
+   ],
+   [
+    28,
+    "Bison output files to be licensed under the GNU General Public"
+   ],
+   [
+    29,
+    "License without this special exception."
+   ]
+  ]
+ },
+ {
+  "path": "src/parser.h",
+  "bytes": 6846,
+  "sha256": "a8a32cd4da1ce205cc8ba03001db1709791634015c51736c6e49d1aa80078b9e",
+  "licenseLikeLines": [
+   [
+    5,
+    "Copyright (C) 1984, 1989-1990, 2000-2015, 2018-2021 Free Software Foundation,"
+   ],
+   [
+    8,
+    "This program is free software: you can redistribute it and/or modify"
+   ],
+   [
+    9,
+    "it under the terms of the GNU General Public License as published by"
+   ],
+   [
+    10,
+    "the Free Software Foundation, either version 3 of the License, or"
+   ],
+   [
+    16,
+    "GNU General Public License for more details."
+   ],
+   [
+    18,
+    "You should have received a copy of the GNU General Public License"
+   ],
+   [
+    19,
+    "along with this program.  If not, see <https://www.gnu.org/licenses/>.  */"
+   ],
+   [
+    21,
+    "/* As a special exception, you may create a larger work that contains"
+   ],
+   [
+    25,
+    "as a parser skeleton.  Alternatively, if you modify or redistribute"
+   ],
+   [
+    27,
+    "special exception, which will cause the skeleton and the resulting"
+   ],
+   [
+    28,
+    "Bison output files to be licensed under the GNU General Public"
+   ],
+   [
+    29,
+    "License without this special exception."
+   ]
+  ]
+ },
+ {
+  "path": "src/parser.y",
+  "bytes": 22382,
+  "sha256": "803aa7c0b1acba2228e52d1de392fb51e60a7bbe23e42870aea1d62c43360c60",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/util.c",
+  "bytes": 37337,
+  "sha256": "1f413a1ffeb9194f246f7d9079169d41126686ca212d7b262a1d7b8cf783be06",
+  "licenseLikeLines": [
+   [
+    2,
+    "* Parts (strptime()) Copyright (c) 1997, 1998, 2005, 2008 The NetBSD Foundation, Inc."
+   ],
+   [
+    3,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/util.h",
+  "bytes": 1596,
+  "sha256": "fd8adf652fb1c09a3b14354124909384dea01637182cfcfdb3f471a960b9414b",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "vendor/decNumber/ICU-license.html",
+  "bytes": 2022,
+  "sha256": "6173f8134932a9a7d0253d49116733e4035ed119f90b2318e76ade4f000a2c94",
+  "licenseLikeLines": [
+   [
+    5,
+    "<title>ICU License - ICU 1.8.1 and later</title>"
+   ],
+   [
+    9,
+    "<h1>ICU License - ICU 1.8.1 and later</h1>"
+   ],
+   [
+    11,
+    "COPYRIGHT AND PERMISSION NOTICE"
+   ],
+   [
+    13,
+    "Copyright (c) 1995-2005 International Business Machines Corporation and others"
+   ],
+   [
+    14,
+    "All rights reserved."
+   ],
+   [
+    16,
+    "Permission is hereby granted, free of charge, to any person obtaining a"
+   ],
+   [
+    22,
+    "copyright notice(s) and this permission notice appear in all copies of"
+   ],
+   [
+    23,
+    "the Software and that both the above copyright notice(s) and this"
+   ],
+   [
+    29,
+    "OF THIRD PARTY RIGHTS. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR"
+   ],
+   [
+    36,
+    "Except as contained in this notice, the name of a copyright holder"
+   ],
+   [
+    39,
+    "of the copyright holder."
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decBasic.c",
+  "bytes": 183775,
+  "sha256": "f5e1c52046a75a43ea469fa4554a57aab6ad37e0b3b22da986de6fd2445b008f",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2010.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ],
+   [
+    73,
+    "/* This works on specials, too; no error or exception is possible.    */"
+   ],
+   [
+    1609,
+    "/* This works on specials, too; no error or exception is possible.    */"
+   ],
+   [
+    1815,
+    "/* This is a bitwise operation; no errors or exceptions are possible. */"
+   ],
+   [
+    1829,
+    "/* This is a bitwise operation; no errors or exceptions are possible. */"
+   ],
+   [
+    1844,
+    "/* This is a bitwise operation; no errors or exceptions are possible. */"
+   ],
+   [
+    1860,
+    "/* This is a bitwise operation; no errors or exceptions are possible. */"
+   ],
+   [
+    2272,
+    "/* The result is Exact; no errors or exceptions are possible.         */"
+   ],
+   [
+    2307,
+    "/* The result is Exact; no errors or exceptions are possible.         */"
+   ],
+   [
+    2968,
+    "// exceptional (all-nines) case, so place four zeros now; this is"
+   ],
+   [
+    3505,
+    "/* No exceptions, even Inexact, are raised except for sNaN input, or  */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decCommon.c",
+  "bytes": 86898,
+  "sha256": "d02a1174907d2510bbb1acc960cbafc6573bf97e342c73f0da4db4ced9a3260d",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2010.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decContext.c",
+  "bytes": 24547,
+  "sha256": "fd3cb9f0fd775949f7c2d018ba6c6a2cc483198c2b9340c8608d2bb2817d3521",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2009.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ],
+   [
+    205,
+    "/*  status  is the DEC_ exception code                                */"
+   ],
+   [
+    322,
+    "/*  status  is the DEC_ exception code                                */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decContext.h",
+  "bytes": 12820,
+  "sha256": "24e56975f89adbe1558042a735387c7ecf8493fb72ca2b24de51afd2e421053a",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2010.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ],
+   [
+    124,
+    "/* Trap-enabler and Status flags (exceptional conditions), and      */"
+   ],
+   [
+    204,
+    "/* Name strings for the exceptional conditions                      */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decDPD.h",
+  "bytes": 95798,
+  "sha256": "e908230fb6721b15030af6355a835ad31b55abc2b4211e3785d3daa1f7d59c98",
+  "licenseLikeLines": [
+   [
+    5,
+    "/* Copyright (c) IBM Corporation, 2000, 2008. All rights reserved.          */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decDouble.c",
+  "bytes": 7086,
+  "sha256": "d9d7d9a3f8825a5929c0d008a9d1058011450bba45fe483f4d467f7dfaeb3146",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2010.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decDouble.h",
+  "bytes": 10452,
+  "sha256": "d6f2bb601e7f9280f640e67b7aefc48ad001da82d5685c89675bb0d09b6f590e",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2010.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decNumber.c",
+  "bytes": 397280,
+  "sha256": "906dbffecf2c7007127557421cf4e1625c6060d6d3b362cef5afcea1f954c493",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2009.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ],
+   [
+    87,
+    "/*    enabled the operator routines are protected against exceptions. */"
+   ],
+   [
+    90,
+    "/*    However, the routines will never cause exceptions if they are   */"
+   ],
+   [
+    1777,
+    "// turn off exceptions if the result is a normal number"
+   ],
+   [
+    3389,
+    "/* No exception or error can occur; this is a quiet bitwise operation.*/"
+   ],
+   [
+    3410,
+    "/* No exception or error can occur; this is a quiet bitwise operation.*/"
+   ],
+   [
+    3432,
+    "/* No exception or error can occur; this is a quiet bitwise operation.*/"
+   ],
+   [
+    4298,
+    "// [Note that infinity/0 raises no exceptions]"
+   ],
+   [
+    4325,
+    "if (ISZERO(rhs)) {                  // x/0 is always exceptional"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decNumber.h",
+  "bytes": 11603,
+  "sha256": "0f7a9b64736350bb7ae581803b2b580ed0bdb42a4daefc2f8e0b82b94cad4d3c",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2010.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decNumberLocal.h",
+  "bytes": 39795,
+  "sha256": "fb17acfdd8b07a4023e6eb3a31c053864e3f45a1d0d3a689df75dcec55fd5398",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2010.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decPacked.c",
+  "bytes": 10369,
+  "sha256": "92c2a98018fb6c3cd99373fb90cd6518c6c26ee1898603bccc7c0a98d8f922ce",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2002.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decPacked.h",
+  "bytes": 2970,
+  "sha256": "bac6457a8aec13a5c78d1a29afe92fde775ee17ec30ec3264e2834b09c90dd37",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2005.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decQuad.c",
+  "bytes": 6696,
+  "sha256": "6ef42ea60be7a94d965f3968897b86abdb876f12526034b8e15c4b6a2e3e8335",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2010.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decQuad.h",
+  "bytes": 11220,
+  "sha256": "792cfa9a442a4447164b71496e7dd5cba8d4adb6e7f5dfeb3401c9525b0a1c20",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2010.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decSingle.c",
+  "bytes": 3597,
+  "sha256": "2be25dc719f5c22cc0b843bd2e31bd546e743c69e0988979fa59a795b998b9bd",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2008.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decSingle.h",
+  "bytes": 4961,
+  "sha256": "21720caaa656cfdedf1427155c7b6e2d9d6b8ad25cf95e9a4c4489b82f7dcb62",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2008.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decimal128.c",
+  "bytes": 25853,
+  "sha256": "3d3c31d368fe449d95cfd1c2a9f052fa985e9620e7f7672a6677a9c011d9456c",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2008.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decimal128.h",
+  "bytes": 4351,
+  "sha256": "678f466182d9d6bb2c2cb4c075bc7cec748e44c16ae286ad7af95c11426b05b9",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2005.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decimal32.c",
+  "bytes": 22555,
+  "sha256": "3aac17ad0db4ef79e8da49ad463d3e20c7a5e2e0c6044be3e69a0154324031d9",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2008.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decimal32.h",
+  "bytes": 4295,
+  "sha256": "db7b823d5c6d137219592dc9a57e60c3789ed772769aabf9fd7b323722e0b004",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2006.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decimal64.c",
+  "bytes": 38520,
+  "sha256": "b03bc633b3a87e9603ce36c62bd1e6f4f17246c6dbfa43eedf47c41221f36097",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2009.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decimal64.h",
+  "bytes": 4363,
+  "sha256": "6475f1839d79668040a8a75e97d98ca9a9e083745540fa36822f2b73c52bd877",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2000, 2005.  All rights reserved.   */"
+   ],
+   [
+    7,
+    "/* ICU License -- ICU 1.8.1 and later.                                */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/decnumber.pdf",
+  "error": "gh api failed: repos/jqlang/jq/contents/vendor/decNumber/decnumber.pdf?ref=34f7186b86743a083a589741b"
+ },
+ {
+  "path": "vendor/decNumber/example1.c",
+  "bytes": 1574,
+  "sha256": "f8b69448a655017e199e3d8ae2310dc221e36765bc6f42f3844d9cbf717f9adf",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2001, 2007.  All rights reserved.   */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/example2.c",
+  "bytes": 2412,
+  "sha256": "cc8ae3eb247ed0db1e82e297f2e52d95d7f6a140b7135f451f0f79e1fe487518",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2001.  All rights reserved.         */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/example3.c",
+  "bytes": 2800,
+  "sha256": "46785d2e53f50b76066e819e9d186e4173832a671e780192e1472d9016dc3cc0",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2001.  All rights reserved.         */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/example4.c",
+  "bytes": 2305,
+  "sha256": "23cef619d7fef35d1b33f36be7c8dcf3ec22d4f541c446a6b918d86b6c33ae0d",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2001.  All rights reserved.         */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/example5.c",
+  "bytes": 1500,
+  "sha256": "2506b4c52b559bd0a9aedc5a9d9094996f84eb3ac95818deb5492af3212a1e2d",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2001, 2007.  All rights reserved.   */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/example6.c",
+  "bytes": 2949,
+  "sha256": "40827b43301d0e5e06efd7340fa5f73646944790382d8d63b8cc4ba7e956a2ed",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2001.  All rights reserved.         */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/example7.c",
+  "bytes": 1377,
+  "sha256": "34c0c377b39f021b22cec036ffc719a7873897a9c34531b43ba303eefe64ae59",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2001, 2008.  All rights reserved.   */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/example8.c",
+  "bytes": 1747,
+  "sha256": "338e65b01adbdce87cb38baed5b2d5fa1db7ba205a62ff1e3457341ef782af1d",
+  "licenseLikeLines": [
+   [
+    4,
+    "/* Copyright (c) IBM Corporation, 2001, 2007.  All rights reserved.   */"
+   ]
+  ]
+ },
+ {
+  "path": "vendor/decNumber/readme.txt",
+  "bytes": 2882,
+  "sha256": "67e6c7036abc5ef35b912caa5c96dccdb16349676e233a6bc15097b5bbdfb020",
+  "licenseLikeLines": [
+   [
+    7,
+    "license), or as a collection of Open Source files from the GCC source"
+   ],
+   [
+    8,
+    "repository (under the GPL license)."
+   ],
+   [
+    23,
+    "*  ICU-license.html"
+   ],
+   [
+    33,
+    "The ICU package is made available under the terms of the ICU License"
+   ],
+   [
+    34,
+    "(ICU 1.8.1 and later) included in the package as ICU-license.html."
+   ],
+   [
+    42,
+    "Please read the appropriate license and documentation before using"
+   ]
+  ]
+ }
+]

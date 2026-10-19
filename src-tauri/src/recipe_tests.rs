@@ -358,3 +358,128 @@ fn a_forged_recipe_status_in_a_serialized_plan_is_refused() {
     assert_eq!(reject(&|v| v["rollback"]["reliability"] = json!("verified")), "rollback_inconsistent");
     assert_eq!(reject(&|v| v["steps"][1]["typed"] = Value::Null), "untyped_step_without_missing_parameters");
 }
+
+// ---- Phase 3D-1: the jq 1.8.2 / Windows x64 DRAFT recipe is data in the documentation folder and stays non-executable ----------------
+
+const JQ_DRAFT_JSON: &str = include_str!("../../docs/phase-3d1/jq-1.8.2-windows-x64.recipe.draft.json");
+// The jq digest is deliberately NOT written as a literal in any Rust source (a Phase 3D-0 guard test scans the sources for it, so that no
+// reference digest can be added unnoticed): it is read from the draft, and the independent literal comparison lives in tests/test_phase3d1_contract.py.
+
+fn jq_draft() -> ReviewedRecipe {
+    serde_json::from_str(JQ_DRAFT_JSON).expect("the draft has exactly the reviewed-recipe shape (unknown fields are refused)")
+}
+
+fn no_refs() -> ReferenceSet {
+    ReferenceSet { authenticated: vec![], unauthenticated: vec![] }
+}
+
+#[test]
+fn the_jq_draft_recipe_pins_exactly_the_verified_file_and_nothing_else() {
+    let d = jq_draft();
+    let r = &d.recipe;
+    assert_eq!(
+        (r.tool_id.as_str(), r.version.as_str(), r.target.platform_target.as_str(), r.target.scope.as_str()),
+        ("jq", "1.8.2", "windows-x64", "user")
+    );
+    assert_eq!((r.artifact.file_name.as_str(), r.artifact.size_bytes), ("jq-windows-amd64.exe", 1_035_264));
+    assert_eq!(r.artifact.sha256.len(), 64);
+    assert!(r.artifact.sha256.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
+    assert_eq!((r.artifact.digest_scope, r.artifact.format.as_str()), (DigestScope::ExactFile, "pe-x64"));
+    assert_eq!(r.source.repository, "jqlang/jq");
+    assert_eq!(r.source.immutable_commit, "34f7186b86743a083a589741b6cea95293524108");
+    assert!(!r.source.source_attested, "no verifier for real source attestations exists: the draft does not claim one");
+    assert_eq!(
+        r.steps[1].get("expectedSha256").and_then(Value::as_str),
+        Some(r.artifact.sha256.as_str()),
+        "the verify step binds the same digest"
+    );
+    assert!(!r.synthetic && !r.tool_id.starts_with("synthetic-"));
+    // declared effects: manager folders only, one release download, no PATH / agent / package-manager / launch capability exists in the vocabulary
+    assert_eq!(r.permissions, vec!["current_user_account", "network_download", "write_manager_folders"]);
+    assert_eq!(r.network, vec!["github_release_download"]);
+    assert!(r.filesystem_changes.iter().all(|c| matches!(c.area.as_str(), "manager_staging" | "manager_versions" | "manager_state")));
+    assert_eq!(r.lifecycle_actions, vec!["install", "uninstall"], "no update path in the first pilot");
+    assert!(
+        r.rollback.does_not_undo.iter().any(|x| x == "tool_user_data") && r.rollback.state == "designed",
+        "rollback is designed, never claimed verified"
+    );
+    for forbidden in ["path", "agent", "package", "launch", "execute", "shell", "script"] {
+        let blob = serde_json::to_string(&r.permissions).unwrap()
+            + &serde_json::to_string(&r.filesystem_changes).unwrap()
+            + &serde_json::to_string(&r.steps).unwrap();
+        assert!(!blob.to_lowercase().contains(forbidden), "{forbidden}");
+    }
+}
+
+#[test]
+fn the_jq_draft_is_blocked_by_exactly_the_missing_authentication_license_review_and_evidence() {
+    let d = jq_draft();
+    let p = problems(&d, &no_refs());
+    assert_eq!(p, vec!["artifact_not_authenticated", "license_not_accepted", "not_reviewed", "staging_evidence"], "{p:?}");
+    assert!(validate(&d, &no_refs()).is_err());
+    // even with an authenticated reference for this exact file (a future, separately reviewed step) the draft stays blocked by licence and review
+    let mut refs = no_refs();
+    refs.authenticated.push(ReferenceDigest {
+        entry_id: "jq".into(),
+        kind: ArtifactKind::Executable,
+        format: "pe-x64".into(),
+        platform_target: "windows-x64".into(),
+        version: "1.8.2".into(),
+        sha256: d.recipe.artifact.sha256.clone(),
+        source: "hypothetical reference used only by this test".into(),
+    });
+    let p = problems(&d, &refs);
+    assert_eq!(p, vec!["license_not_accepted", "not_reviewed", "staging_evidence"], "{p:?}");
+    // and the steps, target, permissions, filesystem effects, network and rollback contract are already acceptable to the validator
+    for code in [
+        "steps",
+        "permissions",
+        "filesystem_changes",
+        "network",
+        "rollback_contract",
+        "lifecycle_actions",
+        "artifact_format",
+        "digest_scope_not_exact_file",
+        "source_not_immutable",
+    ] {
+        assert!(!p.contains(&code), "{code}");
+    }
+}
+
+#[test]
+fn the_jq_draft_is_not_registered_not_compiled_in_and_cannot_be_registered_as_a_real_recipe() {
+    assert_eq!(BUILT_IN_RECIPES_JSON.trim(), "[]");
+    assert_eq!(RecipeRegistry::production().len(), 0);
+    assert!(RecipeRegistry::synthetic(vec![jq_draft()]).is_err(), "only synthetic recipes may be registered outside the built-in list");
+    // the draft file is read by this test only: no production source refers to it
+    for (name, text) in [
+        ("recipe.rs", include_str!("recipe.rs")),
+        ("plan.rs", include_str!("plan.rs")),
+        ("commands.rs", include_str!("commands.rs")),
+        ("adapter.rs", include_str!("adapter.rs")),
+        ("lifecycle.rs", include_str!("lifecycle.rs")),
+        ("lib.rs", include_str!("lib.rs")),
+    ] {
+        assert!(!text.contains("recipe.draft.json") && !text.contains("phase-3d1"), "{name}");
+    }
+    let c = conn();
+    assert!(ReferenceSet::production(&c).unwrap().authenticated.is_empty(), "the production authenticated-reference set stays empty");
+}
+
+#[test]
+fn a_reviewed_looking_edit_of_the_draft_changes_its_digest_so_a_review_never_carries_over() {
+    let d = jq_draft();
+    let before = recipe_digest(&d.recipe);
+    let mut edited = d.clone();
+    edited.recipe.revision = 2;
+    assert_ne!(recipe_digest(&edited.recipe), before);
+    let mut claimed = d.clone();
+    claimed.review.state = "reviewed".into();
+    claimed.review.reviewed_recipe_digest = before.clone();
+    claimed.review.reviewer_id = "somebody".into();
+    claimed.review.staging_evidence =
+        vec![StagingEvidence { check_id: "x1".into(), state: "passed".into(), independent: true, evidence_digest: "e".repeat(64) }];
+    // claiming a review is not enough: licence and authentication still block it
+    let p = problems(&claimed, &no_refs());
+    assert_eq!(p, vec!["artifact_not_authenticated", "license_not_accepted"], "{p:?}");
+}

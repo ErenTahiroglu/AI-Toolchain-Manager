@@ -39,6 +39,8 @@ fn run(out: PathBuf) -> i32 {
         let lifecycle_probe = lifecycle_probe(&conn, &dir).map_err(|e| e.to_string())?;
         // real-device acceptance of the handle-relative file-system layer: artificial files in a new folder below the data directory
         let fs_acceptance = crate::managed_fs_probe::run(&dir);
+        // read-only Windows Hello availability (no key, no prompt)
+        let hello = crate::os_hello::availability_probe();
         let report = health::run_and_record(&conn, &ctx).map_err(|e| e.to_string())?;
         let chain = audit::verify(&conn).map_err(|e| e.to_string())?;
         Ok(json!({
@@ -53,6 +55,7 @@ fn run(out: PathBuf) -> i32 {
             "planProbe": plan_probe,
             "lifecycleProbe": lifecycle_probe,
             "fsAcceptanceProbe": fs_acceptance,
+            "windowsHelloProbe": hello,
             "report": report,
             "auditChain": chain,
             "auditEvents": audit::list_ascending(&conn).map_err(|e| e.to_string())?,

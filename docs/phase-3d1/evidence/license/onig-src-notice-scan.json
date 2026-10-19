@@ -1,0 +1,1664 @@
+[
+ {
+  "path": "src/ascii.c",
+  "bytes": 3786,
+  "sha256": "f734cc6e17a9c423d15db4509beba03c13d67dc6baf93f43184068a65082ace8",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2024  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/big5.c",
+  "bytes": 6138,
+  "sha256": "a1c9632424195311fa77ac84256d6a6520f5467a00df1deeb3346f0d2644149f",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/cp1251.c",
+  "bytes": 8670,
+  "sha256": "93fed3c57fddfcdb8fa9bac6f17369b5b83eea2116d1ac4fcd378168602f6d47",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2006-2020  Byte      <byte AT mail DOT kna DOT ru>"
+   ],
+   [
+    7,
+    "* All rights reserved."
+   ],
+   [
+    9,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    12,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    14,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/euc_jp.c",
+  "bytes": 7866,
+  "sha256": "239b94398eda31e64a7085c96f184340be3f85c764ab08cffdc5e82d4f20f097",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/euc_jp_prop.c",
+  "bytes": 5363,
+  "sha256": "264e7be695f6abff9fa9e01864fdaf4de3d2524249d4dfad3688b312b28362fb",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/euc_kr.c",
+  "bytes": 5930,
+  "sha256": "e00e279fd2eb8ca712aa497ebd597d59a58263eafc758ac9d2fd7b864b46cb22",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/euc_tw.c",
+  "bytes": 5708,
+  "sha256": "ea95ea5bc4b399164d8700830371efde8b458e1fee0bb67d86bf0dff20f939de",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/gb18030.c",
+  "bytes": 15093,
+  "sha256": "4cc1b23f96320b3b2400e5d16832d952dbdb24bd761b52c75bd2ff0d7c260175",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2005-2023  KUBO Takehiro <kubo AT jiubao DOT org>"
+   ],
+   [
+    7,
+    "* All rights reserved."
+   ],
+   [
+    9,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    12,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    14,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/iso8859_1.c",
+  "bytes": 9087,
+  "sha256": "5502a794476910c0c1aed97829baa7481e3d5f6fcb9bbe68952c16788187b84c",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/iso8859_10.c",
+  "bytes": 8890,
+  "sha256": "f0a1cb8e2ec648d7d33fb47b8834c6f9d4c958f89a8c0f2a4a686873d1c6d3f9",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/iso8859_11.c",
+  "bytes": 4818,
+  "sha256": "51193c21da366f7f88ed8e500accf2a938c6e15d9c3b9d912970066967f29ad8",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2019  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/iso8859_13.c",
+  "bytes": 8651,
+  "sha256": "4e6ae959854e31ef609e2eccd99bd2f20583d70552790032138532fefadfcccf",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/iso8859_14.c",
+  "bytes": 8944,
+  "sha256": "2fe72a025c89b3d5ed5fece798a3c00c5e7c008e7265b541fad6e15ec81cbfac",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/iso8859_15.c",
+  "bytes": 8774,
+  "sha256": "9b3e2d2516bdf266ed40461c040db495762a04810687528bbbdb85e4435665a5",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/iso8859_16.c",
+  "bytes": 8893,
+  "sha256": "a2aa13344c1e2da01dd4295d9bb9aaff642857ab5d6fc9724ce501540a96fe2f",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/iso8859_2.c",
+  "bytes": 8862,
+  "sha256": "394d0b706b1be6de42918f9461828035c1a3ab9233dc436272ed8fb5034a38cc",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/iso8859_3.c",
+  "bytes": 8727,
+  "sha256": "28bcf8b89d67e826ca45410d9e160645af277aad059118fd66ec9385ea254482",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/iso8859_4.c",
+  "bytes": 8847,
+  "sha256": "98cf5fc6f68a3af2d077a9eb5e61f68d622833e1312a71dd5be3d573d588155e",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/iso8859_5.c",
+  "bytes": 8817,
+  "sha256": "41df6d443d1516dca6c18e42af8bfef1689f307315fa46b85110f234e1decca6",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/iso8859_6.c",
+  "bytes": 4811,
+  "sha256": "b904d04267b21a4775cf97bb5746c09f2bf8987df562f95be5785351db7427d9",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2019  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/iso8859_7.c",
+  "bytes": 8563,
+  "sha256": "6d952dcd5fdc3fb69f5b58e44fbcf6d66589af7607dba65bb1c5b9b7cf6450d3",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/iso8859_8.c",
+  "bytes": 4811,
+  "sha256": "a127aff89565bdfdc75094ad8dbe436bc071ea6fc29282b1a20a188b0a8a730d",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2019  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/iso8859_9.c",
+  "bytes": 8671,
+  "sha256": "92072e3802041eb1ba138e79b458084391705f1cba27272d365c74656a6f1b1a",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/koi8.c",
+  "bytes": 9049,
+  "sha256": "5b4b5daedb41f26102923e22f8869fb8552a9930f19ccaece9c8a4a8239c3070",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/koi8_r.c",
+  "bytes": 8614,
+  "sha256": "dfaf7d0bd8b680e8fe4e85ab71deaf27a63b781dd4abcb484931a8a362926a19",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/mktable.c",
+  "bytes": 29158,
+  "sha256": "b7bbbdfd212f3efeec26b70d8fae535a3ebc77c64a9964047729022716297820",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2022  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/onig_init.c",
+  "bytes": 1816,
+  "sha256": "89f37f5b5f5961493bec99aacf1d828f1dd7d70830eed2aaff86247f4d4a4ce3",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2016-2019  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/oniggnu.h",
+  "bytes": 3361,
+  "sha256": "fdb9bfc28287f7573a5ccad2ba45c7759aa2cbc11c57b05b86908809e1ac5f9a",
+  "licenseLikeLines": [
+   [
+    7,
+    "* Copyright (c) 2002-2019  K.Kosako"
+   ],
+   [
+    8,
+    "* All rights reserved."
+   ],
+   [
+    10,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    13,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    15,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/onigposix.h",
+  "bytes": 6766,
+  "sha256": "a4002b01d62f5c91d851190b9225737ad059a85cfa2a04ca6d1d4ff67f4a08de",
+  "licenseLikeLines": [
+   [
+    7,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    8,
+    "* All rights reserved."
+   ],
+   [
+    10,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    13,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    15,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/oniguruma.h",
+  "bytes": 49245,
+  "sha256": "bceb20b139315fbe2fb02e58f3b499107d5d4c2dc9953c677c332ccb1cb305ef",
+  "licenseLikeLines": [
+   [
+    7,
+    "* Copyright (c) 2002-2024  K.Kosako"
+   ],
+   [
+    8,
+    "* All rights reserved."
+   ],
+   [
+    10,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    13,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    15,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/regcomp.c",
+  "bytes": 201096,
+  "sha256": "0f22d86a07412093ce12df15d0b88db02fa21bf409d623738102c805b2580a49",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2024  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/regenc.c",
+  "bytes": 29558,
+  "sha256": "cc33829f2a4279c96ca96d97c6d29d9f6ac65dc7ea0c5494f3b34bc43566585e",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/regenc.h",
+  "bytes": 12579,
+  "sha256": "da808283c9d13aa641a3507d86098273afeb723da9ab2eadae176a388dec4564",
+  "licenseLikeLines": [
+   [
+    7,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    8,
+    "* All rights reserved."
+   ],
+   [
+    10,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    13,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    15,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/regerror.c",
+  "bytes": 13757,
+  "sha256": "eced9d8be1c24c88dbb490668eadac75903e4bdce5f89fda6815f5c4f1ddccc0",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2022  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/regexec.c",
+  "bytes": 169273,
+  "sha256": "51d9456a6b8fc4330b4f5030642265fd7e12524f05223b446b3444bd3fecf03c",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2024  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/regext.c",
+  "bytes": 5430,
+  "sha256": "53683bb1c4d1b787856cce013cc01fa54b917997e96d4471b1c74915bf0b7c00",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2019  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/reggnu.c",
+  "bytes": 4104,
+  "sha256": "18bad41679c188eaa4a0f436fab2bec726076f1e8a6225536fc08fe69d91dd5d",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2019  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/regint.h",
+  "bytes": 33956,
+  "sha256": "676be021dafaf99eaab375b283fb42dc59a31a33d68a6d42dbb15d08defbfd3b",
+  "licenseLikeLines": [
+   [
+    7,
+    "* Copyright (c) 2002-2024  K.Kosako"
+   ],
+   [
+    8,
+    "* All rights reserved."
+   ],
+   [
+    10,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    13,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    15,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/regparse.c",
+  "bytes": 225856,
+  "sha256": "f4b5ef44a888c7150a304d27aef2ffe85d4f8fb2cee220240644be4c62a905d3",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2024  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/regparse.h",
+  "bytes": 15851,
+  "sha256": "a34f5de2e0d8f65923ac4aa93bfabdc93d952d01b8c9f1c489d3cc25e9c040a3",
+  "licenseLikeLines": [
+   [
+    7,
+    "* Copyright (c) 2002-2022  K.Kosako"
+   ],
+   [
+    8,
+    "* All rights reserved."
+   ],
+   [
+    10,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    13,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    15,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/regposerr.c",
+  "bytes": 4497,
+  "sha256": "acd75268d3b4b38a606893c9be01a351e58b0e73cdbec9a151c3318b33ee7a8f",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/regposix.c",
+  "bytes": 13823,
+  "sha256": "dcd79452de0aa87363d3f0aac5096934418dc811c44c9de7275e16988ae73479",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2022  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/regsyntax.c",
+  "bytes": 14163,
+  "sha256": "11e750804c89ff3a4524c70c4bec8caa77da04c12c161385a6d701460456277c",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2024  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/regtrav.c",
+  "bytes": 2851,
+  "sha256": "bb70c4886681a3c17d312f3e23a17f75a613bb8dfc90bfcbb562a71809159a0d",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2019  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/regversion.c",
+  "bytes": 2159,
+  "sha256": "f2a0cc84446e64d202bd9627f4c9924c4d338f0c2ed9fc642a9caefe2757301d",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ],
+   [
+    49,
+    "onig_copyright(void)"
+   ],
+   [
+    54,
+    "\"Oniguruma %d.%d.%d : Copyright (C) 2002-2018 K.Kosako\","
+   ]
+  ]
+ },
+ {
+  "path": "src/sjis.c",
+  "bytes": 8201,
+  "sha256": "bfe3420942bcdcd31142763310acc9d0acb2ab8020bd6f1395e57e86900b578e",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/sjis_prop.c",
+  "bytes": 5323,
+  "sha256": "a4435b5693578749d15c237f5a66c5aff5dbe1bb295b0670f233007a8ec3c768",
+  "licenseLikeLines": []
+ },
+ {
+  "path": "src/st.c",
+  "bytes": 11365,
+  "sha256": "c3e73faab1ef6dc0a8524dde9b71c9a7eedc78edd70232c794ca936b0d83ca27",
+  "licenseLikeLines": [
+   [
+    1,
+    "/* This is a public domain general purpose hash table package written by Peter Moore @ UCB. */"
+   ]
+  ]
+ },
+ {
+  "path": "src/st.h",
+  "bytes": 1717,
+  "sha256": "5a44a44d08dfa64a571cff168878378c3b4bc630e303c12ba99ac99d353595ef",
+  "licenseLikeLines": [
+   [
+    1,
+    "/* This is a public domain general purpose hash table package written by Peter Moore @ UCB. */"
+   ]
+  ]
+ },
+ {
+  "path": "src/unicode.c",
+  "bytes": 33117,
+  "sha256": "381aacfe8feaf7d307c0a729bbb2a903e706866cb3c99a5422f003ff7fa97dff",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/unicode_egcb_data.c",
+  "bytes": 50524,
+  "sha256": "21663445ace4f64775506f3fc53332a96e1b2b9f509b63eeb5462913daeb6d73",
+  "licenseLikeLines": [
+   [
+    3,
+    "* Copyright (c) 2017-2024  K.Kosako"
+   ],
+   [
+    4,
+    "* All rights reserved."
+   ],
+   [
+    6,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    9,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    11,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/unicode_fold1_key.c",
+  "bytes": 25307,
+  "sha256": "1a965892c78598ed0d7c7adad0021dc774d6278c727692b8b2300804de70f043",
+  "licenseLikeLines": [
+   [
+    12,
+    "* Copyright (c) 2017-2024  K.Kosako"
+   ],
+   [
+    13,
+    "* All rights reserved."
+   ],
+   [
+    15,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    18,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    20,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/unicode_fold2_key.c",
+  "bytes": 4459,
+  "sha256": "70b6f9185984408b308bb9d441333c5be95d36853fa60294ec0d08c274d5088c",
+  "licenseLikeLines": [
+   [
+    12,
+    "* Copyright (c) 2017-2024  K.Kosako"
+   ],
+   [
+    13,
+    "* All rights reserved."
+   ],
+   [
+    15,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    18,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    20,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/unicode_fold3_key.c",
+  "bytes": 3991,
+  "sha256": "1e026d61dbd1e1300feecfeb5788f62cd2e388cf9a0c3b666e389bc3cf449369",
+  "licenseLikeLines": [
+   [
+    12,
+    "* Copyright (c) 2017-2024  K.Kosako"
+   ],
+   [
+    13,
+    "* All rights reserved."
+   ],
+   [
+    15,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    18,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    20,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/unicode_fold_data.c",
+  "bytes": 112522,
+  "sha256": "690b14e8f84ff1345ec38657ab41a0c630dea37b99fb39519d9789ddf2558a55",
+  "licenseLikeLines": [
+   [
+    3,
+    "* Copyright (c) 2017-2024  K.Kosako"
+   ],
+   [
+    4,
+    "* All rights reserved."
+   ],
+   [
+    6,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    9,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    11,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/unicode_property_data.c",
+  "bytes": 709364,
+  "sha256": "6f69e9852bf746acfc3847c9789225d4ba1f085f1852ca00fcab7fa912982f52",
+  "licenseLikeLines": [
+   [
+    37,
+    "* Copyright (c) 2016-2024  K.Kosako"
+   ],
+   [
+    38,
+    "* All rights reserved."
+   ],
+   [
+    40,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    43,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    45,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/unicode_property_data_posix.c",
+  "bytes": 106350,
+  "sha256": "27bf4f37819b67b43d2a223a0a251978335d1c44a0ec02b4f907fba32b002058",
+  "licenseLikeLines": [
+   [
+    37,
+    "* Copyright (c) 2016-2024  K.Kosako"
+   ],
+   [
+    38,
+    "* All rights reserved."
+   ],
+   [
+    40,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    43,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    45,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/unicode_unfold_key.c",
+  "bytes": 61001,
+  "sha256": "521fc37c8626e811c3c8042b848c4289f775dbae58b8422dfc5ad1447e2e98a9",
+  "licenseLikeLines": [
+   [
+    12,
+    "* Copyright (c) 2017-2024  K.Kosako"
+   ],
+   [
+    13,
+    "* All rights reserved."
+   ],
+   [
+    15,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    18,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    20,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/unicode_wb_data.c",
+  "bytes": 40578,
+  "sha256": "9530ddf3208658a05bf33d36249bc6b9d8e500f54cfa2c8552762d42314244ba",
+  "licenseLikeLines": [
+   [
+    3,
+    "* Copyright (c) 2019-2024  K.Kosako"
+   ],
+   [
+    4,
+    "* All rights reserved."
+   ],
+   [
+    6,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    9,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    11,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/utf16_be.c",
+  "bytes": 7634,
+  "sha256": "2f5690e7ebdd6cddebe53e9a5479fd5c4b4b1bd1f40321e20a83f6114e2632ac",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2024  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/utf16_le.c",
+  "bytes": 7668,
+  "sha256": "7420d3f24620f50489e6b335885f2ca59f004a8862e8e87db506d269d773155c",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2024  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/utf32_be.c",
+  "bytes": 4826,
+  "sha256": "3e07ba968d71b5695b429f6d9dbee179db26a24c2e1f44fc938f6147b09af94d",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/utf32_le.c",
+  "bytes": 4853,
+  "sha256": "e0aa493bd75bc8580cb9f9daf1c6eda7f248fbc29d64ffcc414350f0e8f76f0b",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2020  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ },
+ {
+  "path": "src/utf8.c",
+  "bytes": 8021,
+  "sha256": "8927e4b2e64fd188592a95ecf56f2d6c7bb0bcb5721b6d2fd446c20c10a7ddf4",
+  "licenseLikeLines": [
+   [
+    5,
+    "* Copyright (c) 2002-2019  K.Kosako"
+   ],
+   [
+    6,
+    "* All rights reserved."
+   ],
+   [
+    8,
+    "* Redistribution and use in source and binary forms, with or without"
+   ],
+   [
+    11,
+    "* 1. Redistributions of source code must retain the above copyright"
+   ],
+   [
+    13,
+    "* 2. Redistributions in binary form must reproduce the above copyright"
+   ]
+  ]
+ }
+]
