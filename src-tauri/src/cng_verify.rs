@@ -16,12 +16,19 @@ use windows::Security::Cryptography::{
     CryptographicBuffer,
 };
 
-windows_link::link!("combase.dll" "system" fn RoInitialize(init_type : i32) -> i32);
+windows_link::link!("ole32.dll" "system" fn CoIncrementMTAUsage(cookie : *mut isize) -> i32);
 
-/// Gives the calling thread a multithreaded WinRT apartment ("already initialised" is not an error).
+/// Keeps the process-wide WinRT multithreaded apartment alive for the whole life of the process (once). Per-thread `RoInitialize` is NOT
+/// enough: the `windows` crate caches activation factories in statics, and when the last initialised thread exits the apartment is torn
+/// down and those cached factories dangle (an access violation on the next call, found by the CI run of Phase 3D-1). `CoIncrementMTAUsage`
+/// makes every thread an implicit member of a MTA that is never torn down.
 pub(crate) fn init_apartment() {
-    // SAFETY: plain apartment initialisation of the calling thread (RO_INIT_MULTITHREADED = 1); the result is deliberately ignored.
-    let _ = unsafe { RoInitialize(1) };
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let mut cookie: isize = 0;
+        // SAFETY: the out-pointer is a valid local; the usage count is deliberately never decremented (process lifetime).
+        let _ = unsafe { CoIncrementMTAUsage(&mut cookie) };
+    });
 }
 
 pub struct CngRsaSha256Verifier;
