@@ -93,7 +93,10 @@ class TheGatesThatMustNotMove(unittest.TestCase):
                 self.assertNotIn("synthetic-pilot", line, "the release build must not carry the synthetic supply")
 
     def test_every_recipe_must_be_synthetic_and_the_production_policy_accepts_no_actor(self):
-        self.assertIn('!r.synthetic || !r.tool_id.starts_with("synthetic-")', text(SRC / "lifecycle.rs"))
+        # Phase 3D-3: "synthetic, or listed in the build's (empty in release) enablement list" -- see tests/test_phase3d3_contract.py
+        life = text(SRC / "lifecycle.rs")
+        self.assertIn('let synthetic_ok = r.synthetic && r.tool_id.starts_with("synthetic-");', life)
+        self.assertIn("!synthetic_ok && !gate.iter().any(|g| g.allows(a.recipe))", life)
         approval = production("approval.rs")
         self.assertIn("ApprovalPolicy { allow_synthetic: false, allow_in_app: false }", approval)
 

@@ -1,0 +1,303 @@
+{
+  "phase": "first",
+  "passed": 74,
+  "total": 74,
+  "results": [
+    {
+      "label": "17 install panels (13 real entries + 4 synthetic)",
+      "value": true
+    },
+    {
+      "label": "synthetic-hello: 'Kurulabilir'",
+      "value": true
+    },
+    {
+      "label": "synthetic-unverified-tool: 'Doğrulama tamamlanmadı' and no install button",
+      "value": true
+    },
+    {
+      "label": "synthetic-license-pending: 'Lisans incelemesi gerekli' and no install button",
+      "value": true
+    },
+    {
+      "label": "a REAL catalog entry (gitleaks) is 'Doğrulama tamamlanmadı' with no install button",
+      "value": true
+    },
+    {
+      "label": "a REAL entry cannot be previewed even through the IPC (forged call)",
+      "value": true
+    },
+    {
+      "label": "the manager's folder does not exist yet (looking created nothing)",
+      "value": true
+    },
+    {
+      "label": "open the installation preview",
+      "value": true
+    },
+    {
+      "label": "preview heading is shown",
+      "value": true
+    },
+    {
+      "label": "preview: exact version, platform, digest, file name",
+      "value": true
+    },
+    {
+      "label": "preview: every file-system effect listed, none absolute",
+      "value": true
+    },
+    {
+      "label": "preview: says nothing is executed, no network, PATH untouched",
+      "value": true
+    },
+    {
+      "label": "preview: notices (components + unresolved) are part of the confirmation",
+      "value": true
+    },
+    {
+      "label": "preview: says what the confirmation is NOT (no identity proof)",
+      "value": true
+    },
+    {
+      "label": "preview: marked SENTETİK DENEME",
+      "value": true
+    },
+    {
+      "label": "the confirm button is disabled until the acknowledgement is ticked",
+      "value": true
+    },
+    {
+      "label": "nothing was created by opening a preview",
+      "value": true
+    },
+    {
+      "label": "a second preview supersedes the first (the old one is gone)",
+      "value": true
+    },
+    {
+      "label": "forged confirm: unknown extra field (path) is rejected by the IPC layer",
+      "value": true
+    },
+    {
+      "label": "forged confirm: not acknowledged -> refused, nothing happens",
+      "value": true
+    },
+    {
+      "label": "forged confirm after that: the burned offer cannot be used any more",
+      "value": true
+    },
+    {
+      "label": "forged confirm: made-up offer id and malformed id are refused",
+      "value": true
+    },
+    {
+      "label": "still nothing created after the forged attempts",
+      "value": true
+    },
+    {
+      "label": "open a preview again and cancel it with 'Vazgeç'",
+      "value": true
+    },
+    {
+      "label": "after cancelling the tool is 'Kurulabilir' again",
+      "value": true
+    },
+    {
+      "label": "a cancelled offer cannot be confirmed (forged replay of the cancelled id)",
+      "value": true
+    },
+    {
+      "label": "nothing created by cancel",
+      "value": true
+    },
+    {
+      "label": "retained tool: 'Kurulabilir' (the fixture sits in the fixed input folder)",
+      "value": true
+    },
+    {
+      "label": "retained file missing: the preview is refused with its code and creates nothing",
+      "value": true
+    },
+    {
+      "label": "retained file with the right size but other content: refused (INSTALL_ARTIFACT_REJECTED)",
+      "value": true
+    },
+    {
+      "label": "nothing was created by those refusals",
+      "value": true
+    },
+    {
+      "label": "retained file back: preview opens; the file is swapped for other content BEFORE the confirmation",
+      "value": true
+    },
+    {
+      "label": "the swap was caught before the first change: no manager folder exists",
+      "value": true
+    },
+    {
+      "label": "install the retained tool through the real window",
+      "value": true
+    },
+    {
+      "label": "the retained tool is on disk, equals the retained file, and the retained file itself is unchanged",
+      "value": true
+    },
+    {
+      "label": "remove the retained tool; the retained file is still there byte-identical",
+      "value": true
+    },
+    {
+      "label": "open the preview and tick the acknowledgement",
+      "value": true
+    },
+    {
+      "label": "the confirm button is now enabled and is pressed",
+      "value": true
+    },
+    {
+      "label": "result: 'Tamamlandı' and the receipt is shown",
+      "value": true
+    },
+    {
+      "label": "the file is on disk exactly where the preview said, with the digest the preview showed",
+      "value": true
+    },
+    {
+      "label": "the version folder holds ONLY artifact.bin (no sidecar / notice file)",
+      "value": true
+    },
+    {
+      "label": "no file outside the manager folder and the database was created",
+      "value": true
+    },
+    {
+      "label": "the manager folder holds exactly the fixed layout",
+      "value": true
+    },
+    {
+      "label": "no lock, staging or snapshot leftovers",
+      "value": true
+    },
+    {
+      "label": "the installed file is NOT executed: it is a plain data file and nothing started",
+      "value": true
+    },
+    {
+      "label": "a second install of the same tool is refused before any preview exists",
+      "value": true
+    },
+    {
+      "label": "after the result the status is 'Kurulu ve doğrulandı'",
+      "value": true
+    },
+    {
+      "label": "open the installed-tool details",
+      "value": true
+    },
+    {
+      "label": "details: version, relative location, digest, 5 passed checks, notices, 'yapmadıkları'",
+      "value": true
+    },
+    {
+      "label": "details show no absolute path or account name",
+      "value": true
+    },
+    {
+      "label": "dashboard counts one installed tool",
+      "value": true
+    },
+    {
+      "label": "audit chain still verifies after the whole sequence",
+      "value": true
+    },
+    {
+      "label": "open the REMOVAL preview and confirm it",
+      "value": true
+    },
+    {
+      "label": "result: removal 'Tamamlandı'",
+      "value": true
+    },
+    {
+      "label": "the version folder and the pointer are gone",
+      "value": true
+    },
+    {
+      "label": "the tool's own user data is byte-identical",
+      "value": true
+    },
+    {
+      "label": "status is 'Kaldırıldı'",
+      "value": true
+    },
+    {
+      "label": "reinstall through the same preview and confirmation",
+      "value": true
+    },
+    {
+      "label": "reinstalled: 'Tamamlandı'",
+      "value": true
+    },
+    {
+      "label": "a tampered installed file is reported as 'Başarısız / dikkat gerekiyor' (drift)",
+      "value": true
+    },
+    {
+      "label": "nothing was repaired or deleted: the tampered bytes are still there",
+      "value": true
+    },
+    {
+      "label": "no removal/install can be opened for a drifted tool",
+      "value": true
+    },
+    {
+      "label": "once the owner restores the file the tool verifies again",
+      "value": true
+    },
+    {
+      "label": "removal with a failing audit write: the answer says it was DONE but the audit row is missing (needs attention)",
+      "value": true
+    },
+    {
+      "label": "the removal really happened on disk",
+      "value": true
+    },
+    {
+      "label": "the tool is 'Başarısız / dikkat gerekiyor' with the audit reason and no new operation can be opened",
+      "value": true
+    },
+    {
+      "label": "recovery while the audit trail still fails reconciles nothing and says so",
+      "value": true
+    },
+    {
+      "label": "recovery with a working audit trail rebuilds the missing row from the receipt and the journal",
+      "value": true
+    },
+    {
+      "label": "the tool is 'Kaldırıldı' again and recovery changed no file of the manager folder",
+      "value": true
+    },
+    {
+      "label": "the status is 'Kaldırıldı' after the reconciliation",
+      "value": true
+    },
+    {
+      "label": "a second recovery reconciles nothing more (idempotent)",
+      "value": true
+    },
+    {
+      "label": "installation with a failing pre-installation audit write is REFUSED (audit_unavailable) and changes no file",
+      "value": true
+    },
+    {
+      "label": "with the audit trail working again the installation goes through (a NEW preview and confirmation)",
+      "value": true
+    },
+    {
+      "label": "the audit chain verifies after all of that",
+      "value": true
+    }
+  ]
+}

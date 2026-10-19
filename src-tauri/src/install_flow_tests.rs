@@ -1246,3 +1246,5 @@ fn the_workflow_modules_never_touch_windows_hello_the_approval_ledger_or_a_key_s
         }
     }
 }
+
+include!("install_flow_pilot_tests.rs");

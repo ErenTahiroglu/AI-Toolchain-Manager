@@ -7,8 +7,10 @@
 //
 // Environment: ATM_DATA_DIR (the isolated directory the application uses), EVIDENCE_DIR (screenshots and result.json are written here).
 import { createHash } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { diff, inventory } from "./fs_inventory.mjs";
 
 const DATA = process.env.ATM_DATA_DIR;
 const OUT = process.env.EVIDENCE_DIR;
@@ -40,6 +42,12 @@ const shot = async (name, selector) => {
   writeFileSync(join(OUT, `${PHASE}-${name}.png`), Buffer.from(r.result.data, "base64"));
 };
 
+// ---- helpers for the Phase 3D-3 scenarios ------------------------------------------------------------------------------------------
+const saveInventory = (name) => writeFileSync(join(OUT, `inventory-${name}.json`), JSON.stringify(inventory(DATA), null, 1));
+// A second connection to the application's own database, used ONLY by this test to make audit writes fail (a trigger) and to remove the trigger.
+const sqlite = (sql) => { const db = new DatabaseSync(join(DATA, "atm.sqlite")); db.exec("PRAGMA busy_timeout = 5000"); db.exec(sql); db.close(); };
+const failAudit = (eventType, name) => sqlite(`CREATE TRIGGER ${name} BEFORE INSERT ON audit_events WHEN json_extract(NEW.record_json, '$.eventType') = '${eventType}' AND json_extract(NEW.record_json, '$.outcome') = 'passed' BEGIN SELECT RAISE(ABORT, 'audit write refused'); END;`);
+const dropTrigger = (name) => sqlite(`DROP TRIGGER ${name};`);
 const results = [];
 const check = async (label, expr, wait = 300) => {
   const v = typeof expr === "function" ? await expr() : await ev(expr);
@@ -82,15 +90,28 @@ const openCatalog = async () => {
   await waitFor(`!!__h.group('${HELLO}')`);
   await sleep(500);
 };
-const dataFilesOutsideManager = () => readdirSync(DATA).filter((n) => !n.startsWith("atm.sqlite") && n !== "atm-managed" && n !== "backups" && !/^(crash|diagnostic)/i.test(n));
+const dataFilesOutsideManager = () => readdirSync(DATA).filter((n) => !n.startsWith("atm.sqlite") && n !== "atm-managed" && n !== "pilot-input" && n !== "backups" && !/^(crash|diagnostic)/i.test(n));
 
 await sleep(1500);
 await openCatalog();
 await shot("1-catalog");
+const RETAINED = "synthetic-retained";
+const INPUT = join(DATA, "pilot-input", "synthetic-retained.exe");
+/** open the preview of `tool`, tick the acknowledgement and press the confirm button (matched by `confirmRe`) */
+const drive = async (tool, openRe, confirmRe) => {
+  if (!(await ev(click(tool, openRe)))) return false;
+  await sleep(800);
+  await ev(`document.querySelector('.preview-card input[type=checkbox]')?.click()`);
+  await sleep(300);
+  const ok = await ev(clickAnywhere(confirmRe));
+  await sleep(900);
+  return ok;
+};
 
 if (PHASE === "first") {
   // ---- the catalog tells the situations apart --------------------------------------------------------------------------------------
-  await check("16 install panels (13 real entries + 3 synthetic)", `document.querySelectorAll('[role=group][aria-label^="Kurulum: "]').length === 16`);
+  await check("17 install panels (13 real entries + 4 synthetic)", `document.querySelectorAll('[role=group][aria-label^="Kurulum: "]').length === 17`);
+  saveInventory("0-start");
   await check("synthetic-hello: 'Kurulabilir'", `${groupText(HELLO)}.includes('Kurulabilir')`);
   await check("synthetic-unverified-tool: 'Doğrulama tamamlanmadı' and no install button", `${groupText("synthetic-unverified-tool")}.includes('Doğrulama tamamlanmadı') && !${groupText("synthetic-unverified-tool")}.includes('Kurulum önizlemesini aç')`);
   await check("synthetic-license-pending: 'Lisans incelemesi gerekli' and no install button", `${groupText("synthetic-license-pending")}.includes('Lisans incelemesi gerekli') && !${groupText("synthetic-license-pending")}.includes('Kurulum önizlemesini aç')`);
@@ -127,6 +148,42 @@ if (PHASE === "first") {
   await check("after cancelling the tool is 'Kurulabilir' again", `${groupText(HELLO)}.includes('Kurulabilir') && !${groupText(HELLO)}.includes('Onayınız bekleniyor')`);
   await check("a cancelled offer cannot be confirmed (forged replay of the cancelled id)", async () => { const r = await ev(`__h.ipc('confirm_install', { request: { offerId: '${offer.offerId}', previewDigest: '${offer.digest}', acknowledged: true } })`); return r.ok && r.value.outcome === "refused"; });
   await check("nothing created by cancel", () => rootDir() === null);
+
+  // ---- the retained-file provider (the way the first real pilot will read its file): no path from the window ---------------------------------
+  await check("retained tool: 'Kurulabilir' (the fixture sits in the fixed input folder)", `${groupText(RETAINED)}.includes('Kurulabilir')`);
+  const retainedOriginal = readFileSync(INPUT);
+  const retainedSha = sha(INPUT);
+  const aside = INPUT + ".aside";
+  renameSync(INPUT, aside);
+  await openCatalog();
+  await check("retained file missing: the preview is refused with its code and creates nothing", async () => { await ev(click(RETAINED, "/Kurulum önizlemesini aç/")); await sleep(900); return ev(`document.body.innerText.includes('INSTALL_ARTIFACT_UNAVAILABLE')`); });
+  renameSync(aside, INPUT);
+  writeFileSync(INPUT, Buffer.alloc(retainedOriginal.length, 7));
+  await openCatalog();
+  await check("retained file with the right size but other content: refused (INSTALL_ARTIFACT_REJECTED)", async () => { await ev(click(RETAINED, "/Kurulum önizlemesini aç/")); await sleep(900); return ev(`document.body.innerText.includes('INSTALL_ARTIFACT_REJECTED')`); });
+  writeFileSync(INPUT, retainedOriginal);
+  await check("nothing was created by those refusals", () => rootDir() === null);
+  await openCatalog();
+  await check("retained file back: preview opens; the file is swapped for other content BEFORE the confirmation", async () => {
+    await ev(click(RETAINED, "/Kurulum önizlemesini aç/")); await sleep(900);
+    writeFileSync(INPUT, Buffer.alloc(retainedOriginal.length, 9));
+    await ev(`document.querySelector('.preview-card input[type=checkbox]')?.click()`); await sleep(300);
+    await ev(clickAnywhere("/Onaylıyorum ve kur/")); await sleep(1200);
+    return ev(`document.body.innerText.includes('Sonuç: Reddedildi') && document.body.innerText.includes('artifact_does_not_match_recipe')`);
+  });
+  await shot("2b-swapped-refused", ".result-card");
+  await check("the swap was caught before the first change: no manager folder exists", () => rootDir() === null);
+  writeFileSync(INPUT, retainedOriginal);
+  await ev(clickAnywhere("/^Tamam$/"));
+  await openCatalog();
+  await check("install the retained tool through the real window", async () => await drive(RETAINED, "/Kurulum önizlemesini aç/", "/Onaylıyorum ve kur/") && await waitFor(`document.body.innerText.includes('Sonuç: Tamamlandı')`));
+  await check("the retained tool is on disk, equals the retained file, and the retained file itself is unchanged", () => existsSync(join(rootDir(), "versions", RETAINED, "1.0.0", "artifact.bin")) && sha(join(rootDir(), "versions", RETAINED, "1.0.0", "artifact.bin")) === retainedSha && sha(INPUT) === retainedSha);
+  await ev(clickAnywhere("/^Tamam$/"));
+  await openCatalog();
+  await check("remove the retained tool; the retained file is still there byte-identical", async () => await drive(RETAINED, "/Kaldırma önizlemesini aç/", "/Onaylıyorum ve kaldır/") && await waitFor(`document.body.innerText.includes('Kaldırma tamamlandı')`) && sha(INPUT) === retainedSha && !existsSync(join(rootDir(), "versions", RETAINED)));
+  await ev(clickAnywhere("/^Tamam$/"));
+  await openCatalog();
+  saveInventory("1-before-hello-install");
 
   // ---- confirm: the real install ----------------------------------------------------------------------------------------------------
   await check("open the preview and tick the acknowledgement", async () => { await ev(click(HELLO, "/Kurulum önizlemesini aç/")); await sleep(700); return ev(`(() => { const c = document.querySelector('.preview-card input[type=checkbox]'); if (!c) return false; c.click(); return true; })()`); }, 400);
@@ -186,6 +243,48 @@ if (PHASE === "first") {
   await ev(`__h.nav('Ana Sayfa')`); await sleep(500);
   await openCatalog();
   await check("once the owner restores the file the tool verifies again", `${groupText(HELLO)}.includes('Kurulu ve doğrulandı')`);
+  saveInventory("2-after-install");
+
+  // ---- Issue #22 in the real window: audit failures are never ignored ------------------------------------------------------------------------
+  // (1) a failed post-removal audit row: the removal HAPPENS, is reported as needing attention, and recovery reconciles it from the receipt
+  failAudit("uninstall", "gui_refuse_uninstall_row");
+  await openCatalog();
+  await check("removal with a failing audit write: the answer says it was DONE but the audit row is missing (needs attention)", async () => {
+    await drive(HELLO, "/Kaldırma önizlemesini aç/", "/Onaylıyorum ve kaldır/");
+    return ev(`document.body.innerText.includes('Sonuç: Yapıldı — ama dikkat gerekiyor') && document.body.innerText.includes('denetim kaydı yazılamadı') && !document.body.innerText.includes('Kaldırma tamamlandı')`);
+  });
+  await shot("8-audit-pending", ".result-card");
+  await check("the removal really happened on disk", () => !existsSync(join(rootDir(), "versions", HELLO)));
+  await ev(clickAnywhere("/^Tamam$/"));
+  await openCatalog();
+  await check("the tool is 'Başarısız / dikkat gerekiyor' with the audit reason and no new operation can be opened", `${groupText(HELLO)}.includes('Başarısız / dikkat gerekiyor') && ${groupText(HELLO)}.includes('denetim kaydı yazılamadı') && !${groupText(HELLO)}.includes('Kurulum önizlemesini aç')`);
+  const beforeRecover = inventory(DATA);
+  await check("recovery while the audit trail still fails reconciles nothing and says so", async () => { await ev(click(HELLO, "/Kurtarmayı çalıştır/")); await sleep(1200); return ev(`document.body.innerText.includes('0 eksik denetim kaydı makbuzdan yeniden kuruldu, 1 kayıt kurulamadı')`); });
+  dropTrigger("gui_refuse_uninstall_row");
+  await check("recovery with a working audit trail rebuilds the missing row from the receipt and the journal", async () => { await ev(click(HELLO, "/Kurtarmayı çalıştır/")); await sleep(1500); return ev(`document.body.innerText.includes('1 eksik denetim kaydı makbuzdan yeniden kuruldu, 0 kayıt kurulamadı')`); });
+  await openCatalog();
+  await check("the tool is 'Kaldırıldı' again and recovery changed no file of the manager folder", () => { const d = diff(beforeRecover, inventory(DATA)); return d.added.length === 0 && d.removed.length === 0 && d.changed.every((k) => k.includes("atm.sqlite")); });
+  await check("the status is 'Kaldırıldı' after the reconciliation", `${groupText(HELLO)}.includes('Kaldırıldı')`);
+  await check("a second recovery reconciles nothing more (idempotent)", async () => { const r = await ev(`__h.ipc('recover_installations')`); return r.ok && r.value.auditReconciled === 0 && r.value.auditUnreconciled === 0; });
+  // (2) a failed MANDATORY pre-installation audit row: nothing is applied at all
+  failAudit("approve", "gui_refuse_approve_row");
+  await openCatalog();
+  const rootBefore = inventory(DATA);
+  await check("installation with a failing pre-installation audit write is REFUSED (audit_unavailable) and changes no file", async () => {
+    await drive(HELLO, "/Kurulum önizlemesini aç/", "/Onaylıyorum ve kur/");
+    const refused = await ev(`document.body.innerText.includes('Sonuç: Reddedildi') && document.body.innerText.includes('audit_unavailable')`);
+    const d = diff(rootBefore, inventory(DATA));
+    return refused && d.added.length === 0 && d.removed.length === 0 && d.changed.every((k) => k.includes("atm.sqlite"));
+  });
+  await ev(clickAnywhere("/^Tamam$/"));
+  dropTrigger("gui_refuse_approve_row");
+  await openCatalog();
+  await check("with the audit trail working again the installation goes through (a NEW preview and confirmation)", async () => await drive(HELLO, "/Kurulum önizlemesini aç/", "/Onaylıyorum ve kur/") && await waitFor(`document.body.innerText.includes('Sonuç: Tamamlandı')`));
+  await ev(clickAnywhere("/^Tamam$/"));
+  await openCatalog();
+  await check("the audit chain verifies after all of that", async () => { const r = await ev(`__h.ipc('verify_audit_chain')`); return r.ok && r.value.ok === true; });
+  saveInventory("3-final");
+  writeFileSync(join(OUT, "inventory-diff-start-to-final.json"), JSON.stringify(diff(JSON.parse(readFileSync(join(OUT, "inventory-0-start.json"), "utf8")), JSON.parse(readFileSync(join(OUT, "inventory-3-final.json"), "utf8"))), null, 1));
 } else {
   // ---- after an application restart (the earlier process was killed) -------------------------------------------------------------------
   await check("after the restart the tool is still 'Kurulu ve doğrulandı'", `${groupText(HELLO)}.includes('Kurulu ve doğrulandı')`);

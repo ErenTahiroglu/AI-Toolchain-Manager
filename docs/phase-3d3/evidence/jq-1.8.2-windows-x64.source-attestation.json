@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "jq-1-8-2-windows-x64-request-a",
+  "toolId": "jq",
+  "version": "1.8.2",
+  "platformTarget": "windows-x64",
+  "artifact": {
+    "fileName": "jq-windows-amd64.exe",
+    "sizeBytes": 1035264,
+    "sha256": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627",
+    "format": "pe-x64"
+  },
+  "repository": {
+    "slug": "jqlang/jq",
+    "repositoryId": 5101141,
+    "ownerId": 104800540
+  },
+  "source": {
+    "tag": "jq-1.8.2",
+    "commit": "34f7186b86743a083a589741b6cea95293524108"
+  },
+  "workflow": {
+    "path": ".github/workflows/ci.yml",
+    "gitRef": "refs/tags/jq-1.8.2",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "runnerEnvironment": "github-hosted",
+    "trigger": "push",
+    "runUrl": "https://github.com/jqlang/jq/actions/runs/27872779544/attempts/1",
+    "transparencyLogIndex": 1884519155
+  },
+  "verification": {
+    "methods": [
+      "gh attestation verify (official verifier, strict identity policy, online and byte-exact offline replay)",
+      "tools/verify_sigstore_bundle.py + tools/review_jq_verification.py (supporting verifier, 151 checks over the retained session)",
+      "gpg detached signature, isolated keyring, pinned fingerprint"
+    ],
+    "sessionId": "jq-review-20261018T2240Z",
+    "checksTotal": 151,
+    "checksFailed": 0,
+    "officialVerifierPassed": true,
+    "exactBytesVerified": true,
+    "gpgFingerprint": "93079A9511EFC0B7D6CDBFB5B0DA60FB454BAF18",
+    "gpgSignatureValid": true,
+    "networkPolicyCompliant": false,
+    "networkIncident": "the first online `gh attestation verify` contacted tmaproduction.blob.core.windows.net, a host outside the approved list; recorded permanently in network-incident.json and NOT accepted retroactively",
+    "offlineReplayContactedHosts": 0,
+    "acceptance": "Issue #19 closure: the cryptographic evidence is conditionally accepted; the network contact is not. Effective in this application only if a reviewed change compiles this record in."
+  },
+  "retainedEvidence": [
+    {
+      "path": "docs/phase-3d0/evidence/jq-1.8.2-windows-amd64.attestations.json",
+      "sha256": "91da51db9953c757ba91a8565e5c8c76ef291ba8e8dd1a1e9630f87718383198"
+    },
+    {
+      "path": "docs/phase-3d0/evidence/report-windows-amd64.json",
+      "sha256": "e3ddecc24dcb973d2eb654e3d18b4103ce0cb12c458b2b3221dcdcd6ba59a3a0"
+    },
+    {
+      "path": "docs/phase-3d0/evidence/jq-1.8.2-sha256sum.txt",
+      "sha256": "dc86824a41c165ece971ff691aff6e08bbfe6e1d1f531688b47ee78c283a85cd"
+    },
+    {
+      "path": "docs/phase-3d0/evidence/request-a-session-20261018/review-v2.json",
+      "sha256": "c192a8c9af39abe195c9416e0c6986d90a9d49f1f9c05f5b0357c6df7d91d7ae"
+    },
+    {
+      "path": "docs/phase-3d0/evidence/request-a-session-20261018/jq-windows-amd64.exe.gh.json",
+      "sha256": "2acf6875c9eaa273f7022dc76e5ba747ca05adf4cf6a9338a0085588d6586196"
+    },
+    {
+      "path": "docs/phase-3d0/evidence/request-a-session-20261018/jq-windows-amd64.exe.gpg.status",
+      "sha256": "ea534fe121629598e5bddd448b8c3c42326f381d8cf4b82b79a923bd59c7d74c"
+    },
+    {
+      "path": "docs/phase-3d0/evidence/request-a-session-20261018/jq-windows-amd64.exe.custom.json",
+      "sha256": "5b5cc9e10ba64c3a6b77c990f34e6e1263ef5b72cf01b49013fe7ab40af348e8"
+    },
+    {
+      "path": "docs/phase-3d0/evidence/request-a-session-20261018/authenticode-windows.json",
+      "sha256": "971c2a98f91cd0742216e888228349562d555e60a08a026b1343f2ed0ca58618"
+    },
+    {
+      "path": "docs/phase-3d0/evidence/request-a-session-20261018/static-header-facts.json",
+      "sha256": "4e93e2c79a8b2360f22fa971fdda621a6f9f000cbf306e03d6a01eabeabfe8fd"
+    },
+    {
+      "path": "docs/phase-3d0/evidence/request-a-session-20261018/network-incident.json",
+      "sha256": "c8c166608fd8ea0d5e500e24b9ab51ba978fde4f2e51e790270d86eb72fea4ee"
+    }
+  ],
+  "retainedSessionListingSha256": "f32cadfe6954284ecbf74ac36f81fd48bbb4590449eb2c9b18c657024e757711"
+}

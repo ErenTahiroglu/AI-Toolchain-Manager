@@ -148,7 +148,7 @@ pub struct Receipt {
     pub approval_id: String,
     pub platform_target: String,
     pub computer_id: String,
-    /// Always true: the engine cannot produce anything else.
+    /// True for a synthetic recipe (and always in the path-based engine); false only for a real recipe that the build was explicitly enabled to apply.
     pub synthetic: bool,
     pub completed_at: String,
     /// Always `committed`.
@@ -821,6 +821,29 @@ pub(crate) struct Pointer {
     pub(crate) txn: String,
 }
 
+/// One REAL recipe that a build has been explicitly enabled to apply (Phase 3D-3): the exact tool, version, platform, reviewed recipe digest and
+/// artifact digest. A release build's list is EMPTY, so no real recipe can be applied; enabling one is a reviewed change to that list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PilotRecipe {
+    pub tool_id: String,
+    pub version: String,
+    pub platform_target: String,
+    pub recipe_digest: String,
+    pub artifact_sha256: String,
+}
+
+impl PilotRecipe {
+    pub(crate) fn allows(&self, recipe: &ValidatedRecipe) -> bool {
+        let r = recipe.recipe();
+        !r.synthetic
+            && self.tool_id == r.tool_id
+            && self.version == r.version
+            && self.platform_target == r.target.platform_target
+            && self.recipe_digest == recipe.digest()
+            && self.artifact_sha256 == r.artifact.sha256
+    }
+}
+
 /// The synthetic-recipe and approval checks shared by the synthetic engine and the isolated test-mode adapter.
 pub(crate) fn check_authority(
     a: &Authority,
@@ -829,9 +852,23 @@ pub(crate) fn check_authority(
     host_platform: &str,
     now: DateTime<Utc>,
 ) -> Result<(), TxnError> {
+    check_authority_gated(a, action, computer_id, host_platform, now, &[])
+}
+
+/// The same, with the list of real recipes this build may apply. Everything else is unchanged: a recipe that is neither synthetic nor listed is
+/// refused with the same code as before.
+pub(crate) fn check_authority_gated(
+    a: &Authority,
+    action: Action,
+    computer_id: &str,
+    host_platform: &str,
+    now: DateTime<Utc>,
+    gate: &[PilotRecipe],
+) -> Result<(), TxnError> {
     let r = a.recipe.recipe();
     let ap = a.approval.approval();
-    if !r.synthetic || !r.tool_id.starts_with("synthetic-") {
+    let synthetic_ok = r.synthetic && r.tool_id.starts_with("synthetic-");
+    if !synthetic_ok && !gate.iter().any(|g| g.allows(a.recipe)) {
         return Err(TxnError::Refused("not_a_synthetic_recipe"));
     }
     if ap.action != action

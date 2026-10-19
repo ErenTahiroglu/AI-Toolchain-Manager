@@ -1,0 +1,116 @@
+{
+  "recipe": {
+    "schemaVersion": 1,
+    "recipeId": "jq-1.8.2-windows-x64",
+    "revision": 2,
+    "synthetic": false,
+    "toolId": "jq",
+    "version": "1.8.2",
+    "target": {
+      "platformTarget": "windows-x64",
+      "agentSurface": "local-cli",
+      "scope": "user"
+    },
+    "source": {
+      "repository": "jqlang/jq",
+      "immutableCommit": "34f7186b86743a083a589741b6cea95293524108",
+      "sourceAttested": true
+    },
+    "artifact": {
+      "artifactId": "primary",
+      "fileName": "jq-windows-amd64.exe",
+      "sizeBytes": 1035264,
+      "sha256": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627",
+      "digestScope": "exact_file",
+      "format": "pe-x64"
+    },
+    "authentication": [
+      {
+        "kind": "authenticated_reference_digest",
+        "evidenceId": "request-a-session-20261018"
+      },
+      {
+        "kind": "source_attestation_evidence",
+        "evidenceId": "jq-1-8-2-windows-x64-request-a"
+      }
+    ],
+    "license": {
+      "state": "accepted_local_use",
+      "spdxId": "LicenseRef-jq-1.8.2-win-x64",
+      "evidenceId": "R34"
+    },
+    "permissions": [
+      "current_user_account",
+      "write_manager_folders"
+    ],
+    "filesystemChanges": [
+      {
+        "area": "manager_staging",
+        "kind": "create"
+      },
+      {
+        "area": "manager_versions",
+        "kind": "create"
+      },
+      {
+        "area": "manager_versions",
+        "kind": "remove"
+      },
+      {
+        "area": "manager_state",
+        "kind": "replace"
+      },
+      {
+        "area": "manager_state",
+        "kind": "remove"
+      }
+    ],
+    "network": [],
+    "lifecycleActions": [
+      "install",
+      "uninstall"
+    ],
+    "steps": [
+      {
+        "operation": "fetch-release-artifact",
+        "artifactId": "primary"
+      },
+      {
+        "operation": "verify-artifact-digest",
+        "artifactId": "primary",
+        "expectedSha256": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627"
+      },
+      {
+        "operation": "stage-private-copy",
+        "artifactId": "primary",
+        "destinationId": "manager-owned-staging"
+      },
+      {
+        "operation": "activate-staged-artifact",
+        "artifactId": "primary",
+        "activationSlot": "manager-versioned-binary",
+        "activationMethod": "atomic-version-switch"
+      }
+    ],
+    "rollback": {
+      "state": "designed",
+      "undoes": [
+        "pointer_restore",
+        "staging_removal",
+        "version_folder_removal",
+        "removed_version_restore"
+      ],
+      "doesNotUndo": [
+        "tool_user_data",
+        "external_effects",
+        "agent_configuration"
+      ]
+    }
+  },
+  "review": {
+    "state": "draft",
+    "reviewerId": "none-yet",
+    "reviewedRecipeDigest": "",
+    "stagingEvidence": []
+  }
+}

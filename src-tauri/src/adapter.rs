@@ -27,8 +27,8 @@ use crate::{
     device_trust::{self, ApprovalLedger, AuditSink, DeviceApproval, Expected, KeyStore, TrustPolicy},
     discovery::reference::ReferenceSet,
     lifecycle::{
-        check_artifact, check_authority, receipt_digest, sha256_hex_bytes, Authority, ClockFn, Fault, FaultFn, NotUndone, Outcome,
-        OwnedFile, Phase, Point, Pointer, Receipt, Recovered, RollbackReport, TxnError, TxnState,
+        check_artifact, check_authority_gated, receipt_digest, sha256_hex_bytes, Authority, ClockFn, Fault, FaultFn, NotUndone, Outcome,
+        OwnedFile, Phase, PilotRecipe, Point, Pointer, Receipt, Recovered, RollbackReport, TxnError, TxnState,
     },
     managed_fs::{Dir, Expect, FileH, FsError, Identity, Kind},
     managed_root::ManagedRoot,
@@ -101,6 +101,8 @@ pub struct Adapter<'a> {
     /// The device-approval collaborators. `None` for the in-app-confirmation workflow, which has no key store.
     trust: Option<Trust<'a>>,
     mode: Mode,
+    /// The real recipes this adapter may apply (empty everywhere except in a test or a build that was explicitly enabled for one).
+    gate: &'a [PilotRecipe],
 }
 
 /// The transaction record (journal). Reuses the lifecycle data types, with its own on-disk shape and digest.
@@ -117,6 +119,9 @@ struct Txn {
     recipe_digest: String,
     approval_id: String,
     device_approval_id: Option<String>,
+    /// A REAL (non-synthetic) recipe that the build was enabled to apply. Absent in every synthetic journal, so their digests are unchanged.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    real: bool,
     platform_target: String,
     computer_id: String,
     state: TxnState,
@@ -176,7 +181,7 @@ impl<'a> Adapter<'a> {
         clock: ClockFn<'a>,
         trust: Trust<'a>,
     ) -> Adapter<'a> {
-        Adapter { root, refs, host_platform, clock, fault: None, trust: Some(trust), mode: Mode::Production }
+        Adapter { root, refs, host_platform, clock, fault: None, trust: Some(trust), mode: Mode::Production, gate: &[] }
     }
 
     /// The only adapter that can act, and it exists in test builds only.
@@ -189,7 +194,7 @@ impl<'a> Adapter<'a> {
         fault: Option<FaultFn<'a>>,
         trust: Trust<'a>,
     ) -> Adapter<'a> {
-        Adapter { root, refs, host_platform, clock, fault, trust: Some(trust), mode: Mode::TestSynthetic }
+        Adapter { root, refs, host_platform, clock, fault, trust: Some(trust), mode: Mode::TestSynthetic, gate: &[] }
     }
 
     /// The acting adapter of the Phase 3D-2 workflow: synthetic artifacts only (the recipe gate is unchanged), authorised by an in-app
@@ -203,7 +208,18 @@ impl<'a> Adapter<'a> {
         clock: ClockFn<'a>,
         fault: Option<FaultFn<'a>>,
     ) -> Adapter<'a> {
-        Adapter { root, refs, host_platform, clock, fault, trust: None, mode: Mode::MvpSynthetic }
+        Adapter { root, refs, host_platform, clock, fault, trust: None, mode: Mode::MvpSynthetic, gate: &[] }
+    }
+
+    /// Enables exactly the listed real recipes (Phase 3D-3). Tests and the explicit pilot build only; a release build never calls this.
+    #[cfg(any(test, feature = "synthetic-pilot"))]
+    pub fn with_pilot_gate(mut self, gate: &'a [PilotRecipe]) -> Adapter<'a> {
+        self.gate = gate;
+        self
+    }
+
+    fn authority(&self, a: &Authority, action: Action) -> R<()> {
+        check_authority_gated(a, action, self.root.computer_id(), self.host_platform, (self.clock)(), self.gate)
     }
 
     fn gate(&self) -> R<()> {
@@ -261,6 +277,7 @@ impl<'a> Adapter<'a> {
             recipe_digest: a.recipe.digest().to_string(),
             approval_id: a.approval.approval().approval_id.clone(),
             device_approval_id: None,
+            real: !r.synthetic,
             platform_target: self.host_platform.to_string(),
             computer_id: self.root.computer_id().to_string(),
             state: TxnState::Started,
@@ -648,7 +665,7 @@ impl<'a> Adapter<'a> {
     /// Everything that can be decided without changing anything. Returns (artifact digest, installed pointer, existing receipt when the
     /// requested state already holds).
     fn preflight_apply(&self, d: &Dirs, a: &Authority, action: Action, artifact: &[u8]) -> R<(String, Option<Pointer>, Option<Receipt>)> {
-        check_authority(a, action, self.root.computer_id(), self.host_platform, (self.clock)())?;
+        self.authority(a, action)?;
         let r = a.recipe.recipe();
         if !crate::managed_fs::valid_name(&r.tool_id) || !crate::managed_fs::valid_name(&r.version) {
             return Err(TxnError::Refused("unsafe_path_component"));
@@ -690,7 +707,7 @@ impl<'a> Adapter<'a> {
                 })
             }
             (Action::Uninstall, None) => {
-                check_authority(a, action, self.root.computer_id(), self.host_platform, (self.clock)())?;
+                self.authority(a, action)?;
                 self.ensure_free(&d, &r.tool_id)?;
                 let cur = Self::read_pointer(&d, &r.tool_id)?;
                 Ok(Preflight {
@@ -1071,7 +1088,7 @@ impl<'a> Adapter<'a> {
             approval_id: t.approval_id.clone(),
             platform_target: t.platform_target.clone(),
             computer_id: t.computer_id.clone(),
-            synthetic: true,
+            synthetic: !t.real,
             completed_at: self.now(),
             state: "committed".to_string(),
             kept: self.kept(&t.tool_id),
@@ -1180,7 +1197,7 @@ impl<'a> Adapter<'a> {
     fn remove(&self, a: &Authority, auth: Auth) -> R<Outcome> {
         self.gate()?;
         let d = self.dirs()?;
-        check_authority(a, Action::Uninstall, self.root.computer_id(), self.host_platform, (self.clock)())?;
+        self.authority(a, Action::Uninstall)?;
         let r = a.recipe.recipe();
         if !crate::managed_fs::valid_name(&r.tool_id) {
             return Err(TxnError::Refused("unsafe_path_component"));
@@ -1706,6 +1723,30 @@ impl<'a> Adapter<'a> {
             }
         }
         out.sort_by(|a, b| a.completed_at.cmp(&b.completed_at).then_with(|| a.txn_id.cmp(&b.txn_id)));
+        Ok(out)
+    }
+
+    /// Every committed receipt of every tool whose own digest holds, each with a flag: does the journal INDEPENDENTLY say `committed` for the same
+    /// transaction, tool and approval? (read-only). Only a receipt with the flag set is evidence that audit reconciliation may rely on.
+    pub fn committed_receipts(&self) -> R<Vec<(Receipt, bool)>> {
+        self.gate()?;
+        let d = self.dirs()?;
+        let mut out = Vec::new();
+        for (name, kind) in d.receipts.list().map_err(fs_err)? {
+            if kind != Kind::File || !name.ends_with(".json") {
+                continue;
+            }
+            let Ok(bytes) = d.receipts.read_file(&name, MAX_JSON) else { continue };
+            let Ok(r) = serde_json::from_slice::<Receipt>(&bytes) else { continue };
+            if receipt_digest(&r) != r.receipt_digest || r.state != "committed" {
+                continue;
+            }
+            let journal = Self::read_txn(&d, &format!("{}.json", r.txn_id));
+            let confirmed =
+                journal.is_some_and(|t| t.state == TxnState::Committed && t.tool_id == r.tool_id && t.approval_id == r.approval_id);
+            out.push((r, confirmed));
+        }
+        out.sort_by(|a, b| a.0.completed_at.cmp(&b.0.completed_at).then_with(|| a.0.txn_id.cmp(&b.0.txn_id)));
         Ok(out)
     }
 

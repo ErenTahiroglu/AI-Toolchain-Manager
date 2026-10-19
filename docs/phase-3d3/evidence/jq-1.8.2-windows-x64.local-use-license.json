@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "R34",
+  "scope": "local_use_no_redistribution",
+  "decision": "LICENSE_PASS_LOCAL_USE",
+  "toolId": "jq",
+  "version": "1.8.2",
+  "platformTarget": "windows-x64",
+  "artifactSha256": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627",
+  "spdxExpression": "LicenseRef-jq-1.8.2-win-x64",
+  "noticeBundleSha256": "9209879a46288f9c68397bdffd9574106c4a9544578e7eb905ba10c113ed57df",
+  "reviewRecordPath": "docs/phase-3d3/LICENSE-LOCAL-USE-REVIEW.md",
+  "reviewRecordSha256": "9b8a0e9b2dbcb73834d86cd262f26c7c954da590e79e4b1e054285701e002f00",
+  "conditions": [
+    {
+      "id": "C1",
+      "text": "The project does not host, mirror, bundle or re-sign the executable.",
+      "satisfiedBy": "No jq byte is in the repository (tests/test_phase3d3_contract.py hashes every tracked file); the application ships no jq; the file is the user's own retained copy of the upstream release asset; the manager only writes it into the user's own manager folder."
+    },
+    {
+      "id": "C2",
+      "text": "Third-party notices are available to the person inside the application; the 'next to the installed version' half is replaced.",
+      "satisfiedBy": "Application-presented, digest-bound complete notice bundle (docs/phase-3d2/NOTICES-DECISION.md); amendment of C2 instructed for this local-use pilot only."
+    },
+    {
+      "id": "C3",
+      "text": "Q1-Q3 are evaluated in writing.",
+      "satisfiedBy": "docs/phase-3d3/LICENSE-LOCAL-USE-REVIEW.md section 3: none of them blocks a local, non-redistributing copy; all stay open for redistribution."
+    },
+    {
+      "id": "C4",
+      "text": "Any move toward redistribution re-opens the review.",
+      "satisfiedBy": "The recipe state is accepted_local_use, which never satisfies redistribution_permitted(); the record is bound to one file digest and one notice text."
+    },
+    {
+      "id": "C5",
+      "text": "license.state stays unknown until C1-C3 are recorded.",
+      "satisfiedBy": "C1-C3 are recorded here; the state becomes accepted_local_use, never accepted."
+    }
+  ],
+  "openQuestions": [
+    {
+      "id": "Q1",
+      "text": "Do Oniguruma's compiled Unicode 16.0 tables count as 'Data Files or Software' under Unicode License V3?",
+      "blocksLocalUse": false,
+      "blocksRedistribution": true
+    },
+    {
+      "id": "Q2",
+      "text": "Which mingw-w64 runtime parts are linked (stripped executable)?",
+      "blocksLocalUse": false,
+      "blocksRedistribution": true
+    },
+    {
+      "id": "Q3",
+      "text": "Is libgcc linked, and does the upstream build meet every detail of the GCC Runtime Library Exception? (libssp is linked.)",
+      "blocksLocalUse": false,
+      "blocksRedistribution": true
+    }
+  ]
+}

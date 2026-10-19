@@ -2,6 +2,8 @@ mod adapter;
 mod approval;
 mod approval_store;
 mod archive_check;
+mod artifact_provider;
+mod attestation;
 mod audit;
 mod backups;
 mod catalog;

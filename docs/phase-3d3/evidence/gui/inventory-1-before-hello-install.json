@@ -1,0 +1,83 @@
+{
+ "atm-managed/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/data/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/journal/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/journal/txn-40b427e53f98479daaf1d6d13539fe40.json": {
+  "kind": "file",
+  "size": 1831,
+  "links": 1,
+  "sha256": "289a4b5595d0b540ec70e2e789df19bee53cb174f1fdd9c9042a17bd2250962a"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/journal/txn-7d18a14d72544083a7504a1696365be5.json": {
+  "kind": "file",
+  "size": 1788,
+  "links": 1,
+  "sha256": "73c8f8516e4cfe2f806df0e798330cecaca096541a4ccc99b37ccb786627afaa"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/locks/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/receipts/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/receipts/txn-40b427e53f98479daaf1d6d13539fe40.json": {
+  "kind": "file",
+  "size": 705,
+  "links": 1,
+  "sha256": "dab51f9c3ba955605d3be77c34e93112c8b4985ac6c00eefdabae8e4b858a90d"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/receipts/txn-7d18a14d72544083a7504a1696365be5.json": {
+  "kind": "file",
+  "size": 707,
+  "links": 1,
+  "sha256": "ea4d8afd18b69bf1e02db8cb88a91bfba41b63a7f49edb53832ca4b88bf286d8"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/snapshots/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/staging/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/state/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/versions/": {
+  "kind": "dir"
+ },
+ "atm.sqlite": {
+  "kind": "file",
+  "size": 4096,
+  "links": 1,
+  "sha256": "da63a52bdf62b3fc863995d79f497584be3ba97c1de4c55d1d301afbafab6cfc"
+ },
+ "atm.sqlite-shm": {
+  "kind": "file",
+  "size": 32768,
+  "links": 1,
+  "sha256": "f1c5604f58bb330b0fff98679554c808b4c76ebeed74a820803cbf4cc81218e5"
+ },
+ "atm.sqlite-wal": {
+  "kind": "file",
+  "size": 824032,
+  "links": 1,
+  "sha256": "c01c0469820e6baa89b158da3d7ac668049af9fd9f7653999822d4a4b3bf355f"
+ },
+ "pilot-input/": {
+  "kind": "dir"
+ },
+ "pilot-input/synthetic-retained.exe": {
+  "kind": "file",
+  "size": 246,
+  "links": 1,
+  "sha256": "fe418d0abc6b9da958c19c6af3f4bf2905769f887bbb5218f41ab57b0b656982"
+ }
+}

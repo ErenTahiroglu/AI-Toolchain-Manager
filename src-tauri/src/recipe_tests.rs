@@ -575,7 +575,13 @@ fn even_a_fully_valid_jq_recipe_cannot_be_registered_or_applied_by_this_build_an
     assert_eq!(BUILT_IN_RECIPES_JSON.trim(), "[]");
     // (b) ... and the engine's own gate still refuses a non-synthetic recipe, in the shared authority check
     let gate = include_str!("lifecycle.rs");
-    assert!(gate.contains("!r.synthetic || !r.tool_id.starts_with(\"synthetic-\")") && gate.contains("not_a_synthetic_recipe"));
+    // (Phase 3D-3: the check became "synthetic OR listed in the build's enablement list"; the list is empty in a release build, and the same
+    // refusal code is returned for anything else)
+    assert!(
+        gate.contains("let synthetic_ok = r.synthetic && r.tool_id.starts_with(\"synthetic-\");")
+            && gate.contains("!synthetic_ok && !gate.iter().any(|g| g.allows(a.recipe))")
+            && gate.contains("not_a_synthetic_recipe")
+    );
     // (c) the plan such a recipe would produce is fixed and honest: no network, four typed steps, the only blocker is the missing approval
     let c = conn();
     let entry = synthetic::catalog_entry(&base(&c), "jq");

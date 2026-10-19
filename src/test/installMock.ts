@@ -7,6 +7,10 @@ export interface InstallMock {
   offers: Map<string, { entryId: string; action: InstallAction; digest: string }>;
   /** When set, the next confirmation returns this instead of the default answer. */
   nextConfirm: InstallResult | null;
+  /** What a recovery reports as reconciled audit rows. */
+  auditReconciled: number;
+  /** The licence state a preview shows (the pilot candidate shows accepted_local_use). */
+  licenseState: string;
   expiresInSeconds: number;
   counter: number;
 }
@@ -21,7 +25,7 @@ export const toolState = (entryId: string, status: ToolState["status"], over: Pa
   synthetic: true, canInstall: status === "available" || status === "removed", canRemove: status === "installed_verified", ...over,
 });
 
-export const createInstallMock = (): InstallMock => ({ states: new Map(), offers: new Map(), nextConfirm: null, expiresInSeconds: 120, counter: 0 });
+export const createInstallMock = (): InstallMock => ({ states: new Map(), offers: new Map(), nextConfirm: null, auditReconciled: 0, licenseState: "accepted", expiresInSeconds: 120, counter: 0 });
 
 export const SHA = "ab".repeat(32);
 
@@ -37,7 +41,7 @@ export const makePreview = (m: InstallMock, entryId: string, action: InstallActi
       action, entryId, displayName: `Sentetik ${entryId}`, version: "1.0.0", platformTarget: "windows-x64", architecture: "x64",
       source: { repository: "synthetic/example", immutableCommit: "0123456789abcdef0123456789abcdef01234567", sourceAttested: true },
       artifact: { fileName: "artifact.bin", sizeBytes: 123, sha256: SHA, format: "pe", digestScope: "exact_file" },
-      authentication: "authenticated_reference", licenseState: "accepted", licenseSpdx: "MIT",
+      authentication: "authenticated_reference", licenseState: m.licenseState, licenseSpdx: "MIT",
       notices: { title: "SENTETİK bildirim paketi (deneme)", sha256: "cd".repeat(32), components: ["synthetic-hello - MIT (sentetik)", "synthetic-runtime - GPL WITH exception (sentetik)"], unresolved: ["Bu bir deneme paketidir."] },
       effects: removal
         ? [
@@ -63,7 +67,7 @@ export const makePreview = (m: InstallMock, entryId: string, action: InstallActi
   };
 };
 
-export const refused = (code: string, message: string): InstallResult => ({ outcome: "refused", action: null, entryId: null, version: null, code, message, receipt: null, rollback: null, state: null });
+export const refused = (code: string, message: string): InstallResult => ({ outcome: "refused", auditRecorded: true, action: null, entryId: null, version: null, code, message, receipt: null, rollback: null, state: null });
 
 const receipt = (action: "install" | "uninstall") => ({ txnId: `txn-${"a".repeat(32)}`, action, version: "1.0.0", completedAt: "2027-01-01T12:00:00Z", artifactSha256: action === "install" ? SHA : null, kept: ["user_data"] });
 
@@ -105,9 +109,9 @@ export function installCommand(b: { entries: { entryId: string; removedAt: strin
         return { handled: true, value: forced };
       }
       if (offer.action === "install") {
-        return done(toolState(offer.entryId, "installed_verified"), { outcome: "completed", action: "install", entryId: offer.entryId, version: "1.0.0", code: null, message: "Kurulum tamamlandı ve doğrulandı. Hiçbir program çalıştırılmadı.", receipt: receipt("install"), rollback: null, state: null });
+        return done(toolState(offer.entryId, "installed_verified"), { outcome: "completed", auditRecorded: true, action: "install", entryId: offer.entryId, version: "1.0.0", code: null, message: "Kurulum tamamlandı ve doğrulandı. Hiçbir program çalıştırılmadı.", receipt: receipt("install"), rollback: null, state: null });
       }
-      return done(toolState(offer.entryId, "removed"), { outcome: "completed", action: "uninstall", entryId: offer.entryId, version: "1.0.0", code: null, message: "Kaldırma tamamlandı. Aracın kendi kullanıcı verisine dokunulmadı.", receipt: receipt("uninstall"), rollback: null, state: null });
+      return done(toolState(offer.entryId, "removed"), { outcome: "completed", auditRecorded: true, action: "uninstall", entryId: offer.entryId, version: "1.0.0", code: null, message: "Kaldırma tamamlandı. Aracın kendi kullanıcı verisine dokunulmadı.", receipt: receipt("uninstall"), rollback: null, state: null });
     }
     case "get_installed_details": {
       const id = String(args?.entryId);
@@ -125,7 +129,7 @@ export function installCommand(b: { entries: { entryId: string; removedAt: strin
     }
     case "recover_installations": {
       for (const [id, s] of m.states) if (s.status === "failed_needs_attention") m.states.set(id, toolState(id, "available"));
-      return { handled: true, value: { examined: true, rolledBack: 1, rolledForward: 0, needsAttention: 0, notes: [] } };
+      return { handled: true, value: { examined: true, auditReconciled: m.auditReconciled, auditUnreconciled: 0, rolledBack: 1, rolledForward: 0, needsAttention: 0, notes: [] } };
     }
     default: return { handled: false };
   }

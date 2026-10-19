@@ -14,6 +14,11 @@
 
 use super::{ArtifactProvider, NoticeBundle, Sources};
 use crate::{
+    artifact_provider::{RetainedEntry, RetainedFileProvider},
+    managed_fs::{Dir, FsError},
+    plan::HostFacts,
+};
+use crate::{
     catalog,
     error::AppResult,
     recipe::{self, RecipeRegistry},
@@ -24,6 +29,10 @@ use serde_json::json;
 use std::collections::HashMap;
 
 pub const HELLO: &str = "synthetic-hello";
+/// A synthetic tool whose bytes come from the RETAINED-FILE provider (a fixed folder), like the first real pilot will.
+pub const RETAINED: &str = "synthetic-retained";
+pub const RETAINED_FILE: &str = "synthetic-retained.exe";
+pub const RETAINED_FOLDER: &str = "pilot-input";
 pub const UNVERIFIED: &str = "synthetic-unverified-tool";
 pub const LICENSE_PENDING: &str = "synthetic-license-pending";
 pub const VERSION: &str = "1.0.0";
@@ -65,12 +74,72 @@ pub fn notices() -> NoticeBundle {
 
 /// The complete synthetic supply: recipes and references for both platforms, the bytes, and the notice bundle.
 pub fn sources() -> Sources {
+    build(&[HELLO, UNVERIFIED, LICENSE_PENDING], None)
+}
+
+/// The supply of the `synthetic-pilot` application build: the three tools above plus one whose file is read from the fixed input folder.
+pub fn sources_for_app(input_folder: std::path::PathBuf) -> Sources {
+    build(&[HELLO, UNVERIFIED, LICENSE_PENDING, RETAINED], Some(input_folder))
+}
+
+/// Puts the retained-file fixture where a person would put the retained file: the fixed input folder inside the application's own data
+/// directory. Idempotent; never overwrites a file that is already there (so tests can swap or remove it and see the refusals).
+pub fn place_retained_fixture(data_dir: &std::path::Path) {
+    let platform = HostFacts::detect().platform;
+    if !PLATFORMS.contains(&platform.as_str()) {
+        return;
+    }
+    let bytes = synthetic::artifact_bytes(&platform, &payload(RETAINED));
+    let Ok(top) = Dir::open_anchor(data_dir) else { return };
+    let dir = match top.child(RETAINED_FOLDER) {
+        Ok(d) => d,
+        Err(FsError::NotFound) => match top.create_child(RETAINED_FOLDER) {
+            Ok(d) => d,
+            Err(_) => return,
+        },
+        Err(_) => return,
+    };
+    if matches!(dir.stat(RETAINED_FILE), Ok(Some(_))) {
+        return;
+    }
+    if let Ok(mut f) = dir.create_file(RETAINED_FILE) {
+        let _ = f.write_all(&bytes);
+        let _ = f.sync_all();
+    }
+}
+
+struct Both {
+    memory: Bytes,
+    retained: RetainedFileProvider,
+}
+
+impl ArtifactProvider for Both {
+    fn bytes(&self, tool: &str, version: &str, platform: &str) -> Result<Vec<u8>, &'static str> {
+        if tool == RETAINED {
+            self.retained.bytes(tool, version, platform)
+        } else {
+            self.memory.bytes(tool, version, platform)
+        }
+    }
+}
+
+fn build(tools: &[&str], input_folder: Option<std::path::PathBuf>) -> Sources {
+    let mut retained_entries = Vec::new();
     let mut recipes = Vec::new();
     let mut authenticated = Vec::new();
     let mut files = HashMap::new();
     for platform in PLATFORMS {
-        for tool in [HELLO, UNVERIFIED, LICENSE_PENDING] {
+        for &tool in tools {
             let bytes = synthetic::artifact_bytes(platform, &payload(tool));
+            if tool == RETAINED {
+                retained_entries.push(RetainedEntry {
+                    tool_id: tool.to_string(),
+                    version: VERSION.to_string(),
+                    platform_target: platform.to_string(),
+                    file_name: RETAINED_FILE.to_string(),
+                    size_bytes: bytes.len() as u64,
+                });
+            }
             let mut rr = synthetic::reviewed_recipe(tool, VERSION, platform, &bytes);
             if tool != UNVERIFIED {
                 authenticated.push(synthetic::reference_for(tool, VERSION, platform, &bytes));
@@ -79,15 +148,23 @@ pub fn sources() -> Sources {
                 rr.recipe.license.state = "unknown".to_string();
                 synthetic::rereview(&mut rr);
             }
-            files.insert((tool.to_string(), VERSION.to_string(), platform.to_string()), bytes);
+            if tool != RETAINED {
+                files.insert((tool.to_string(), VERSION.to_string(), platform.to_string()), bytes);
+            }
             recipes.push(rr);
         }
     }
     Sources {
         registry: RecipeRegistry::synthetic(recipes).expect("the synthetic recipes are synthetic"),
         extra_authenticated: authenticated,
-        artifacts: Box::new(Bytes { files }),
+        artifacts: match input_folder {
+            Some(folder) => Box::new(Both { memory: Bytes { files }, retained: RetainedFileProvider::new(folder, retained_entries) }),
+            None => Box::new(Bytes { files }),
+        },
         notices: vec![notice_for_license_pending(), notices()],
+        // (the retained tool carries no notice bundle: its preview shows none)
+        evidence: super::Evidence::none(),
+        pilot_gate: vec![],
     }
 }
 
@@ -105,12 +182,21 @@ fn notice_for_license_pending() -> NoticeBundle {
 /// Puts the three synthetic tools into the catalog of an ISOLATED data directory, so the ordinary catalog page lists them like any
 /// other entry. Idempotent. Never used for a real catalog: only the `synthetic-pilot` build calls it.
 pub fn seed_catalog(conn: &Connection) -> AppResult<()> {
-    let now = crate::audit::now_utc();
     for (tool, name) in [
         (HELLO, "Sentetik Merhaba (deneme aracı)"),
         (UNVERIFIED, "Sentetik doğrulanmamış araç (deneme)"),
         (LICENSE_PENDING, "Sentetik lisansı bekleyen araç (deneme)"),
+        (RETAINED, "Sentetik saklanan-dosya aracı (deneme)"),
     ] {
+        seed_one(conn, tool, name)?;
+    }
+    Ok(())
+}
+
+/// One catalog row for a tool id (test-only helper for the real-recipe transition tests uses it with the id `jq`: a TEST row, never seeded).
+pub fn seed_one(conn: &Connection, tool: &str, name: &str) -> AppResult<()> {
+    let now = crate::audit::now_utc();
+    {
         let record = json!({
             "schemaVersion": 0,
             "synthetic": true,

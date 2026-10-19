@@ -215,6 +215,7 @@ export const changeLabel = (s: string) => CHANGE[s] ?? s;
 
 const RESULT: Record<string, string> = {
   completed: "Tamamlandı", already_applied: "Zaten geçerliydi", failed: "Başarısız — geri alındı", refused: "Reddedildi — hiçbir şey yapılmadı",
+  needs_attention: "Yapıldı — ama dikkat gerekiyor",
 };
 export const resultLabel = (s: string) => RESULT[s] ?? s;
 

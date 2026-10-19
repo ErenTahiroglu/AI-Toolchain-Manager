@@ -1581,6 +1581,20 @@ pub fn build_plan_with(
     candidates: &[&ReviewedRecipe],
     refs: &ReferenceSet,
 ) -> AppResult<InstallPlan> {
+    build_plan_with_evidence(entry, req, host, observations, candidates, refs, &crate::attestation::Evidence::none())
+}
+
+/// The same, judging the recipe against reviewed evidence records too (Phase 3D-3): a real recipe's source attestation and local-use licence
+/// count only if a record substantiates them.
+pub fn build_plan_with_evidence(
+    entry: &CatalogEntry,
+    req: &PlanRequest,
+    host: &HostFacts,
+    observations: &[StoredObservation],
+    candidates: &[&ReviewedRecipe],
+    refs: &ReferenceSet,
+    evidence: &crate::attestation::Evidence,
+) -> AppResult<InstallPlan> {
     let mut plan = build_draft(entry, req, host, observations)?;
     // Several candidate recipes for one question are ambiguous: none is used.
     let candidate = match candidates {
@@ -1592,7 +1606,7 @@ pub fn build_plan_with(
             return finish(plan);
         }
     };
-    match recipe::validate(candidate, refs) {
+    match recipe::validate_with(candidate, refs, evidence) {
         Err(problems) => {
             plan.recipe = RecipeStatus {
                 state: "invalid".to_string(),
@@ -1741,7 +1755,7 @@ pub fn plan_for(conn: &Connection, req: &PlanRequest, host: &HostFacts) -> AppRe
     let registry = RecipeRegistry::production();
     let refs = ReferenceSet::production(conn)?;
     let found = registry.find(&req.entry_id, &req.platform_target, &req.agent_surface, &req.scope);
-    build_plan_with(&entry, req, host, &observations, &found, &refs)
+    build_plan_with_evidence(&entry, req, host, &observations, &found, &refs, &crate::attestation::Evidence::production())
 }
 
 #[cfg(test)]

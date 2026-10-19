@@ -31,6 +31,11 @@ impl AppDataAnchor {
     pub(crate) fn from_resolved_data_dir(dir: PathBuf) -> AppDataAnchor {
         AppDataAnchor(dir)
     }
+
+    /// The application's own data directory (for the pilot build's fixture placement; never an argument of any command).
+    pub(crate) fn dir_path(&self) -> &std::path::Path {
+        &self.0
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

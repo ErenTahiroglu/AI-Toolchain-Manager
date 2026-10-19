@@ -189,7 +189,7 @@ describe("catalog -> preview -> confirm -> result -> installed details", () => {
     await userEvent.click(panel.getByRole("button", { name: "Kurulum önizlemesini aç" }));
     await screen.findByRole("heading", { name: /Kurulum önizlemesi/ });
     const failed: InstallResult = {
-      outcome: "failed", action: "install", entryId: HELLO, version: "1.0.0", code: "fs_io", message: "Disk yazma hatası (örneğin yer kalmadı). İşlem geri alındı. Geri alma durumu: KISMEN geri alındı; bir kişinin bakması gerekiyor",
+      outcome: "failed", auditRecorded: true, action: "install", entryId: HELLO, version: "1.0.0", code: "fs_io", message: "Disk yazma hatası (örneğin yer kalmadı). İşlem geri alındı. Geri alma durumu: KISMEN geri alındı; bir kişinin bakması gerekiyor",
       receipt: null, rollback: { status: "partial", undone: ["hazırlık klasörü kaldırıldı"], notUndone: ["version folder: kayıtla eşleşmeyen bir dosya var; dokunulmadı"], notCovered: ["tool_user_data"] }, state: toolState(HELLO, "failed_needs_attention", { reasons: [{ code: "unfinished_transaction", text: "Yarım kalmış bir işlem var." }] }),
     };
     backend.install.nextConfirm = failed;
@@ -252,5 +252,64 @@ describe("the interface cannot ask for what the application never does", () => {
     b.focus();
     expect(b).toHaveFocus();
     expect(incompleteState("x").status).toBe("verification_incomplete");
+  });
+});
+
+describe("audit honesty (Issue #22) and the local-use licence in the real components", () => {
+  it("an operation that happened but could not be audited is shown as needing attention, never as a plain success, and can be reconciled", async () => {
+    const panel = await openCatalog("available");
+    await userEvent.click(panel.getByRole("button", { name: "Kurulum önizlemesini aç" }));
+    await screen.findByRole("heading", { name: /Kurulum önizlemesi/ });
+    const attention = toolState(HELLO, "failed_needs_attention", {
+      installedVersion: "1.0.0", canInstall: false, canRemove: false,
+      reasons: [{ code: "audit_outcome_missing", text: "Son işlem tamamlandı ve doğrulandı, ancak denetim kaydı yazılamadı." }],
+    });
+    backend.install.nextConfirm = {
+      outcome: "needs_attention", auditRecorded: false, action: "install", entryId: HELLO, version: "1.0.0", code: "audit_outcome_not_persisted",
+      message: "İşlem YAPILDI ve doğrulandı, ancak denetim kaydı yazılamadı. Gerçek durum ve makbuz doğrudur.",
+      receipt: { txnId: `txn-${"b".repeat(32)}`, action: "install", version: "1.0.0", completedAt: "2027-01-01T12:00:00Z", artifactSha256: "ab".repeat(32), kept: [] },
+      rollback: null, state: attention,
+    };
+    // (the real backend's state after the operation is what the panel reloads once the answer is in)
+    backend.install.states.set(HELLO, attention);
+    backend.install.auditReconciled = 1;
+    await userEvent.click(screen.getByRole("checkbox", { name: /okudum ve anladım/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Onaylıyorum ve kur" }));
+    expect(await screen.findByRole("heading", { name: "Sonuç: Yapıldı — ama dikkat gerekiyor" })).toBeInTheDocument();
+    expect(screen.getByText(/İşlem YAPILDI ve doğrulandı, ancak denetim kaydı yazılamadı/)).toBeInTheDocument();
+    expect(screen.getByText(/denetim kaydı yazılamadı; gerçek durum ve makbuz doğrudur/)).toBeInTheDocument();
+    expect(screen.getByText("audit_outcome_not_persisted")).toBeInTheDocument();
+    expect(screen.queryByText(/Kurulum tamamlandı ve doğrulandı/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Sonuç: Tamamlandı" })).not.toBeInTheDocument();
+    // the tool is shown as needing attention and only an explicit recovery action reconciles it
+    await userEvent.click(screen.getByRole("button", { name: "Tamam" }));
+    const group = within(await screen.findByRole("group", { name: `Kurulum: ${HELLO}` }));
+    expect(await group.findByText("Başarısız / dikkat gerekiyor")).toBeInTheDocument();
+    expect(calls("recover_installations")).toHaveLength(0);
+    await userEvent.click(group.getByRole("button", { name: "Kurtarmayı çalıştır" }));
+    expect(await screen.findByText(/1 eksik denetim kaydı makbuzdan yeniden kuruldu, 0 kayıt kurulamadı/)).toBeInTheDocument();
+  });
+
+  it("a refusal whose own audit row could not be written says so", async () => {
+    const panel = await openCatalog("available");
+    await userEvent.click(panel.getByRole("button", { name: "Kurulum önizlemesini aç" }));
+    await screen.findByRole("heading", { name: /Kurulum önizlemesi/ });
+    backend.install.nextConfirm = { ...refused("audit_unavailable", "Denetim kaydı yazılamadığı için hiçbir şey yapılmadı. Onay kullanıldı; önizlemeyi yeniden açın."), auditRecorded: false };
+    await userEvent.click(screen.getByRole("checkbox", { name: /okudum ve anladım/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Onaylıyorum ve kur" }));
+    expect(await screen.findByRole("heading", { name: "Sonuç: Reddedildi — hiçbir şey yapılmadı" })).toBeInTheDocument();
+    expect(screen.getByText(/Denetim kaydı yazılamadığı için hiçbir şey yapılmadı/)).toBeInTheDocument();
+    expect(screen.getByText(/denetim kaydı yazılamadı; gerçek durum ve makbuz doğrudur/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Araç ayrıntılarını göster" })).not.toBeInTheDocument();
+  });
+
+  it("the preview of a local-use licence says it is for this computer only and never for redistribution", async () => {
+    backend.install.licenseState = "accepted_local_use";
+    const panel = await openCatalog("available");
+    await userEvent.click(panel.getByRole("button", { name: "Kurulum önizlemesini aç" }));
+    const heading = await screen.findByRole("heading", { name: /Kurulum önizlemesi/ });
+    const scope = within(heading.closest("section")!);
+    expect(scope.getByText(/Yalnızca bu bilgisayardaki yerel kullanım için kabul edildi \(yeniden dağıtım veya paketleme için DEĞİL\)/)).toBeInTheDocument();
+    expect(scope.getByText(/Kaynak, bağımsız bir kanıt kaydıyla depo, iş akışı ve commit.e bağlandı/)).toBeInTheDocument();
   });
 });

@@ -1,0 +1,84 @@
+{
+  "note": "Only the fsAcceptanceProbe section of --self-check of the Phase 3D-3 pilot-feature debug build on the development PC (isolated data directory). Other sections stay local.",
+  "fsAcceptanceProbe": {
+    "arch": "x86_64",
+    "checks": [
+      {
+        "id": "anchor_opens_without_following_links",
+        "result": "pass"
+      },
+      {
+        "id": "owner_only_root_is_created_and_verified",
+        "result": "pass"
+      },
+      {
+        "id": "files_can_be_created_and_flushed",
+        "result": "pass"
+      },
+      {
+        "id": "exclusive_create_refuses_an_existing_name",
+        "result": "pass"
+      },
+      {
+        "id": "identity_and_single_link_are_read_from_the_handle",
+        "result": "pass"
+      },
+      {
+        "id": "no_clobber_move_works_on_this_volume",
+        "result": "pass"
+      },
+      {
+        "id": "no_clobber_move_refuses_an_existing_destination",
+        "result": "pass"
+      },
+      {
+        "id": "the_refused_destination_is_unchanged",
+        "result": "pass"
+      },
+      {
+        "id": "replacement_refuses_an_unknown_destination",
+        "result": "pass"
+      },
+      {
+        "id": "replacement_of_the_known_file_works",
+        "result": "pass"
+      },
+      {
+        "id": "deletion_refuses_a_hard_linked_file",
+        "result": "pass"
+      },
+      {
+        "id": "deletion_refuses_a_same_content_replacement",
+        "result": "pass"
+      },
+      {
+        "id": "deletion_of_the_verified_file_works",
+        "result": "pass"
+      },
+      {
+        "id": "a_link_is_reported_and_refused",
+        "result": "not_exercised",
+        "why": "creating a link needs a privilege that is not available"
+      },
+      {
+        "id": "a_held_folder_can_be_removed_by_another_process",
+        "result": "observed",
+        "value": "no_prevented_by_the_os"
+      },
+      {
+        "id": "an_open_file_can_be_removed",
+        "result": "observed",
+        "value": "no_locked_by_the_holder"
+      },
+      {
+        "id": "folder_flush",
+        "result": "observed",
+        "value": "flushed"
+      }
+    ],
+    "failed": 0,
+    "filesystem": "ntfs",
+    "platform": "windows",
+    "ran": true
+  }
+}

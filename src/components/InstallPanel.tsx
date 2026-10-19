@@ -80,7 +80,8 @@ function PreviewView({
         <dt>Dosya özeti (SHA-256)</dt><dd><code>{c.artifact.sha256}</code></dd>
         <dt>Özetin kapsamı</dt><dd>Kurulacak dosyanın kendisi (arşiv değil)</dd>
         <dt>Doğrulama</dt><dd>Dosyanın özeti, bağımsız olarak doğrulanmış bir referans özetiyle ve tarifle eşleşti.</dd>
-        <dt>Lisans</dt><dd>{c.licenseState === "accepted" ? "Bir incelemeyle kabul edildi" : licenseLabel(c.licenseState)} · {c.licenseSpdx}</dd>
+        <dt>Lisans</dt><dd>{c.licenseState === "accepted" ? "Bir incelemeyle kabul edildi" : c.licenseState === "accepted_local_use" ? "Yalnızca bu bilgisayardaki yerel kullanım için kabul edildi (yeniden dağıtım veya paketleme için DEĞİL)" : licenseLabel(c.licenseState)} · {c.licenseSpdx}</dd>
+        <dt>Kaynak doğrulaması</dt><dd>{c.source.sourceAttested ? "Kaynak, bağımsız bir kanıt kaydıyla depo, iş akışı ve commit'e bağlandı" : "Yalnızca beyan; kanıtlanmadı"}</dd>
         <dt>Ağ</dt><dd>{c.networkUsed ? "Ağ kullanılacak" : "Ağ kullanılmayacak; hiçbir şey indirilmeyecek"}</dd>
       </dl>
 
@@ -146,10 +147,12 @@ function PreviewView({
 
 function ResultView({ result, onClose, onDetails }: { result: InstallResult; onClose: () => void; onDetails: () => void }) {
   const ok = result.outcome === "completed" || result.outcome === "already_applied";
+  const happened = ok || result.outcome === "needs_attention";
   return (
     <section className="result-card" aria-labelledby="h-result">
       <h3 id="h-result">Sonuç: {resultLabel(result.outcome)}</h3>
       <p role="status" className={ok ? "ok-text" : "bad-text"}>{ok ? "✓" : "✕"} {result.message}</p>
+      {!result.auditRecorded && <p className="small bad-text" role="note">Bu cevabın denetim kaydı yazılamadı; gerçek durum ve makbuz doğrudur.</p>}
       {result.code && <p className="small muted">Kod: <code>{result.code}</code></p>}
       {result.receipt && (<><h4>Makbuz</h4><Receipt r={result.receipt} /></>)}
       {result.rollback && (
@@ -164,7 +167,7 @@ function ResultView({ result, onClose, onDetails }: { result: InstallResult; onC
         </>
       )}
       <p className="actions">
-        {result.state && (result.state.status === "installed_verified" || result.state.status === "removed") && (
+        {happened && result.state && (result.state.status === "installed_verified" || result.state.status === "removed" || result.state.status === "failed_needs_attention") && (
           <button type="button" onClick={onDetails}>Araç ayrıntılarını göster</button>
         )}
         <button type="button" className="secondary" onClick={onClose}>Tamam</button>
@@ -286,7 +289,7 @@ export function InstallPanel({ entryId, state, onChanged }: { entryId: string; s
       const r = await api.recoverInstallations();
       setRecovery(
         r.examined
-          ? `Denetlendi: ${r.rolledBack} işlem geri alındı, ${r.rolledForward} işlem tamamlandı, ${r.needsAttention} işlem hâlâ dikkat gerektiriyor.${r.notes.length ? " " + r.notes.join(" ") : ""}`
+          ? `Denetlendi: ${r.rolledBack} işlem geri alındı, ${r.rolledForward} işlem tamamlandı, ${r.needsAttention} işlem hâlâ dikkat gerektiriyor; ${r.auditReconciled} eksik denetim kaydı makbuzdan yeniden kuruldu, ${r.auditUnreconciled} kayıt kurulamadı.${r.notes.length ? " " + r.notes.join(" ") : ""}`
           : "Denetlenecek bir şey yoktu.",
       );
     } catch (e) {
@@ -298,7 +301,7 @@ export function InstallPanel({ entryId, state, onChanged }: { entryId: string; s
   const idle = view.kind === "idle";
   const canOpenInstall = idle && state.canInstall && (state.status === "available" || state.status === "removed" || state.status === "ready_for_approval");
   const canOpenRemoval = idle && state.canRemove && (state.status === "installed_verified" || state.status === "ready_for_approval");
-  const needsRecovery = state.status === "failed_needs_attention" && state.reasons.some((r) => r.code === "unfinished_transaction");
+  const needsRecovery = state.status === "failed_needs_attention" && state.reasons.some((r) => r.code === "unfinished_transaction" || r.code === "audit_outcome_missing");
 
   return (
     <div className="install-panel" role="group" aria-label={`Kurulum: ${entryId}`}>

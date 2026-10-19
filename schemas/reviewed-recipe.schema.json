@@ -63,7 +63,7 @@
             "additionalProperties": false,
             "required": ["kind", "evidenceId"],
             "properties": {
-              "kind": { "enum": ["authenticated_reference_digest", "synthetic_source_attestation"] },
+              "kind": { "enum": ["authenticated_reference_digest", "synthetic_source_attestation", "source_attestation_evidence"] },
               "evidenceId": { "$ref": "#/$defs/id" }
             }
           },
@@ -74,7 +74,7 @@
           "additionalProperties": false,
           "required": ["state", "spdxId", "evidenceId"],
           "properties": {
-            "state": { "const": "accepted" },
+            "state": { "enum": ["accepted", "accepted_local_use"], "description": "accepted_local_use = accepted for ONE local, non-redistributing use of ONE exact file; valid only with a covering local-use licence record (attestation.rs); never grants redistribution rights" },
             "spdxId": { "type": "string", "minLength": 1, "maxLength": 40 },
             "evidenceId": { "type": "string", "pattern": "^R[0-9]{2,3}$" }
           }

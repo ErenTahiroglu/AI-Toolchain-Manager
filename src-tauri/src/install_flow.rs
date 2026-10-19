@@ -22,6 +22,7 @@
 use crate::{
     adapter::{Adapter, Inspection},
     approval::{self, Action, Actor, ApprovalPolicy, Situation, UserAction},
+    attestation::Evidence,
     audit::{self, canonical_json, sha256_hex, EventContext, NewEvent},
     catalog::{self, CatalogEntry},
     consent::{Binding, ConsentBook, ConsentGrant, GRANT_TTL_SECONDS},
@@ -30,7 +31,7 @@ use crate::{
         store,
     },
     error::{AppError, AppResult},
-    lifecycle::{check_artifact_for, Authority, Receipt, RollbackReport, TxnError},
+    lifecycle::{check_artifact_for, Authority, PilotRecipe, Receipt, RollbackReport, TxnError},
     managed_root::{AppDataAnchor, ManagedRoot, RootError},
     plan::{self, HostFacts, InstallPlan, PlanRequest},
     recipe::{self, RecipeRegistry, ValidatedRecipe},
@@ -94,6 +95,10 @@ pub struct Sources {
     pub extra_authenticated: Vec<ReferenceDigest>,
     pub artifacts: Box<dyn ArtifactProvider>,
     pub notices: Vec<NoticeBundle>,
+    /// Reviewed evidence records (source attestations, local-use licence records). EMPTY in a release build.
+    pub evidence: Evidence,
+    /// The REAL recipes this build may apply. EMPTY in a release build, so only synthetic recipes can ever be applied.
+    pub pilot_gate: Vec<PilotRecipe>,
 }
 
 impl Sources {
@@ -105,6 +110,8 @@ impl Sources {
             extra_authenticated: Vec::new(),
             artifacts: Box::new(NoArtifacts),
             notices: Vec::new(),
+            evidence: Evidence::production(),
+            pilot_gate: Vec::new(),
         }
     }
 
@@ -305,8 +312,12 @@ fn rollback_outcome(r: &RollbackReport) -> RollbackOutcome {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallResult {
-    /// `completed` | `already_applied` | `failed` | `refused`
+    /// `completed` | `already_applied` | `failed` | `refused` | `needs_attention`
+    /// (`needs_attention`: the operation itself happened and is verified, but its audit outcome could not be persisted, or the state after it
+    /// could not be verified. The actual state, the journal and the receipt are true; recovery can reconcile the missing audit row.)
     pub outcome: String,
+    /// Was the audit row of this answer written? `false` is never hidden: a refusal or failure still stands, a success becomes `needs_attention`.
+    pub audit_recorded: bool,
     pub action: Option<Action>,
     pub entry_id: Option<String>,
     pub version: Option<String>,
@@ -355,6 +366,10 @@ pub struct InstalledDetails {
 #[serde(rename_all = "camelCase")]
 pub struct RecoverySummary {
     pub examined: bool,
+    /// Audit rows reconstructed from independently checked manager-owned evidence (a committed receipt AND its committed journal).
+    pub audit_reconciled: u32,
+    /// Committed operations whose audit row is still missing and could not be reconstructed.
+    pub audit_unreconciled: u32,
     pub rolled_back: u32,
     pub rolled_forward: u32,
     pub needs_attention: u32,
@@ -390,6 +405,8 @@ pub struct CancelRequest {
 
 pub fn reason_text(code: &str) -> String {
     match code {
+        "recipe_not_enabled" => "Bu derlemede bu gerçek araç için kurulum etkinleştirilmedi; ayrı, gözden geçirilmiş bir etkinleştirme gerekir.",
+        "notices_missing_or_changed" => "Lisans yalnızca belirli bir bildirim metni için, yerel kullanıma kabul edildi; uygulamadaki bildirim metni o metinle aynı değil.",
         "no_reviewed_recipe" => "Bu araç için incelenmiş ve onaylanmış bir kurulum tarifi yok.",
         "ambiguous_recipes" => "Bu araç için birden fazla tarif var; hiçbiri kullanılmıyor.",
         "host_not_supported" => "Bu bilgisayarın platformu desteklenen platformlardan biri değil.",
@@ -404,6 +421,9 @@ pub fn reason_text(code: &str) -> String {
         "entry_quarantined" => "Kayıt karantinada veya engelli.",
         "execution_policy_blocked" => "Bu kayıt için kapsamlı yazılı yetki olmadan hiçbir işlem yapılamaz.",
         "entry_removed" => "Bu kayıt katalogdan kaldırılmış.",
+        "audit_outcome_missing" => "Son işlem tamamlandı ve doğrulandı, ancak denetim kaydı yazılamadı. \"Kurtarmayı çalıştır\", kaydı yöneticinin klasöründeki makbuz ve günlükten yeniden kurar. Bu sırada yeni işlem başlatılamaz.",
+        "audit_unavailable" => "Denetim kaydı okunamıyor veya yazılamıyor. Denetim kaydı olmadan yeni işlem yapılmaz; mevcut dosyalara dokunulmadı.",
+        "post_verification_failed" => "İşlem tamamlandı ama sonrasında durum beklendiği gibi doğrulanamadı. Hiçbir şey otomatik düzeltilmedi veya silinmedi.",
         "unfinished_transaction" => "Yarım kalmış bir işlem var. Önce \"Kurtarmayı çalıştır\" ile durumu denetleyin.",
         "installed_artifact_drift"
         | "installed_artifact_missing"
@@ -447,6 +467,11 @@ fn refusal_text(code: &str) -> String {
         "artifact_does_not_match_recipe" | "artifact_format_mismatch" | "artifact_not_authenticated_for_this_platform" => {
             "Dosya, tarifteki ve doğrulanmış kaynaktaki özetle eşleşmiyor. Hiçbir şey yapılmadı."
         }
+        "audit_unavailable" => "Denetim kaydı yazılamadığı için hiçbir şey yapılmadı. Onay kullanıldı; önizlemeyi yeniden açın.",
+        "audit_outcome_not_persisted" => "İşlem YAPILDI ve doğrulandı, ancak denetim kaydı yazılamadı. Gerçek durum ve makbuz doğrudur; \"Kurtarmayı çalıştır\" eksik kaydı yeniden kurar.",
+        "post_verification_failed" => "İşlem tamamlandı ama sonrasında durum doğrulanamadı. Hiçbir şey otomatik düzeltilmedi; durumu denetleyin.",
+        "artifact_not_a_plain_file" => "Dosya düz, tek bağlantılı bir dosya değil (bağlantı, klasör veya özel girdi). Hiçbir şey yapılmadı.",
+        "artifact_size_mismatch" => "Dosyanın boyutu tarifteki boyutla aynı değil. Hiçbir şey yapılmadı.",
         "production_adapter_not_enabled" => "Bu sürümde gerçek kurulum kapalıdır. Hiçbir şey yapılmadı.",
         "consent_binding_mismatch" | "consent_actor_mismatch" => "Onay, bu işlemin ayrıntılarına bağlı değil. Hiçbir şey yapılmadı.",
         "approval_expired" => "Onayın süresi dolmuş. Hiçbir şey yapılmadı veya yapılan geri alındı.",
@@ -528,7 +553,8 @@ impl InstallService {
     pub fn for_app(data_dir: PathBuf) -> InstallService {
         #[cfg(feature = "synthetic-pilot")]
         {
-            InstallService::with_sources(data_dir, supply::sources(), Arc::new(Utc::now))
+            let input = data_dir.join(supply::RETAINED_FOLDER);
+            InstallService::with_sources(data_dir, supply::sources_for_app(input), Arc::new(Utc::now))
         }
         #[cfg(not(feature = "synthetic-pilot"))]
         {
@@ -542,6 +568,7 @@ impl InstallService {
         #[cfg(feature = "synthetic-pilot")]
         {
             let _ = supply::seed_catalog(conn);
+            supply::place_retained_fixture(self.anchor.dir_path());
         }
         let _ = self.recover(conn);
     }
@@ -612,7 +639,7 @@ impl InstallService {
         let fault: Option<crate::lifecycle::FaultFn<'a>> = self.fault.as_deref().map(|f| f as crate::lifecycle::FaultFn<'a>);
         #[cfg(not(test))]
         let fault: Option<crate::lifecycle::FaultFn<'a>> = None;
-        Ok(Adapter::mvp_synthetic(root, refs, platform, clock, fault))
+        Ok(Adapter::mvp_synthetic(root, refs, platform, clock, fault).with_pilot_gate(&self.sources.pilot_gate))
     }
 
     /// A release build contains no acting adapter at all: there is nothing to construct.
@@ -642,7 +669,7 @@ impl InstallService {
             [one] => *one,
             _ => return Ok(Err(Unavailable::Verification(vec![reason("ambiguous_recipes")]))),
         };
-        let valid = match recipe::validate(candidate, &refs) {
+        let valid = match recipe::validate_with(candidate, &refs, &self.sources.evidence) {
             Ok(v) => v,
             Err(problems) => {
                 let reasons: Vec<Reason> = problems.iter().map(|p| reason(p)).collect();
@@ -662,7 +689,23 @@ impl InstallService {
             project_alias: None,
         };
         let observations = store::latest_observations_with(conn, &refs)?;
-        let plan = plan::build_plan_with(&entry, &request, &host, &observations, &[candidate], &refs)?;
+        let plan = plan::build_plan_with_evidence(&entry, &request, &host, &observations, &[candidate], &refs, &self.sources.evidence)?;
+        // a REAL recipe is applicable only in a build that was explicitly enabled for exactly this recipe (the list is empty in a release build)
+        if !valid.recipe().synthetic && !self.sources.pilot_gate.iter().any(|g| g.allows(&valid)) {
+            return Ok(Err(Unavailable::Verification(vec![reason("recipe_not_enabled")])));
+        }
+        // a local-use licence covers one exact notice text: the application must hold that very text (Phase 3D-3)
+        {
+            let r = valid.recipe();
+            if r.license.state == "accepted_local_use" {
+                let covered = self.sources.evidence.local_use_license(&r.license.evidence_id).is_some_and(|l| {
+                    self.sources.notices_for(&r.tool_id, &r.version).is_some_and(|n| sha256_hex(&n.text) == l.notice_bundle_sha256)
+                });
+                if !covered {
+                    return Ok(Err(Unavailable::License(vec![reason("notices_missing_or_changed")])));
+                }
+            }
+        }
         let others: Vec<Reason> = plan
             .eligibility
             .blockers
@@ -702,10 +745,50 @@ impl InstallService {
             Err(code) => return Ok(Probe { root_exists: true, inspection: None, attention: Some(code.to_string()) }),
         };
         match adapter.inspect(&rec.tool_id, &rec.version, rec.artifact.size_bytes) {
-            Ok(i) => Ok(Probe { root_exists: true, inspection: Some(i), attention: None }),
+            Ok(i) => {
+                // a committed operation whose audit outcome is missing keeps the tool in "needs attention" until it is reconciled
+                let attention = if matches!(i, Inspection::Busy { .. }) {
+                    None
+                } else {
+                    match adapter.history(&rec.tool_id) {
+                        Ok(h) => match Self::audit_gap(conn, &h) {
+                            Ok(gap) if gap.is_empty() => None,
+                            Ok(_) => Some("audit_outcome_missing".to_string()),
+                            Err(()) => Some("audit_unavailable".to_string()),
+                        },
+                        Err(_) => None,
+                    }
+                };
+                Ok(Probe { root_exists: true, inspection: Some(i), attention })
+            }
             Err(TxnError::Refused(code)) => Ok(Probe { root_exists: true, inspection: None, attention: Some(code.to_string()) }),
             Err(_) => Ok(Probe { root_exists: true, inspection: None, attention: Some("unfinished_transaction".to_string()) }),
         }
+    }
+
+    /// Committed operations (install, removal) that have NO `passed` outcome row in the audit trail, matched by the approval reference the receipt
+    /// carries. `Err` = the audit trail itself cannot be read.
+    fn audit_gap(conn: &Connection, receipts: &[Receipt]) -> Result<Vec<Receipt>, ()> {
+        let mut gap = Vec::new();
+        for r in receipts {
+            let kind = match r.action {
+                Action::Install => "install",
+                Action::Uninstall => "uninstall",
+                Action::Update => continue,
+            };
+            let n: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM audit_events WHERE json_extract(record_json, '$.eventType') = ?1
+                       AND json_extract(record_json, '$.outcome') = 'passed' AND json_extract(record_json, '$.approvalReference') = ?2",
+                    rusqlite::params![kind, r.approval_id],
+                    |row| row.get(0),
+                )
+                .map_err(|_| ())?;
+            if n == 0 {
+                gap.push(r.clone());
+            }
+        }
+        Ok(gap)
     }
 
     fn is_busy_here(&self, tool: &str) -> bool {
@@ -738,6 +821,9 @@ impl InstallService {
         if let Some(code) = &probe.attention {
             st.status = Status::FailedNeedsAttention;
             st.reasons = vec![reason(code)];
+            if let Some(Inspection::Installed { version, .. }) = &probe.inspection {
+                st.installed_version = Some(version.clone());
+            }
             return Ok(st);
         }
         match probe.inspection {
@@ -970,9 +1056,19 @@ impl InstallService {
         sha256_hex(&canonical_json(&serde_json::to_value(content).unwrap_or(serde_json::Value::Null)))
     }
 
+    /// Marks an answer whose own audit row could not be written, in plain words (the answer itself stands).
+    fn unrecorded(mut r: InstallResult, recorded: bool) -> InstallResult {
+        if !recorded {
+            r.audit_recorded = false;
+            r.message.push_str(" Bu cevabın denetim kaydı YAZILAMADI.");
+        }
+        r
+    }
+
     fn refuse(code: &str, action: Option<Action>, entry: Option<&str>) -> InstallResult {
         InstallResult {
             outcome: "refused".to_string(),
+            audit_recorded: true,
             action,
             entry_id: entry.map(str::to_string),
             version: None,
@@ -984,8 +1080,11 @@ impl InstallService {
         }
     }
 
-    fn audit(conn: &Connection, event: NewEvent) {
-        let _ = audit::append(conn, &event);
+    /// Writes one audit row and SAYS whether it was written. Nothing in the workflow ignores the answer: a mandatory row that cannot be written
+    /// stops the operation, and a missing outcome row is reported (`needs_attention`) and later reconciled from manager-owned evidence.
+    #[must_use = "an audit row that was not written must be handled"]
+    fn audit(conn: &Connection, event: NewEvent) -> bool {
+        audit::append(conn, &event).is_ok()
     }
 
     /// Opens an installation (or removal) preview and the offer its confirmation is bound to. It changes nothing.
@@ -1058,7 +1157,9 @@ impl InstallService {
     pub fn cancel(&self, conn: &Connection, req: &CancelRequest) -> AppResult<()> {
         match self.book.cancel(&req.offer_id, self.now()) {
             Ok(b) => {
-                Self::audit(
+                // withdrawing an offer changes nothing, so its audit row is informational: it is attempted and its failure does not turn a
+                // harmless withdrawal into an error (every row that CONFIRMS or APPLIES something is mandatory or reported, see `confirm`)
+                let _recorded = Self::audit(
                     conn,
                     NewEvent::plain("reject", "passed", "install-preview-cancelled", None, "human-review", "user")
                         .for_tool(&b.tool_id, EventContext { tool_version: Some(b.version.clone()), ..Default::default() }),
@@ -1083,13 +1184,14 @@ impl InstallService {
             Ok(g) => g,
             Err(e) => {
                 let code = e.code();
-                Self::with_conn(db, |c| {
+                let recorded = Self::with_conn(db, |c| {
                     Self::audit(
                         c,
                         NewEvent::plain("approve", "blocked", "install-confirmation", Some(leak(upper(code))), "human-review", "user"),
                     )
-                });
-                return Self::refuse(code, None, None);
+                })
+                .unwrap_or(false);
+                return Self::unrecorded(Self::refuse(code, None, None), recorded);
             }
         };
         let b = grant.binding().clone();
@@ -1103,17 +1205,19 @@ impl InstallService {
             BusyGuard { set: &self.busy, tool: tool.clone() }
         };
         // 3. freshness and the Phase 3A approval, with the database (the grant is consumed here whatever the answer)
-        let prepared = Self::with_conn(db, |c| {
-            self.verify_and_approve(c, grant, &b).inspect_err(|code| {
-                Self::audit(
+        let prepared = Self::with_conn(db, |c| match self.verify_and_approve(c, grant, &b) {
+            Ok(p) => Ok(p),
+            Err(code) => {
+                let recorded = Self::audit(
                     c,
                     NewEvent::plain("approve", "blocked", "install-freshness", Some(leak(upper(code))), "not-applicable", "adapter"),
                 );
-            })
+                Err((code, recorded))
+            }
         });
         let p = match prepared {
             Some(Ok(p)) => p,
-            Some(Err(code)) => return Self::refuse(code, Some(b.action), Some(&tool)),
+            Some(Err((code, recorded))) => return Self::unrecorded(Self::refuse(code, Some(b.action), Some(&tool)), recorded),
             None => return Self::refuse("database_unavailable", Some(b.action), Some(&tool)),
         };
         // 4. apply (no database lock is held while the adapter works)
@@ -1194,7 +1298,9 @@ impl InstallService {
             Ok(v) => v,
             Err(e) => return Err(e.code()),
         };
-        Self::audit(
+        // MANDATORY: the affirmative confirmation is on record BEFORE the first filesystem change. If it cannot be written, nothing is applied
+        // (the grant is spent: the person previews again once the audit trail works).
+        let recorded = Self::audit(
             conn,
             NewEvent::plain("approve", "passed", "install-confirmation", None, "human-review", "user").for_tool(
                 &rec.tool_id,
@@ -1208,6 +1314,9 @@ impl InstallService {
                 },
             ),
         );
+        if !recorded {
+            return Err("audit_unavailable");
+        }
         Ok(Prepared { resolved: r, verified, bytes, grant, computer })
     }
 
@@ -1252,6 +1361,7 @@ impl InstallService {
         let approval_id = verified.approval().approval_id.clone();
         let mut result = match outcome {
             Ok(o) => InstallResult {
+                audit_recorded: true,
                 outcome: if o.already_applied { "already_applied" } else { "completed" }.to_string(),
                 action: Some(action),
                 entry_id: Some(rec.tool_id.clone()),
@@ -1267,6 +1377,7 @@ impl InstallService {
                 state: None,
             },
             Err(TxnError::Failed { code, rollback }) => InstallResult {
+                audit_recorded: true,
                 outcome: "failed".to_string(),
                 action: Some(action),
                 entry_id: Some(rec.tool_id.clone()),
@@ -1292,21 +1403,51 @@ impl InstallService {
             Err(TxnError::Pending(_)) => Self::refuse("needs_attention", Some(action), Some(&rec.tool_id)),
             Err(TxnError::Interrupted(_)) => Self::refuse("needs_attention", Some(action), Some(&rec.tool_id)),
         };
+        // The pointer-replacement race is not closed by the platform: so after a completed operation the state is READ BACK, independently of the
+        // transaction's own bookkeeping. Anything but the expected, verified state is reported as needing attention, never as a success.
+        let mut post_verified = true;
+        if result.outcome == "completed" {
+            post_verified = match (action, adapter.inspect(&rec.tool_id, &rec.version, rec.artifact.size_bytes)) {
+                (Action::Install, Ok(Inspection::Installed { artifact_sha256, version, .. })) => {
+                    artifact_sha256 == rec.artifact.sha256 && version == rec.version
+                }
+                (Action::Uninstall, Ok(Inspection::NotInstalled { removed: true })) => true,
+                _ => false,
+            };
+            if !post_verified {
+                result.outcome = "needs_attention".to_string();
+                result.code = Some("post_verification_failed".to_string());
+                result.message = refusal_text("post_verification_failed");
+            }
+        }
         drop(root);
         let state = Self::with_conn(db, |conn| {
-            let (outcome_tag, code) = match result.outcome.as_str() {
-                "completed" | "already_applied" => ("passed", None),
-                "failed" => ("failed", result.code.as_deref().map(|c| leak(upper(c)))),
+            let (outcome_tag, code) = match (result.outcome.as_str(), post_verified) {
+                ("completed" | "already_applied", true) => ("passed", None),
+                ("needs_attention", _) | (_, false) => ("unknown", Some("POST_VERIFICATION_FAILED")),
+                ("failed", _) => ("failed", result.code.as_deref().map(|c| leak(upper(c)))),
                 _ => ("blocked", result.code.as_deref().map(|c| leak(upper(c)))),
             };
-            Self::audit(
+            let recorded = Self::audit(
                 conn,
                 NewEvent::plain(event_type, outcome_tag, "install-apply", code, "not-applicable", "adapter")
                     .for_tool(&rec.tool_id, ctx(&approval_id)),
             );
-            self.state_of(conn, &rec.tool_id).ok()
+            (recorded, self.state_of(conn, &rec.tool_id).ok())
         });
-        result.state = state.flatten();
+        let (recorded, state) = state.unwrap_or((false, None));
+        if !recorded {
+            result.audit_recorded = false;
+            if result.outcome == "completed" {
+                // the operation HAPPENED and is verified; only its audit outcome is missing: say exactly that, never "fully audited"
+                result.outcome = "needs_attention".to_string();
+                result.code = Some("audit_outcome_not_persisted".to_string());
+                result.message = refusal_text("audit_outcome_not_persisted");
+            } else {
+                result.message.push_str(" Bu cevabın denetim kaydı YAZILAMADI.");
+            }
+        }
+        result.state = state;
         result
     }
 
@@ -1381,11 +1522,74 @@ impl InstallService {
         Ok(d)
     }
 
+    /// Writes the missing outcome rows of operations that DID commit, from independently checked manager-owned evidence: the receipt (own digest
+    /// holds) AND the journal (committed, same transaction, tool and approval). The row says what it is (`install-audit-reconciled`); it is never
+    /// presented as the original, and nothing is invented: without the recipe the receipt was made under, no row is written. Only the audit table
+    /// is touched -- never a file of the manager folder, a foreign file or user data.
+    fn reconcile_audit(&self, conn: &Connection, adapter: &Adapter, s: &mut RecoverySummary) {
+        let Ok(receipts) = adapter.committed_receipts() else { return };
+        let plain: Vec<Receipt> = receipts.iter().map(|(r, _)| r.clone()).collect();
+        let Ok(gap) = Self::audit_gap(conn, &plain) else {
+            s.notes.push(reason_text("audit_unavailable"));
+            return;
+        };
+        for rc in gap {
+            if !receipts.iter().any(|(r, confirmed)| *confirmed && r.txn_id == rc.txn_id) {
+                s.audit_unreconciled += 1;
+                s.notes.push(format!("{}: denetim kaydı yeniden kurulamadı (günlük bu işlemi bağımsız olarak doğrulamıyor).", rc.txn_id));
+                continue;
+            }
+            let resolved = self.resolve(conn, &rc.tool_id);
+            let Ok(Ok(res)) = resolved else {
+                s.audit_unreconciled += 1;
+                s.notes.push(format!("{}: denetim kaydı yeniden kurulamadı (tarif artık geçerli değil).", rc.txn_id));
+                continue;
+            };
+            let rec = res.valid.recipe();
+            if res.valid.digest() != rc.recipe_digest {
+                s.audit_unreconciled += 1;
+                s.notes.push(format!("{}: denetim kaydı yeniden kurulamadı (makbuz başka bir tarif sürümüyle yapılmış).", rc.txn_id));
+                continue;
+            }
+            let (event_type, version) = match rc.action {
+                Action::Install => ("install", rc.to_version.clone()),
+                _ => ("uninstall", rc.from_version.clone()),
+            };
+            let ctx = EventContext {
+                recipe_id: Some(rec.recipe_id.clone()),
+                tool_version: version,
+                approval_reference: Some(rc.approval_id.clone()),
+                approved_recipe_digest: None,
+                artifact_digest: rc.artifact_sha256.clone(),
+                evidence_digest: self.sources.notices_for(&rec.tool_id, &rec.version).map(|n| n.digest()),
+            };
+            let ok = Self::audit(
+                conn,
+                NewEvent::plain(event_type, "passed", "install-audit-reconciled", None, "not-applicable", "adapter")
+                    .for_tool(&rec.tool_id, ctx),
+            );
+            if ok {
+                s.audit_reconciled += 1;
+            } else {
+                s.audit_unreconciled += 1;
+                s.notes.push(format!("{}: denetim kaydı yazılamadı.", rc.txn_id));
+            }
+        }
+    }
+
     /// Explicit recovery of the manager's own unfinished transactions (also run once when the application starts). It only undoes or
     /// finishes work this manager started itself, and reports anything it cannot prove to be its own instead of touching it.
     pub fn recover(&self, conn: &Connection) -> AppResult<RecoverySummary> {
         let computer = Self::computer_id(conn)?;
-        let mut s = RecoverySummary { examined: false, rolled_back: 0, rolled_forward: 0, needs_attention: 0, notes: vec![] };
+        let mut s = RecoverySummary {
+            examined: false,
+            audit_reconciled: 0,
+            audit_unreconciled: 0,
+            rolled_back: 0,
+            rolled_forward: 0,
+            needs_attention: 0,
+            notes: vec![],
+        };
         if Self::root_row(conn, &computer)?.is_none() {
             return Ok(s);
         }
@@ -1423,9 +1627,10 @@ impl InstallService {
                 s.notes.push("Kurtarma çalıştırılamadı.".to_string());
             }
         }
+        self.reconcile_audit(conn, &adapter, &mut s);
         // only something that actually happened is a rollback event: an examination that found nothing is not recorded
         if s.rolled_back + s.rolled_forward + s.needs_attention > 0 {
-            Self::audit(
+            let recorded = Self::audit(
                 conn,
                 NewEvent::plain(
                     "rollback",
@@ -1436,6 +1641,9 @@ impl InstallService {
                     "adapter",
                 ),
             );
+            if !recorded {
+                s.notes.push("Kurtarmanın kendi denetim kaydı yazılamadı; yapılan işlem doğrudur.".to_string());
+            }
         }
         Ok(s)
     }

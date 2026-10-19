@@ -543,7 +543,9 @@ export interface InstallPreview { offerId: string; createdAt: string; expiresAt:
 export interface ReceiptView { txnId: string; action: "install" | "update" | "uninstall"; version: string | null; completedAt: string; artifactSha256: string | null; kept: string[] }
 export interface RollbackOutcome { status: string; undone: string[]; notUndone: string[]; notCovered: string[] }
 export interface InstallResult {
-  outcome: "completed" | "already_applied" | "failed" | "refused";
+  /** needs_attention: the operation happened (and is true on disk) but its audit outcome could not be persisted or the state could not be read back. */
+  outcome: "completed" | "already_applied" | "failed" | "refused" | "needs_attention";
+  auditRecorded: boolean;
   action: InstallAction | "update" | null;
   entryId: string | null;
   version: string | null;
@@ -568,4 +570,6 @@ export interface InstalledDetails {
   never: string[];
   lastResult: InstallResult | null;
 }
-export interface RecoverySummary { examined: boolean; rolledBack: number; rolledForward: number; needsAttention: number; notes: string[] }
+export interface RecoverySummary {
+  examined: boolean; auditReconciled: number; auditUnreconciled: number; rolledBack: number; rolledForward: number; needsAttention: number; notes: string[];
+}

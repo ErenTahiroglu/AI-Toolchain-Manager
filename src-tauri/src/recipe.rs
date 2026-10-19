@@ -17,6 +17,7 @@
 #![allow(dead_code)] // the synthetic lifecycle is exercised by tests and the self-check only; no command reaches it
 
 use crate::{
+    attestation::Evidence,
     audit::{canonical_json, sha256_hex},
     discovery::reference::{ArtifactFormat, ArtifactKind, ReferenceSet},
     plan::{self, OperationKind},
@@ -227,8 +228,15 @@ impl ValidatedRecipe {
     }
 }
 
-/// Why a recipe is not usable. Closed codes; the order is stable.
+/// Why a recipe is not usable. Closed codes; the order is stable. No attestation and no local-use licence record is available here: a real
+/// recipe can claim neither (see [`problems_with`]).
 pub fn problems(rr: &ReviewedRecipe, refs: &ReferenceSet) -> Vec<&'static str> {
+    problems_with(rr, refs, &Evidence::none())
+}
+
+/// The same, judged against the reviewed evidence records (Phase 3D-3). A claim that a real recipe's source is attested, or that its licence is
+/// accepted for local use, holds only if a record in `ev` substantiates it field by field.
+pub fn problems_with(rr: &ReviewedRecipe, refs: &ReferenceSet, ev: &Evidence) -> Vec<&'static str> {
     let r = &rr.recipe;
     let mut p: Vec<&'static str> = Vec::new();
     if r.schema_version != RECIPE_SCHEMA_VERSION {
@@ -291,23 +299,35 @@ pub fn problems(rr: &ReviewedRecipe, refs: &ReferenceSet) -> Vec<&'static str> {
         p.push("authenticated_references_conflict");
     }
     if r.source.source_attested {
-        // only a synthetic recipe may claim an attestation, and only through the synthetic evidence kind
+        // a synthetic recipe claims it through the synthetic evidence kind; a REAL recipe only through a record that substantiates every binding
         let kinded = r.authentication.iter().any(|e| e.kind == "synthetic_source_attestation");
-        if !(r.synthetic && kinded) {
+        let substantiated = !r.synthetic
+            && r.authentication
+                .iter()
+                .filter(|e| e.kind == "source_attestation_evidence")
+                .any(|e| ev.attestation(&e.evidence_id).map(|a| a.problems_for(r).is_empty()).unwrap_or(false));
+        if !((r.synthetic && kinded) || substantiated) {
             p.push("source_attestation_unverifiable");
         }
     }
-    if r.authentication
-        .iter()
-        .any(|e| !matches!(e.kind.as_str(), "authenticated_reference_digest" | "synthetic_source_attestation") || !is_id(&e.evidence_id))
-    {
+    if r.authentication.iter().any(|e| {
+        !matches!(e.kind.as_str(), "authenticated_reference_digest" | "synthetic_source_attestation" | "source_attestation_evidence")
+            || !is_id(&e.evidence_id)
+    }) {
         p.push("authentication_kind");
     }
-    if r.license.state != "accepted"
-        || r.license.spdx_id.is_empty()
-        || r.license.spdx_id.len() > 40
-        || !r.license.evidence_id.starts_with('R')
-    {
+    let license_shape = !r.license.spdx_id.is_empty() && r.license.spdx_id.len() <= 40 && r.license.evidence_id.starts_with('R');
+    let license_ok = match r.license.state.as_str() {
+        "accepted" => license_shape,
+        // accepted for ONE local, non-redistributing use of ONE exact file: valid only with a record that covers this very recipe
+        "accepted_local_use" => {
+            license_shape
+                && !r.synthetic
+                && ev.local_use_license(&r.license.evidence_id).map(|l| l.problems_for(r).is_empty()).unwrap_or(false)
+        }
+        _ => false,
+    };
+    if !license_ok {
         p.push("license_not_accepted");
     }
     if r.permissions.is_empty()
@@ -381,7 +401,11 @@ pub fn problems(rr: &ReviewedRecipe, refs: &ReferenceSet) -> Vec<&'static str> {
 }
 
 pub fn validate(rr: &ReviewedRecipe, refs: &ReferenceSet) -> Result<ValidatedRecipe, Vec<&'static str>> {
-    let p = problems(rr, refs);
+    validate_with(rr, refs, &Evidence::none())
+}
+
+pub fn validate_with(rr: &ReviewedRecipe, refs: &ReferenceSet, ev: &Evidence) -> Result<ValidatedRecipe, Vec<&'static str>> {
+    let p = problems_with(rr, refs, ev);
     if p.is_empty() {
         Ok(ValidatedRecipe { digest: recipe_digest(&rr.recipe), reviewed: rr.clone() })
     } else {
@@ -407,6 +431,12 @@ impl RecipeRegistry {
             return Err("only_synthetic_recipes_may_be_registered_outside_the_built_in_list");
         }
         Ok(RecipeRegistry { entries })
+    }
+
+    /// Tests only: a registry that may hold REAL (non-synthetic) recipes, to exercise the transition. No release or pilot build has this.
+    #[cfg(test)]
+    pub fn for_tests(entries: Vec<ReviewedRecipe>) -> RecipeRegistry {
+        RecipeRegistry { entries }
     }
 
     pub fn len(&self) -> usize {

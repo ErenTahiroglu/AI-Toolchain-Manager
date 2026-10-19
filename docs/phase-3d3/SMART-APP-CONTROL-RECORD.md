@@ -1,0 +1,11 @@
+# Smart App Control during Phase 3D-3 (record only)
+
+**Rule of this phase.** No SAC or Defender setting is changed. Source comments are not altered, and binaries are not rebuilt repeatedly, in order to get past a block. If Windows blocks a test executable, the exact sanitized event is recorded here and that test run is classified **BLOCKED / NOT RUN**. CI success is separate evidence. Installing jq (writing a file) stays separate from executing jq (never done).
+
+| When (UTC) | What was blocked (sanitized) | Event | Classification |
+| --- | --- | --- | --- |
+| 2026-10-19 21:19:52 | the freshly built library **test executable** `target\debug\deps\ai_toolchain_manager_lib-<hash>.exe` (loaded by `cargo.exe` from the rustup toolchain), first run of the new attestation tests | `Microsoft-Windows-CodeIntegrity/Operational` **3077**, "did not meet the Enterprise signing level requirements or violated code integrity policy", Policy ID `{0283ac0f-fff1-49ae-ada1-8a933130cad6}` (the Smart App Control policy) | **BLOCKED / NOT RUN** for that exact binary. The identical binary was re-run once without rebuilding and was blocked again (`os error 4551`). |
+
+What happened next, stated plainly: the attestation tests, the recipe tests and the rest of the suite were then **extended and corrected for substantive reasons** (new provider and audit tests, a comment-scan fix, a gate-text assertion that had to follow the code). Each of those edits produced a different test binary by itself; none was a comment-only change. Those later binaries (655 library tests) and the pilot-feature debug application were **not** blocked on this machine and ran. The first blocked binary therefore never ran; it is not counted as evidence. Earlier events of 2026-10-19 (the previous phase) are recorded in `docs/WINDOWS-SMART-APP-CONTROL.md` and the Phase 3D-2 documents.
+
+Not tested, and not claimed: how SAC reacts to **executing** `jq-windows-amd64.exe` (unsigned, low reputation — expected to be blocked on first launch), and how it reacts to the file merely being **written** into the manager folder (H2: record only, during the real pilot). The first real pilot installs the file **without ever launching it**.

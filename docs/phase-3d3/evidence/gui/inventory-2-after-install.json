@@ -1,0 +1,146 @@
+{
+ "atm-managed/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/data/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/data/synthetic-hello/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/data/synthetic-hello/settings.json": {
+  "kind": "file",
+  "size": 16,
+  "links": 1,
+  "sha256": "0f4f87db4567232a7f1756aa1534ec1314777b39c3bf5209f87cf9739321cddc"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/journal/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/journal/txn-2381cb9241c54101a5b3432014ed0a8a.json": {
+  "kind": "file",
+  "size": 1776,
+  "links": 1,
+  "sha256": "4c1b2b83d05d326c19d4cb2ec7e5e8b334c67bb162865c74782cbd3a18e2de63"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/journal/txn-40b427e53f98479daaf1d6d13539fe40.json": {
+  "kind": "file",
+  "size": 1831,
+  "links": 1,
+  "sha256": "289a4b5595d0b540ec70e2e789df19bee53cb174f1fdd9c9042a17bd2250962a"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/journal/txn-7d18a14d72544083a7504a1696365be5.json": {
+  "kind": "file",
+  "size": 1788,
+  "links": 1,
+  "sha256": "73c8f8516e4cfe2f806df0e798330cecaca096541a4ccc99b37ccb786627afaa"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/journal/txn-b6d3ebba07374c7194124cb7d4b822f1.json": {
+  "kind": "file",
+  "size": 1817,
+  "links": 1,
+  "sha256": "a2243e2aefc1a0fd0220e04bc5a693a2eb07e7afdf568939c4191de1391ea72a"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/journal/txn-f4fb57ac566d4e0abd8f99bd6d39bd27.json": {
+  "kind": "file",
+  "size": 1817,
+  "links": 1,
+  "sha256": "3f52393003e5ddf9f7e5a5fede54e222700b68d88bc280c3772342a5a05c7907"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/locks/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/receipts/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/receipts/txn-2381cb9241c54101a5b3432014ed0a8a.json": {
+  "kind": "file",
+  "size": 715,
+  "links": 1,
+  "sha256": "fa566f65eaa1ae1b654f349773065ab75306eea9a46e90bb9983eb8c32b61b72"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/receipts/txn-40b427e53f98479daaf1d6d13539fe40.json": {
+  "kind": "file",
+  "size": 705,
+  "links": 1,
+  "sha256": "dab51f9c3ba955605d3be77c34e93112c8b4985ac6c00eefdabae8e4b858a90d"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/receipts/txn-7d18a14d72544083a7504a1696365be5.json": {
+  "kind": "file",
+  "size": 707,
+  "links": 1,
+  "sha256": "ea4d8afd18b69bf1e02db8cb88a91bfba41b63a7f49edb53832ca4b88bf286d8"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/receipts/txn-b6d3ebba07374c7194124cb7d4b822f1.json": {
+  "kind": "file",
+  "size": 702,
+  "links": 1,
+  "sha256": "a485889eea568a82bd8481fa29115ad28a06105a3673c2903687b2e691c27225"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/receipts/txn-f4fb57ac566d4e0abd8f99bd6d39bd27.json": {
+  "kind": "file",
+  "size": 713,
+  "links": 1,
+  "sha256": "29a93227885990583d72b4b75895c363f526a4891aa2882e3419ced0b8e7385d"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/snapshots/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/staging/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/state/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/state/synthetic-hello.json": {
+  "kind": "file",
+  "size": 173,
+  "links": 1,
+  "sha256": "d7ed61231bd6590ad8e93f1f23dedf531da28d49a2fa86d6a82985f44c111632"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/versions/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/versions/synthetic-hello/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/versions/synthetic-hello/1.0.0/": {
+  "kind": "dir"
+ },
+ "atm-managed/root-b756c12a174b4a05bc5224f877ed925b/versions/synthetic-hello/1.0.0/artifact.bin": {
+  "kind": "file",
+  "size": 243,
+  "links": 1,
+  "sha256": "74d2146f56904b5d2d5283ca35dd49d66a25789fc76cb4b2912d3969a0b14306"
+ },
+ "atm.sqlite": {
+  "kind": "file",
+  "size": 4096,
+  "links": 1,
+  "sha256": "da63a52bdf62b3fc863995d79f497584be3ba97c1de4c55d1d301afbafab6cfc"
+ },
+ "atm.sqlite-shm": {
+  "kind": "file",
+  "size": 32768,
+  "links": 1,
+  "sha256": "6e9f1a93be925a672226d8acab08120fad23ac9032618b5b96e4b0d6b8b75fe7"
+ },
+ "atm.sqlite-wal": {
+  "kind": "file",
+  "size": 914672,
+  "links": 1,
+  "sha256": "4a5a507a8929b8b7bf45f8e3a9aa54d266e84fddd11d6d98b55198336500b07a"
+ },
+ "pilot-input/": {
+  "kind": "dir"
+ },
+ "pilot-input/synthetic-retained.exe": {
+  "kind": "file",
+  "size": 246,
+  "links": 1,
+  "sha256": "fe418d0abc6b9da958c19c6af3f4bf2905769f887bbb5218f41ab57b0b656982"
+ }
+}
