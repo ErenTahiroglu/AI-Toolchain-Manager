@@ -238,6 +238,10 @@ pub struct PreviewContent {
     pub architecture: String,
     pub source: SourceView,
     pub artifact: ArtifactView,
+    /// Where the bytes come from, from the reviewed recipe: `local_retained_file` | `synthetic_in_memory` | `undeclared`.
+    pub artifact_origin: String,
+    /// The same, in words the person reads (also part of what the confirmation is bound to).
+    pub origin_text: String,
     pub authentication: String,
     pub license_state: String,
     pub license_spdx: String,
@@ -405,6 +409,7 @@ pub struct CancelRequest {
 
 pub fn reason_text(code: &str) -> String {
     match code {
+        "artifact_source_undeclared" | "artifact_origin_conflict" | "artifact_origin_unknown" => "Dosyanın kaynağı tarifte açık ve tutarlı biçimde belirtilmemiş (indirme adresi ya da yerel saklanan dosya, ikisi birden değil).",
         "recipe_not_enabled" => "Bu derlemede bu gerçek araç için kurulum etkinleştirilmedi; ayrı, gözden geçirilmiş bir etkinleştirme gerekir.",
         "notices_missing_or_changed" => "Lisans yalnızca belirli bir bildirim metni için, yerel kullanıma kabul edildi; uygulamadaki bildirim metni o metinle aynı değil.",
         "no_reviewed_recipe" => "Bu araç için incelenmiş ve onaylanmış bir kurulum tarifi yok.",
@@ -1005,6 +1010,17 @@ impl InstallService {
                 if designed { "yalnızca TASARLANMIŞ" } else { "yalnızca SENTETİK denemelerle sınandı" }
             ),
         };
+        let (artifact_origin, origin_text) = match rec.artifact.origin.as_deref() {
+            Some(crate::recipe::ORIGIN_LOCAL_RETAINED_FILE) => (
+                "local_retained_file",
+                "Dosya, bu bilgisayarda daha önce edinilip doğrulanmış YEREL bir dosyadan okunur (uygulamanın sabit giriş klasöründeki tek dosya; yalnızca okunur, değiştirilmez). Hiçbir şey indirilmez; ağ kullanılmaz. Okunan baytların boyutu, biçimi ve SHA-256 özeti yüklemeden hemen önce yeniden doğrulanır.",
+            ),
+            None if rec.synthetic => (
+                "synthetic_in_memory",
+                "Dosya, uygulamanın içindeki SENTETİK deneme verisinden alınır; hiçbir şey indirilmez, gerçek bir kaynak yoktur.",
+            ),
+            _ => ("undeclared", "Dosyanın nereden alınacağı tarifte belirtilmemiş; bu önizleme onaylanamaz."),
+        };
         let mut content = PreviewContent {
             action,
             entry_id: r.entry.entry_id.clone(),
@@ -1024,6 +1040,8 @@ impl InstallService {
                 format: rec.artifact.format.clone(),
                 digest_scope: "exact_file".to_string(),
             },
+            artifact_origin: artifact_origin.to_string(),
+            origin_text: origin_text.to_string(),
             authentication: "authenticated_reference".to_string(),
             license_state: rec.license.state.clone(),
             license_spdx: rec.license.spdx_id.clone(),

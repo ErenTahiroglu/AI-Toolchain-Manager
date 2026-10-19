@@ -1,0 +1,39 @@
+{
+ "added": [
+  "atm-managed/",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/data/",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/data/synthetic-hello/",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/data/synthetic-hello/settings.json",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/journal/",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/journal/txn-2442e86474754e9faf2361f5414d2240.json",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/journal/txn-519125574b1947f5b73b6f3b84a42f1a.json",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/journal/txn-8884a77e0e1e460c9d588b3b86b35aea.json",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/journal/txn-9a391178b6ea49009bdd52c1d16e7297.json",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/journal/txn-9aef08b51ac4475fbd02c127a1a2968d.json",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/journal/txn-9e7aa6aeb11a42dcbdfae1279f9490b4.json",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/journal/txn-cadcecfb395e47a19faca346833e5b3b.json",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/locks/",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/receipts/",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/receipts/txn-2442e86474754e9faf2361f5414d2240.json",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/receipts/txn-519125574b1947f5b73b6f3b84a42f1a.json",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/receipts/txn-8884a77e0e1e460c9d588b3b86b35aea.json",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/receipts/txn-9a391178b6ea49009bdd52c1d16e7297.json",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/receipts/txn-9aef08b51ac4475fbd02c127a1a2968d.json",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/receipts/txn-9e7aa6aeb11a42dcbdfae1279f9490b4.json",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/receipts/txn-cadcecfb395e47a19faca346833e5b3b.json",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/snapshots/",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/staging/",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/state/",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/state/synthetic-hello.json",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/versions/",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/versions/synthetic-hello/",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/versions/synthetic-hello/1.0.0/",
+  "atm-managed/root-82c4d63047d242be91a65f5d0c2a5477/versions/synthetic-hello/1.0.0/artifact.bin"
+ ],
+ "removed": [],
+ "changed": [
+  "atm.sqlite-shm",
+  "atm.sqlite-wal"
+ ]
+}

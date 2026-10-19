@@ -244,7 +244,7 @@ function PlanView({ plan }: { plan: InstallPlan }) {
         <ol aria-label="Önerilen adımlar">
           {plan.steps.map((s) => (
             <li key={s.index}>
-              <strong>{OPERATION[s.kind] ?? s.kind}</strong> — {s.summary}
+              <strong>{s.kind === "fetch-release-artifact" && plan.artifactOrigin === "local_retained_file" ? "Saklanan yerel dosyayı oku (indirme yok)" : OPERATION[s.kind] ?? s.kind}</strong> — {s.summary}
               <ul className="small">
                 {s.missingParameters.length > 0 && <li>Eksik bilgi (bu yüzden tipli işlem yazılamıyor): {s.missingParameters.map((m) => MISSING[m] ?? m).join(", ")}</li>}
                 <li>{s.network === "yes" ? "Ağ kullanımı gerekecekti." : "Ağ kullanımı gerekmeyecekti."}</li>

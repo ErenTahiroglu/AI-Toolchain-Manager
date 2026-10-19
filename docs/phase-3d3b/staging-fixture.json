@@ -1,0 +1,18 @@
+{
+  "payloadAscii": "JQ-PILOT-STAGING-FIXTURE-1: a synthetic stand-in; it is not jq and not a program.",
+  "payloadSha256": "1090fb4499b5308600c5e32c6c3e84ca6b92a8b1009672b7cb63f7e29df9de3d",
+  "platforms": {
+    "windows-x64": {
+      "fileName": "jq-windows-amd64.exe",
+      "sizeBytes": 233,
+      "sha256": "d89485933ba5975899fd3f6c36d0fd98295ff1877043992718cf019e29b61762"
+    },
+    "macos-arm64": {
+      "fileName": "jq-macos-arm64",
+      "sizeBytes": 113,
+      "sha256": "07274dbddf732a2670fcc0c24f1bcde44b898f9fc5a42571d494056ddffc0990"
+    }
+  },
+  "note": "Made-up stand-in for the jq executable. Not jq, not a program, never executed. Rebuilt independently by tools/staging_fixture.py.",
+  "reproduce": "python tools/staging_fixture.py print"
+}

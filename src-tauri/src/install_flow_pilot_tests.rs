@@ -528,3 +528,56 @@ fn the_release_service_has_no_evidence_no_enablement_and_no_real_recipe() {
         assert!(!text.contains("RetainedFileProvider"), "{name}");
     }
 }
+
+#[test]
+fn the_preview_states_where_the_bytes_come_from_and_that_statement_is_part_of_the_confirmation() {
+    let (_k, input) = input_dir();
+    let (l, _, _) = pilot_lab(pilot_sources(&input, b"fixture origin", true, true, true));
+    let p = l.preview(JQ, Action::Install);
+    assert_eq!(p.content.artifact_origin, "local_retained_file");
+    let t = &p.content.origin_text;
+    assert!(t.contains("YEREL") && t.contains("Hiçbir şey indirilmez") && t.contains("ağ kullanılmaz") && t.contains("yeniden doğrulanır"), "{t}");
+    assert!(!p.content.network_used);
+    // a synthetic tool says it is synthetic, never "local file"
+    let hello = lab().preview(HELLO, Action::Install);
+    assert_eq!(hello.content.artifact_origin, "synthetic_in_memory");
+    assert!(hello.content.origin_text.contains("SENTETİK"));
+    // the origin is a reviewed field of the recipe: a recipe that lost it is no longer applicable
+    let (_k2, input2) = input_dir();
+    let mut q = pilot_sources(&input2, b"fixture origin lost", true, true, true);
+    let mut rr = q.sources.registry.find(JQ, &HostFacts::detect().platform, SURFACE, SCOPE)[0].clone();
+    rr.recipe.artifact.origin = None;
+    rr.review.reviewed_recipe_digest = crate::recipe::recipe_digest(&rr.recipe);
+    q.sources.registry = RecipeRegistry::for_tests(vec![rr]);
+    let (l2, _, _) = pilot_lab(q);
+    let st = l2.state(JQ);
+    assert_eq!(st.status, Status::VerificationIncomplete);
+    assert!(st.reasons.iter().any(|r| r.code == "artifact_source_undeclared"), "{st:?}");
+}
+
+// ---- Phase 3D-3B: the staging fixture and the exact reference entry ------------------------------------------------------------------------------
+
+const FIXTURE_JSON: &str = include_str!("../../docs/phase-3d3b/staging-fixture.json");
+
+#[test]
+fn the_staging_fixture_identity_is_pinned_and_the_candidate_runs_end_to_end_on_exactly_those_bytes() {
+    let fx: Value = serde_json::from_str(FIXTURE_JSON).unwrap();
+    let payload = fx["payloadAscii"].as_str().unwrap().as_bytes().to_vec();
+    assert_eq!(crate::synthetic::sha256_of(&payload), fx["payloadSha256"].as_str().unwrap());
+    // both platforms, whatever machine this runs on: the bytes the Rust helpers build are the bytes the independent Python rebuild describes
+    for platform in ["windows-x64", "macos-arm64"] {
+        let bytes = crate::synthetic::artifact_bytes(platform, &payload);
+        let want = &fx["platforms"][platform];
+        assert_eq!(bytes.len() as u64, want["sizeBytes"].as_u64().unwrap(), "{platform}");
+        assert_eq!(crate::synthetic::sha256_of(&bytes), want["sha256"].as_str().unwrap(), "{platform}");
+    }
+    // the full workflow of the candidate structure on THE fixture of this machine's platform, from the retained-file provider
+    let host = HostFacts::detect().platform;
+    let (_k, input) = input_dir();
+    let (l, bytes, _) = pilot_lab(pilot_sources(&input, &payload, true, true, true));
+    assert_eq!(crate::synthetic::sha256_of(&bytes), fx["platforms"][&host]["sha256"].as_str().unwrap());
+    assert_eq!(jq_install(&l).outcome, "completed");
+    assert_eq!(crate::synthetic::sha256_of(&fs::read(jq_artifact(&l)).unwrap()), fx["platforms"][&host]["sha256"].as_str().unwrap());
+    assert_eq!(jq_remove(&l).outcome, "completed");
+    assert_eq!(crate::synthetic::sha256_of(&fs::read(input.join(JQ_FILE)).unwrap()), fx["platforms"][&host]["sha256"].as_str().unwrap());
+}

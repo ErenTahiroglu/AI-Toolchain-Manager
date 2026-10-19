@@ -144,6 +144,11 @@ fn build(tools: &[&str], input_folder: Option<std::path::PathBuf>) -> Sources {
             if tool != UNVERIFIED {
                 authenticated.push(synthetic::reference_for(tool, VERSION, platform, &bytes));
             }
+            if tool == RETAINED {
+                // like the first real pilot: the bytes come from ONE retained local file, and the (reviewed) recipe says so
+                rr.recipe.artifact.origin = Some(crate::recipe::ORIGIN_LOCAL_RETAINED_FILE.to_string());
+                synthetic::rereview(&mut rr);
+            }
             if tool == LICENSE_PENDING {
                 rr.recipe.license.state = "unknown".to_string();
                 synthetic::rereview(&mut rr);

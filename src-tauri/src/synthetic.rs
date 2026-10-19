@@ -64,6 +64,7 @@ pub fn reviewed_recipe(tool: &str, version: &str, platform: &str, bytes: &[u8]) 
             sha256: sha.clone(),
             digest_scope: DigestScope::ExactFile,
             format: reference::native_executable_format(platform).as_str().to_string(),
+            origin: None,
         },
         authentication: vec![
             AuthEvidence { kind: "authenticated_reference_digest".to_string(), evidence_id: "ref-synthetic-1".to_string() },

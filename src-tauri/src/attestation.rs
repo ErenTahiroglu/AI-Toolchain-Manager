@@ -228,6 +228,7 @@ impl LocalUseLicense {
         // the evaluated use is: the person's own copy of an upstream file, written into the manager's folder -- no hosting, no download by the
         // manager, no bundling. A recipe that downloads, or that does more than install/remove, is not what was evaluated.
         if !recipe.network.is_empty()
+            || recipe.artifact.origin.as_deref() != Some(crate::recipe::ORIGIN_LOCAL_RETAINED_FILE)
             || recipe.permissions.iter().any(|x| x == "network_download")
             || recipe.lifecycle_actions.iter().any(|a| a != "install" && a != "uninstall")
         {

@@ -494,6 +494,7 @@ fn jq_pilot_revision() -> ReviewedRecipe {
     d.recipe.recipe_id = "jq-1.8.2-windows-x64".to_string();
     d.recipe.permissions = vec!["current_user_account".to_string(), "write_manager_folders".to_string()];
     d.recipe.network = vec![];
+    d.recipe.artifact.origin = Some(ORIGIN_LOCAL_RETAINED_FILE.to_string());
     d
 }
 
@@ -610,4 +611,50 @@ fn even_a_fully_valid_jq_recipe_cannot_be_registered_or_applied_by_this_build_an
     assert_eq!(p.rollback.reliability, "designed");
     assert!(p.rollback.text.contains("yalnızca TASARLANMIŞ"));
     assert!(!p.executable && !p.executed && !p.modifies_anything);
+}
+
+// ---- Phase 3D-3B: the source of the bytes is explicit and reviewed -----------------------------------------------------------------------------
+
+#[test]
+fn a_real_recipe_must_say_where_its_bytes_come_from_and_the_two_ways_never_mix() {
+    let refs = {
+        let d = jq_pilot_revision();
+        ReferenceSet { authenticated: vec![hypothetical_reference(&d)], unauthenticated: vec![] }
+    };
+    // declared offline origin, no network: nothing to say about the source
+    let ok = jq_pilot_revision();
+    let p = problems(&ok, &refs);
+    assert!(!p.iter().any(|c| c.starts_with("artifact_")), "{p:?}");
+    // no origin and no download destination: the recipe does not say where the bytes come from
+    let mut undeclared = jq_pilot_revision();
+    undeclared.recipe.artifact.origin = None;
+    assert!(problems(&undeclared, &refs).contains(&"artifact_source_undeclared"));
+    // an offline origin together with a download destination or the download permission
+    let mut both = jq_pilot_revision();
+    both.recipe.network = vec!["github_release_download".into()];
+    both.recipe.permissions.push("network_download".into());
+    assert!(problems(&both, &refs).contains(&"artifact_origin_conflict"));
+    let mut perm_only = jq_pilot_revision();
+    perm_only.recipe.permissions.push("network_download".into());
+    assert!(problems(&perm_only, &refs).contains(&"artifact_origin_conflict"));
+    // an origin this build does not know
+    let mut unknown = jq_pilot_revision();
+    unknown.recipe.artifact.origin = Some("anywhere".into());
+    assert!(problems(&unknown, &refs).contains(&"artifact_origin_unknown"));
+    // the draft (a downloading recipe) keeps working the way it did: it has a network list and no origin
+    assert!(!problems(&jq_draft(), &no_refs()).iter().any(|c| c.starts_with("artifact_source") || c.starts_with("artifact_origin")));
+}
+
+#[test]
+fn the_origin_field_changes_the_digest_when_present_and_changes_nothing_for_every_recipe_that_has_none() {
+    let sc = scenario();
+    // a recipe without an origin serialises without the key, so every digest that existed before this field is the digest it always had
+    let json = serde_json::to_string(&sc.reviewed.recipe).unwrap();
+    assert!(!json.contains("origin"));
+    let mut with = sc.reviewed.clone();
+    with.recipe.artifact.origin = Some(ORIGIN_LOCAL_RETAINED_FILE.into());
+    assert!(serde_json::to_string(&with.recipe).unwrap().contains("\"origin\":\"local_retained_file\""));
+    assert_ne!(recipe_digest(&with.recipe), recipe_digest(&sc.reviewed.recipe));
+    // a review made before the origin was added no longer covers the recipe
+    assert!(problems(&with, &sc.refs).contains(&"changed_after_review"));
 }

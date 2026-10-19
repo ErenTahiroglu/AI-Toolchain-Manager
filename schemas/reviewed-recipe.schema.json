@@ -52,6 +52,7 @@
             "sizeBytes": { "type": "integer", "minimum": 1 },
             "sha256": { "$ref": "#/$defs/hex64" },
             "digestScope": { "const": "exact_file" },
+            "origin": { "enum": ["local_retained_file"], "description": "Phase 3D-3B: the bytes come from ONE already retained, verified local file read by the fixed read-only provider; the recipe then has no network list and no network_download permission. Absent: the recipe's network list says where it downloads from (a non-synthetic recipe with neither is refused)." },
             "format": { "enum": ["pe-x64", "pe-arm64", "pe-x86", "macho-arm64", "macho-x64", "macho-universal-arm64", "macho-universal-x64", "macho-universal-arm64-x64", "elf-x64", "elf-arm64", "script-shebang"] }
           }
         },

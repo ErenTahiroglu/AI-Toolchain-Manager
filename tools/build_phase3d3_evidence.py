@@ -127,6 +127,8 @@ def main():
     draft = json.loads((ROOT / "docs/phase-3d1/jq-1.8.2-windows-x64.recipe.draft.json").read_text(encoding="utf-8"))
     r = draft["recipe"]
     r["revision"] = 2
+    # Phase 3D-3B: the offline source is a reviewed, digest-bound part of the recipe (the first step stays the logical acquisition step)
+    r["artifact"]["origin"] = "local_retained_file"
     r["recipeId"] = "jq-1.8.2-windows-x64"
     r["source"]["sourceAttested"] = True
     r["authentication"] = [

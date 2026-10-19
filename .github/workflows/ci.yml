@@ -97,6 +97,11 @@ jobs:
           cargo clippy --target ${{ matrix.target }} --all-targets --features synthetic-pilot -- -D warnings
           cargo test --target ${{ matrix.target }} --features synthetic-pilot
 
+      # Phase 3D-3B: runs EXACTLY the identifiers of docs/phase-3d3b/staging-manifest.json on the synthetic fixture. CI-generated, SUPPORTING evidence of
+      # this commit only (exit status 0 = every named check passed); the developer-authored assertions do not become independent by running here.
+      - name: Staging reproduction of the jq review package (synthetic fixture; supporting evidence)
+        run: python tools/run_staging.py --skip-frontend --report "${{ runner.temp }}/staging-report-${{ matrix.name }}.json"
+
       - name: Build Tauri app (no bundle, no signing)
         run: npx tauri build --no-bundle --target ${{ matrix.target }}
 

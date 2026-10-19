@@ -78,6 +78,7 @@ function PreviewView({
         <dt>Sabit commit</dt><dd><code>{c.source.immutableCommit}</code> {c.source.sourceAttested ? "(bağımsız kanıtla bağlandı)" : "(yalnızca beyan; doğrulanmadı)"}</dd>
         <dt>Dosya</dt><dd>{c.artifact.fileName} · {c.artifact.sizeBytes} bayt · {c.artifact.format}</dd>
         <dt>Dosya özeti (SHA-256)</dt><dd><code>{c.artifact.sha256}</code></dd>
+        <dt>Dosyanın kaynağı</dt><dd>{c.originText}</dd>
         <dt>Özetin kapsamı</dt><dd>Kurulacak dosyanın kendisi (arşiv değil)</dd>
         <dt>Doğrulama</dt><dd>Dosyanın özeti, bağımsız olarak doğrulanmış bir referans özetiyle ve tarifle eşleşti.</dd>
         <dt>Lisans</dt><dd>{c.licenseState === "accepted" ? "Bir incelemeyle kabul edildi" : c.licenseState === "accepted_local_use" ? "Yalnızca bu bilgisayardaki yerel kullanım için kabul edildi (yeniden dağıtım veya paketleme için DEĞİL)" : licenseLabel(c.licenseState)} · {c.licenseSpdx}</dd>

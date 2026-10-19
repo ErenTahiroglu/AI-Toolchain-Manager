@@ -79,7 +79,15 @@ pub struct RecipeArtifact {
     pub digest_scope: DigestScope,
     /// Canonical format id ([`ArtifactFormat::as_str`]).
     pub format: String,
+    /// Where the bytes come from, as a REVIEWED part of the recipe (Phase 3D-3B). `local_retained_file`: one already retained, verified local
+    /// file, read through the fixed read-only provider -- no download, no network. Absent: the recipe's `network` list says where it downloads from
+    /// (a recipe without a network list and without an origin is refused unless it is synthetic). Absent is digest-neutral: every recipe that
+    /// existed before this field has the digest it always had.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
+
+pub const ORIGIN_LOCAL_RETAINED_FILE: &str = "local_retained_file";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -264,6 +272,17 @@ pub fn problems_with(rr: &ReviewedRecipe, refs: &ReferenceSet, ev: &Evidence) ->
     if a.digest_scope != DigestScope::ExactFile {
         // an archive digest never stands for the extracted file (policy since Phase 2C)
         p.push("digest_scope_not_exact_file");
+    }
+    // the source of the bytes is explicit: either declared network destinations, or a declared local retained file (never both, never neither)
+    match a.origin.as_deref() {
+        None if !r.synthetic && r.network.is_empty() => p.push("artifact_source_undeclared"),
+        None => {}
+        Some(ORIGIN_LOCAL_RETAINED_FILE) => {
+            if !r.network.is_empty() || r.permissions.iter().any(|x| x == "network_download") {
+                p.push("artifact_origin_conflict");
+            }
+        }
+        Some(_) => p.push("artifact_origin_unknown"),
     }
     let format = ArtifactFormat::parse(&a.format).filter(|f| *f != ArtifactFormat::Unrecognised);
     match format {

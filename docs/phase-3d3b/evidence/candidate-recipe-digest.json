@@ -1,0 +1,6 @@
+{
+  "note": "SHA-256 of the canonical JSON of the candidate's `recipe` object, computed by Python (tools/build_phase3d3b_inputs.py). The Rust test `the_candidate_recipe_digest_is_the_one_an_independent_python_computation_gives` recomputes it with the application's own code; any edit of the recipe changes it and invalidates every earlier review claim.",
+  "recipeId": "jq-1.8.2-windows-x64",
+  "revision": 2,
+  "recipeDigest": "9c7a020d65d233e86577464a06c32b8f08fd4fd8403110e68fd551b674f7cca1"
+}

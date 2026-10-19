@@ -127,7 +127,19 @@ impl OperationKind {
 
     /// Fixed Turkish description of what the step WOULD do (never what it did).
     fn summary(self) -> &'static str {
+        self.summary_for(false)
+    }
+
+    /// The same, for a recipe whose bytes come from ONE LOCAL RETAINED FILE (Phase 3D-3B): the acquisition step is logical only -- it reads that
+    /// file through the fixed read-only provider; it downloads nothing and uses no network.
+    fn summary_for(self, local: bool) -> &'static str {
         match self {
+            OperationKind::FetchReleaseArtifact if local => {
+                "Dosya, bu bilgisayarda daha önce edinilip doğrulanmış YEREL bir dosyadan okunacaktı (indirme yok; ağ kullanılmaz)."
+            }
+            OperationKind::VerifyArtifactDigest if local => {
+                "Okunan dosyanın SHA-256 özeti, tarifte yazılı beklenen değerle karşılaştırılacaktı."
+            }
             OperationKind::FetchReleaseArtifact => "Yayıncının sürüm dosyası, onaylı tarifte yazılı adresten indirilecekti.",
             OperationKind::VerifyArtifactDigest => "İndirilen dosyanın SHA-256 özeti, tarifte yazılı beklenen değerle karşılaştırılacaktı.",
             OperationKind::StagePrivateCopy => "Dosya, yöneticinin kendi hazırlık klasörüne özel bir kopya olarak alınacaktı.",
@@ -454,6 +466,9 @@ pub struct InstallPlan {
     pub rollback: RollbackInfo,
     pub unknowns: Vec<String>,
     pub recipe: RecipeStatus,
+    /// `local_retained_file` when the validated recipe reads its bytes from one retained local file (then no step touches a network).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_origin: Option<String>,
     /// Always `not_given`. A plan is a draft; an approval is a separate, bound object (`approval.rs`) and is never part of a plan.
     pub approval_state: String,
 }
@@ -480,8 +495,15 @@ impl InstallPlan {
         if self.statement != PREVIEW_STATEMENT || self.network.used_to_build_preview || self.rollback.available {
             return Err("plan_claims_effects");
         }
-        if self.steps.iter().any(|s| s.summary != s.kind.summary()) {
+        let local = self.artifact_origin.as_deref() == Some(crate::recipe::ORIGIN_LOCAL_RETAINED_FILE);
+        if self.steps.iter().any(|s| s.summary != s.kind.summary_for(local)) {
             return Err("step_text_not_from_vocabulary");
+        }
+        // an offline source is only ever claimed by a validated recipe, and then nothing is planned over a network
+        if self.artifact_origin.is_some()
+            && (!local || self.recipe.state != "validated" || self.network.planned_use || !self.network.destinations.is_empty())
+        {
+            return Err("artifact_origin_inconsistent");
         }
         Ok(())
     }
@@ -1518,6 +1540,7 @@ fn build_draft(entry: &CatalogEntry, req: &PlanRequest, host: &HostFacts, observ
             rollback_state: None,
             authentication: "none".to_string(),
         },
+        artifact_origin: None,
         approval_state: "not_given".to_string(),
     };
     let content = serde_json::to_value(&plan).map_err(|_| AppError::new("PLAN_SERIALIZE", "Plan serileştirilemedi."))?;
@@ -1702,6 +1725,12 @@ fn overlay(plan: &mut InstallPlan, valid: &ValidatedRecipe) {
     // the fetch step uses a network only if the recipe declares destinations for it (a synthetic recipe declares none)
     for st in plan.steps.iter_mut() {
         st.network = if st.kind == OperationKind::FetchReleaseArtifact && !r.network.is_empty() { NetworkUse::Yes } else { NetworkUse::No };
+    }
+    if r.artifact.origin.as_deref() == Some(crate::recipe::ORIGIN_LOCAL_RETAINED_FILE) {
+        plan.artifact_origin = r.artifact.origin.clone();
+        for st in plan.steps.iter_mut() {
+            st.summary = st.kind.summary_for(true).to_string();
+        }
     }
     plan.config_changes = Vec::new();
     plan.permissions = r.permissions.iter().map(|p| permission_text(p).to_string()).collect();

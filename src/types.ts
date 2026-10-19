@@ -480,6 +480,8 @@ export interface InstallPlan {
   rollback: { available: false; reliability: "none_implemented" | "designed" | "simulated"; text: string };
   unknowns: string[];
   /** Recipe review is not an approval. */
+  /** `local_retained_file`: the validated recipe reads ONE retained local file; no step downloads or uses a network. */
+  artifactOrigin?: "local_retained_file";
   recipe: {
     state: "none" | "invalid" | "validated";
     recipeId: string | null;
@@ -522,6 +524,8 @@ export interface PreviewContent {
   architecture: string;
   source: { repository: string; immutableCommit: string; sourceAttested: boolean };
   artifact: { fileName: string; sizeBytes: number; sha256: string; format: string; digestScope: string };
+  artifactOrigin: "local_retained_file" | "synthetic_in_memory" | "undeclared";
+  originText: string;
   authentication: string;
   licenseState: string;
   licenseSpdx: string;

@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "guard": {
+    "used": true,
+    "allowedHosts": [],
+    "residualLimits": "not an operating-system firewall: a program that ignores proxy variables and connects directly is neither stopped nor seen; prefer offline verification"
+  },
+  "command": "python.exe",
+  "childExit": 0,
+  "contactedHosts": [],
+  "incidents": [],
+  "exitStatusRule": "97 if any incident, otherwise the child's exit status"
+}

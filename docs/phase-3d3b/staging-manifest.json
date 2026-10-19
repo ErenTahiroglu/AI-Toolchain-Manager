@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 1,
+  "purpose": "The staging checks of the jq 1.8.2 / Windows x64 candidate recipe, mapped to the requirements of Issue #23, with the exact test identifiers that exercise them. Every test is DEVELOPER-AUTHORED and runs on synthetic fixture bytes (docs/phase-3d3b/staging-fixture.json); none of them is independent evidence by itself. tools/run_staging.py runs exactly these identifiers and fails if one is missing, renamed, ignored or failing.",
+  "fixture": "docs/phase-3d3b/staging-fixture.json",
+  "requirements": [
+    {
+      "id": "S1",
+      "title": "Recipe validation (the two reviewer-only blockers and nothing else; the offline source is explicit and digest-bound)",
+      "cargo": [
+        "recipe::tests::the_jq_pilot_transition_closes_exactly_four_blockers_in_a_fixed_order_and_a_review_never_carries_over",
+        "recipe::tests::a_real_recipe_must_say_where_its_bytes_come_from_and_the_two_ways_never_mix",
+        "recipe::tests::the_origin_field_changes_the_digest_when_present_and_changes_nothing_for_every_recipe_that_has_none",
+        "attestation::tests::the_candidate_is_the_draft_plus_exactly_the_agreed_changes",
+        "attestation::tests::the_candidate_recipe_digest_is_the_one_an_independent_python_computation_gives",
+        "attestation::tests::with_the_reviewed_evidence_the_candidate_has_exactly_two_blockers_left_and_the_plan_loses_the_source_blocker"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "Source-attestation evidence binding",
+      "cargo": [
+        "attestation::tests::the_retained_evidence_hashes_in_the_attestation_are_the_hashes_of_the_retained_files",
+        "attestation::tests::the_attestation_substantiates_the_candidate_and_every_binding_matters",
+        "attestation::tests::a_recipe_cannot_claim_a_source_attestation_without_a_substantiating_record",
+        "attestation::tests::production_evidence_is_empty_and_nothing_names_jq",
+        "attestation::tests::the_exact_reference_entry_of_the_review_package_authenticates_the_candidate_and_nothing_else"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "Local-use licence binding (one file, one notice text, one use; never redistribution)",
+      "cargo": [
+        "attestation::tests::local_use_acceptance_needs_a_covering_record_and_never_means_redistribution",
+        "attestation::tests::the_local_use_record_points_at_the_review_it_rests_on_and_at_the_exact_notice_text",
+        "install_flow::tests::without_the_substantiating_evidence_the_real_recipe_stays_unavailable_and_says_why"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "Plan generation and the source-origin gate (the plan says: one local retained file, nothing downloaded)",
+      "cargo": [
+        "attestation::tests::the_plan_of_the_candidate_says_the_bytes_come_from_a_local_retained_file_and_nothing_is_downloaded",
+        "recipe::tests::even_a_fully_valid_jq_recipe_cannot_be_registered_or_applied_by_this_build_and_its_plan_is_fixed"
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "Wrong digest, wrong source, wrong platform or version, wrong enablement: rejected",
+      "cargo": [
+        "install_flow::tests::the_retained_file_provider_failures_reach_the_person_as_refusals_and_a_swapped_file_is_caught_before_the_first_change",
+        "install_flow::tests::a_real_recipe_is_not_applicable_in_a_build_that_was_not_enabled_for_exactly_that_recipe",
+        "install_flow::tests::the_enablement_entry_matches_one_exact_recipe_only",
+        "install_flow::tests::wrong_bytes_are_refused_before_a_preview_and_swapped_bytes_are_refused_before_the_first_change",
+        "install_flow::tests::a_recipe_for_another_platform_or_another_version_never_makes_a_tool_installable_here"
+      ]
+    },
+    {
+      "id": "S6",
+      "title": "Offline artifact provider (fixed folder, read-only, no link followed, size first)",
+      "cargo": [
+        "artifact_provider::tests::the_exact_file_is_read_unchanged_and_left_exactly_as_it_was",
+        "artifact_provider::tests::only_the_recipes_it_was_built_for_can_be_asked_for",
+        "artifact_provider::tests::a_missing_file_a_missing_folder_and_a_wrong_size_are_refused_before_any_byte_is_trusted",
+        "artifact_provider::tests::a_folder_a_hard_linked_file_or_a_link_in_place_of_the_file_is_not_a_plain_file",
+        "artifact_provider::tests::the_input_folder_itself_replaced_by_a_link_is_not_followed",
+        "artifact_provider::tests::the_provider_can_only_read_and_names_no_path_url_or_command"
+      ]
+    },
+    {
+      "id": "S7",
+      "title": "Preview and single-use consent (the preview states the local origin)",
+      "cargo": [
+        "install_flow::tests::the_preview_states_where_the_bytes_come_from_and_that_statement_is_part_of_the_confirmation",
+        "install_flow::tests::the_preview_states_what_will_not_happen_and_what_the_confirmation_is_and_is_not",
+        "install_flow::tests::forged_ipc_payloads_are_refused_at_every_layer",
+        "install_flow::tests::a_confirmation_replay_changes_nothing_and_is_audited",
+        "consent::tests::many_racing_confirmations_of_one_offer_produce_exactly_one_grant"
+      ]
+    },
+    {
+      "id": "S8",
+      "title": "Installation and removal of the candidate structure on the pinned fixture, from the retained-file provider",
+      "cargo": [
+        "install_flow::tests::the_real_candidate_structure_runs_the_whole_workflow_from_the_retained_file_and_the_retained_file_is_never_touched",
+        "install_flow::tests::the_staging_fixture_identity_is_pinned_and_the_candidate_runs_end_to_end_on_exactly_those_bytes"
+      ]
+    },
+    {
+      "id": "S9",
+      "title": "Filesystem effect inventory (every path seen at every injection point is declared; what remains is what was promised)",
+      "cargo": [
+        "install_flow::tests::everything_the_preview_promises_is_what_happens_to_the_file_system_at_every_moment",
+        "install_flow::tests::the_tools_own_user_data_and_everything_outside_the_manager_folder_are_never_modified"
+      ]
+    },
+    {
+      "id": "S10",
+      "title": "Rollback, crash recovery and audit honesty",
+      "cargo": [
+        "install_flow::tests::a_failure_in_the_middle_of_an_install_is_rolled_back_and_reported_honestly",
+        "install_flow::tests::a_crash_at_any_point_is_recovered_after_a_restart_and_the_old_consent_is_gone",
+        "install_flow::tests::a_failed_post_installation_audit_is_reported_as_needs_attention_with_the_true_state_and_never_as_a_plain_success",
+        "install_flow::tests::the_state_is_read_back_after_an_operation_and_a_changed_result_is_never_reported_as_a_success",
+        "install_flow::tests::a_tampered_installed_file_is_reported_never_repaired_and_blocks_removal"
+      ]
+    },
+    {
+      "id": "S11",
+      "title": "No network, no PATH change, no agent settings, no process execution",
+      "cargo": [
+        "install_flow::tests::no_process_is_started_and_the_environment_is_unchanged_by_a_complete_workflow",
+        "attestation::tests::nothing_in_the_application_interprets_recipe_steps_as_a_command_and_it_has_no_network_client",
+        "install_flow::tests::the_webview_reaches_the_installation_engine_only_through_install_flow_and_never_with_a_path_a_url_or_bytes",
+        "install_flow::tests::the_workflow_modules_never_touch_windows_hello_the_approval_ledger_or_a_key_store"
+      ]
+    },
+    {
+      "id": "S12",
+      "title": "Production stays closed (release supply empty, no acting adapter, no enablement)",
+      "cargo": [
+        "install_flow::tests::the_release_service_has_no_evidence_no_enablement_and_no_real_recipe",
+        "install_flow::tests::the_release_supply_offers_nothing_every_real_entry_is_verification_incomplete_and_no_folder_is_created",
+        "install_flow::tests::a_release_build_contains_no_acting_adapter_and_the_gated_pieces_are_only_compiled_for_tests_and_the_pilot_feature"
+      ]
+    }
+  ],
+  "python": [
+    "tests.test_phase3d3_contract",
+    "tests.test_phase3d3b_contract"
+  ],
+  "frontend": {
+    "files": ["src/Install.test.tsx", "src/Plan.test.tsx"],
+    "titles": [
+      "the preview says where the bytes come from, in words, before anything can be confirmed",
+      "a plan whose recipe reads ONE retained local file says so in the step and never says anything is downloaded"
+    ]
+  },
+  "notReproducibleInCi": [
+    "The real application window (tools/gui_install_flow.ps1): needs WebView2, a desktop session and a build made with --features synthetic-pilot. Reproducible on a Windows computer; its raw results are in docs/phase-3d3/evidence/gui and docs/phase-3d3b/evidence/gui.",
+    "Smart App Control / Defender reaction to a real executable: needs the real file and a real machine; not part of this package.",
+    "Operating-system level network isolation: not available without administrator rights; the no-network evidence is code-level (no network client in the application, none called by the workflow, the window may reach only its own IPC) plus a run under tools/egress_guard.py with an empty allow-list (proxy-variable based, NOT an operating-system firewall)."
+  ]
+}

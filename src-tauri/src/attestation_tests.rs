@@ -209,6 +209,8 @@ fn local_use_acceptance_needs_a_covering_record_and_never_means_redistribution()
     assert!(refuse(&|_| {}, &|r| r.recipe.network = vec!["github_release_download".into()]));
     assert!(refuse(&|_| {}, &|r| r.recipe.permissions.push("network_download".into())));
     assert!(refuse(&|_| {}, &|r| r.recipe.lifecycle_actions.push("update".into())));
+    // and the evaluated use IS the retained local file: a recipe that does not declare that origin is not covered
+    assert!(refuse(&|_| {}, &|r| r.recipe.artifact.origin = None));
     // a synthetic recipe cannot use it either
     assert!(refuse(&|_| {}, &|r| r.recipe.synthetic = true));
     // the state itself: anything but the two known values is refused, and the narrow one never grants redistribution
@@ -277,7 +279,11 @@ fn the_candidate_is_the_draft_plus_exactly_the_agreed_changes() {
     let (c, d): (ReviewedRecipe, ReviewedRecipe) =
         (candidate(), serde_json::from_str(include_str!("../../docs/phase-3d1/jq-1.8.2-windows-x64.recipe.draft.json")).unwrap());
     // identity of the file, the source pin, the steps and the rollback contract are untouched
-    assert_eq!(c.recipe.artifact, d.recipe.artifact);
+    // (the artifact is the draft's, field for field, plus the declared offline origin)
+    let mut artifact = c.recipe.artifact.clone();
+    assert_eq!(artifact.origin.as_deref(), Some(crate::recipe::ORIGIN_LOCAL_RETAINED_FILE));
+    artifact.origin = None;
+    assert_eq!(artifact, d.recipe.artifact);
     assert_eq!(c.recipe.source.immutable_commit, d.recipe.source.immutable_commit);
     assert_eq!(c.recipe.source.repository, d.recipe.source.repository);
     assert_eq!(c.recipe.steps, d.recipe.steps);
@@ -292,4 +298,201 @@ fn the_candidate_is_the_draft_plus_exactly_the_agreed_changes() {
     assert_eq!(c.review.state, "draft");
     assert!(c.review.staging_evidence.is_empty());
     assert!(!c.recipe.synthetic);
+}
+
+// ---- Phase 3D-3B: the offline source contract in the plan the person reads ------------------------------------------------------------------
+
+fn reviewed_candidate() -> ReviewedRecipe {
+    let mut c = candidate();
+    c.review.state = "reviewed".into();
+    c.review.reviewer_id = "test-copy-reviewer".into();
+    c.review.reviewed_recipe_digest = recipe_digest(&c.recipe);
+    c.review.staging_evidence = vec![StagingEvidence {
+        check_id: "test-copy-stage".into(),
+        state: "passed".into(),
+        independent: true,
+        evidence_digest: "e".repeat(64),
+    }];
+    c
+}
+
+fn candidate_plan(c: &ReviewedRecipe, ev: &Evidence) -> plan::InstallPlan {
+    let entry = synthetic::catalog_entry(&base(&conn()), "jq");
+    let request = plan::PlanRequest {
+        entry_id: "jq".into(),
+        platform_target: "windows-x64".into(),
+        agent_surface: "local-cli".into(),
+        scope: "user".into(),
+        method_id: None,
+        project_alias: None,
+    };
+    let host = plan::HostFacts { platform: "windows-x64".into(), elevated: Some(false) };
+    plan::build_plan_with_evidence(&entry, &request, &host, &[], &[c], &reference_for(c), ev).unwrap()
+}
+
+#[test]
+fn the_plan_of_the_candidate_says_the_bytes_come_from_a_local_retained_file_and_nothing_is_downloaded() {
+    let c = reviewed_candidate();
+    let p = candidate_plan(&c, &evidence());
+    assert_eq!(p.recipe.state, "validated");
+    assert_eq!(p.artifact_origin.as_deref(), Some("local_retained_file"));
+    let fetch = &p.steps[0];
+    assert_eq!(fetch.kind, plan::OperationKind::FetchReleaseArtifact);
+    assert!(
+        fetch.summary.contains("YEREL") && fetch.summary.contains("indirme yok") && !fetch.summary.contains("indirilecekti"),
+        "{}",
+        fetch.summary
+    );
+    assert_eq!(fetch.network, plan::NetworkUse::No, "the logical acquisition step uses no network");
+    assert!(p.steps.iter().all(|s| s.network == plan::NetworkUse::No));
+    assert!(!p.network.planned_use && p.network.destinations.is_empty());
+    assert!(!p.steps[1].summary.contains("İndirilen"), "{}", p.steps[1].summary);
+    p.check_invariants().unwrap();
+    p.check_semantics().unwrap();
+    // it survives its own JSON form, and the offline claim cannot be forged into a plan that plans a download or edits the texts
+    let json = serde_json::to_string(&p).unwrap();
+    assert!(plan::parse_plan(&json).is_ok());
+    let mut forged = p.clone();
+    forged.network.destinations = vec!["GitHub sürüm indirme adresi (tarifte yazılı)".into()];
+    assert_eq!(forged.check_invariants().unwrap_err(), "artifact_origin_inconsistent");
+    let mut reworded = p.clone();
+    reworded.steps[0].summary = "Yayıncının sürüm dosyası, onaylı tarifte yazılı adresten indirilecekti.".into();
+    assert_eq!(reworded.check_invariants().unwrap_err(), "step_text_not_from_vocabulary");
+    let mut unvalidated = p.clone();
+    unvalidated.recipe.state = "invalid".into();
+    assert_eq!(unvalidated.check_invariants().unwrap_err(), "artifact_origin_inconsistent");
+    // a downloading recipe's plan is exactly what it was: no origin, the old wording
+    let sc = Scenario::new(&base(&conn()), "synthetic-tool", "1.0.0", this_platform(), b"payload");
+    let old = sc.plan();
+    assert!(old.artifact_origin.is_none());
+    assert!(old.steps[0].summary.contains("indirilecekti"));
+    assert!(!serde_json::to_string(&old).unwrap().contains("artifactOrigin"));
+}
+
+#[test]
+fn nothing_in_the_application_interprets_recipe_steps_as_a_command_and_it_has_no_network_client() {
+    // (a) the recipe's `steps` are read by exactly two places, the validator and the plan builder; the adapter and the workflow never look at them
+    for name in ["adapter.rs", "install_flow.rs", "artifact_provider.rs", "consent.rs", "lifecycle.rs"] {
+        let src = std::fs::read_to_string(root().join("src-tauri/src").join(name)).unwrap();
+        let production = src.split("#[cfg(test)]\n#[path").next().unwrap();
+        let code: String = production.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
+        for needle in ["FetchReleaseArtifact", "fetch-release-artifact", ".steps", "OperationKind"] {
+            assert!(!code.contains(needle), "{name} reads recipe steps ({needle})");
+        }
+    }
+    // (b) the network permission of a plan comes from the recipe's `network` list only
+    let plan_src = std::fs::read_to_string(root().join("src-tauri/src/plan.rs")).unwrap();
+    assert!(plan_src.contains("st.network = if st.kind == OperationKind::FetchReleaseArtifact && !r.network.is_empty() { NetworkUse::Yes } else { NetworkUse::No };"));
+    // (c) the application's own code has no network client, and its direct dependencies contain none
+    let cargo = std::fs::read_to_string(root().join("src-tauri/Cargo.toml")).unwrap();
+    let deps = cargo.split("[dependencies]").nth(1).unwrap().split("\n[").next().unwrap();
+    for needle in [
+        "reqwest",
+        "hyper",
+        "ureq",
+        "curl",
+        "isahc",
+        "surf",
+        "attohttpc",
+        "tokio",
+        "tauri-plugin-http",
+        "tauri-plugin-shell",
+        "tauri-plugin-opener",
+    ] {
+        assert!(!deps.contains(needle), "direct dependency {needle}");
+    }
+    let mut checked = 0;
+    for entry in std::fs::read_dir(root().join("src-tauri/src")).unwrap().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.ends_with(".rs") || name.ends_with("_tests.rs") {
+            continue;
+        }
+        let src = std::fs::read_to_string(entry.path()).unwrap();
+        let production = src.split("#[cfg(test)]").next().unwrap();
+        for needle in ["std::net", "TcpStream", "UdpSocket", "TcpListener", "reqwest", "hyper::", "ureq", "tokio::net", "tauri_plugin_http"]
+        {
+            assert!(!production.contains(needle), "{name} contains {needle}");
+        }
+        checked += 1;
+    }
+    assert!(checked > 40);
+    // (d) the window may only call the application's own commands and reach nothing but its own IPC
+    let conf = std::fs::read_to_string(root().join("src-tauri/tauri.conf.json")).unwrap();
+    assert!(conf.contains("connect-src ipc: http://ipc.localhost;"));
+    let caps = std::fs::read_to_string(root().join("src-tauri/capabilities/default.json")).unwrap();
+    assert!(!caps.contains("http:") && !caps.contains("shell:") && !caps.contains("opener:") && !caps.contains("fs:"));
+}
+
+const REFERENCE_ENTRY: &str = include_str!("../../docs/phase-3d3b/evidence/reference-entry.json");
+
+fn reference_from_entry() -> ReferenceSet {
+    let v: serde_json::Value = serde_json::from_str(REFERENCE_ENTRY).unwrap();
+    let s = |k: &str| v[k].as_str().unwrap().to_string();
+    ReferenceSet {
+        authenticated: vec![ReferenceDigest {
+            entry_id: s("entryId"),
+            kind: ArtifactKind::Executable,
+            format: s("format"),
+            platform_target: s("platformTarget"),
+            version: s("version"),
+            sha256: s("sha256"),
+            source: s("authentication"),
+        }],
+        unauthenticated: vec![],
+    }
+}
+
+#[test]
+fn the_exact_reference_entry_of_the_review_package_authenticates_the_candidate_and_nothing_else() {
+    let c = candidate();
+    let refs = reference_from_entry();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(REFERENCE_ENTRY).unwrap().as_object().unwrap().len(), 7, "no unexpected field");
+    // with THIS entry, THIS evidence and nothing else, exactly the two reviewer-only blockers remain
+    assert_eq!(recipe::problems_with(&c, &refs, &evidence()), vec!["not_reviewed", "staging_evidence"]);
+    // the entry names the exact file digest, size-independent but format, platform, version and tool bound
+    assert_eq!(refs.authenticated[0].sha256, c.recipe.artifact.sha256);
+    for tweak in 0..4 {
+        let mut x = reference_from_entry();
+        let e = &mut x.authenticated[0];
+        match tweak {
+            0 => e.sha256 = "0".repeat(64),
+            1 => e.version = "1.8.3".into(),
+            2 => e.platform_target = "macos-arm64".into(),
+            _ => e.entry_id = "yq".into(),
+        }
+        assert!(recipe::problems_with(&c, &x, &evidence()).contains(&"artifact_not_authenticated"), "tweak {tweak}");
+    }
+    // a second, conflicting reference for the same version makes the whole set ambiguous
+    let mut two = reference_from_entry();
+    let mut other = two.authenticated[0].clone();
+    other.sha256 = "1".repeat(64);
+    two.authenticated.push(other);
+    assert!(recipe::problems_with(&c, &two, &evidence()).contains(&"authenticated_references_conflict"));
+    // and the production set is still empty
+    assert!(crate::discovery::reference::BUILT_IN_AUTHENTICATED.is_empty());
+}
+
+#[test]
+fn the_candidate_recipe_digest_is_the_one_an_independent_python_computation_gives() {
+    let pinned: serde_json::Value =
+        serde_json::from_str(include_str!("../../docs/phase-3d3b/evidence/candidate-recipe-digest.json")).unwrap();
+    let c = candidate();
+    assert_eq!(
+        recipe_digest(&c.recipe),
+        pinned["recipeDigest"].as_str().unwrap(),
+        "the application and the independent Python computation disagree"
+    );
+    assert_eq!(
+        (c.recipe.recipe_id.as_str(), c.recipe.revision),
+        (pinned["recipeId"].as_str().unwrap(), pinned["revision"].as_u64().unwrap() as u32)
+    );
+    // the review block is NOT part of the digest: filling it in never changes what the reviewer reviewed, and a reviewer's digest must equal this one
+    let mut reviewed = candidate();
+    reviewed.review.state = "reviewed".into();
+    reviewed.review.reviewer_id = "someone".into();
+    assert_eq!(recipe_digest(&reviewed.recipe), pinned["recipeDigest"].as_str().unwrap());
+    // while any edit of the recipe changes it
+    let mut edited = candidate();
+    edited.recipe.revision += 1;
+    assert_ne!(recipe_digest(&edited.recipe), pinned["recipeDigest"].as_str().unwrap());
 }

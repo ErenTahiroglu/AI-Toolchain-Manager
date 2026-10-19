@@ -41,6 +41,8 @@ export const makePreview = (m: InstallMock, entryId: string, action: InstallActi
       action, entryId, displayName: `Sentetik ${entryId}`, version: "1.0.0", platformTarget: "windows-x64", architecture: "x64",
       source: { repository: "synthetic/example", immutableCommit: "0123456789abcdef0123456789abcdef01234567", sourceAttested: true },
       artifact: { fileName: "artifact.bin", sizeBytes: 123, sha256: SHA, format: "pe", digestScope: "exact_file" },
+      artifactOrigin: "local_retained_file",
+      originText: "Dosya, bu bilgisayarda daha önce edinilip doğrulanmış YEREL bir dosyadan okunur (uygulamanın sabit giriş klasöründeki tek dosya; yalnızca okunur, değiştirilmez). Hiçbir şey indirilmez; ağ kullanılmaz.",
       authentication: "authenticated_reference", licenseState: m.licenseState, licenseSpdx: "MIT",
       notices: { title: "SENTETİK bildirim paketi (deneme)", sha256: "cd".repeat(32), components: ["synthetic-hello - MIT (sentetik)", "synthetic-runtime - GPL WITH exception (sentetik)"], unresolved: ["Bu bir deneme paketidir."] },
       effects: removal

@@ -1,0 +1,29 @@
+{
+ "atm.sqlite": {
+  "kind": "file",
+  "size": 4096,
+  "links": 1,
+  "sha256": "da63a52bdf62b3fc863995d79f497584be3ba97c1de4c55d1d301afbafab6cfc"
+ },
+ "atm.sqlite-shm": {
+  "kind": "file",
+  "size": 32768,
+  "links": 1,
+  "sha256": "fb485be4cd2f9c93fed5980dc11722097a50359deccdb37c49ce4be90f8fc6b9"
+ },
+ "atm.sqlite-wal": {
+  "kind": "file",
+  "size": 655112,
+  "links": 1,
+  "sha256": "6cdc0437b7da004de4e7af18ba4044a9be5db0debb9ae9d45a8be151dee427cb"
+ },
+ "pilot-input/": {
+  "kind": "dir"
+ },
+ "pilot-input/synthetic-retained.exe": {
+  "kind": "file",
+  "size": 246,
+  "links": 1,
+  "sha256": "fe418d0abc6b9da958c19c6af3f4bf2905769f887bbb5218f41ab57b0b656982"
+ }
+}

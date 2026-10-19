@@ -290,6 +290,18 @@ describe("audit honesty (Issue #22) and the local-use licence in the real compon
     expect(await screen.findByText(/1 eksik denetim kaydı makbuzdan yeniden kuruldu, 0 kayıt kurulamadı/)).toBeInTheDocument();
   });
 
+  it("the preview says where the bytes come from, in words, before anything can be confirmed", async () => {
+    const panel = await openCatalog("available");
+    await userEvent.click(panel.getByRole("button", { name: "Kurulum önizlemesini aç" }));
+    const heading = await screen.findByRole("heading", { name: /Kurulum önizlemesi/ });
+    const scope = within(heading.closest("section")!);
+    expect(scope.getByText("Dosyanın kaynağı")).toBeInTheDocument();
+    expect(scope.getByText(/YEREL bir dosyadan okunur/)).toBeInTheDocument();
+    expect(scope.getByText(/Hiçbir şey indirilmez; ağ kullanılmaz/)).toBeInTheDocument();
+    expect(scope.getByText(/Ağ kullanılmayacak; hiçbir şey indirilmeyecek/)).toBeInTheDocument();
+    expect(calls("confirm_install")).toHaveLength(0);
+  });
+
   it("a refusal whose own audit row could not be written says so", async () => {
     const panel = await openCatalog("available");
     await userEvent.click(panel.getByRole("button", { name: "Kurulum önizlemesini aç" }));

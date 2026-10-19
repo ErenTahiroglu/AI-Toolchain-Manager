@@ -58,6 +58,27 @@ describe("installation plan preview", () => {
     expect(screen.getAllByText(/Geri alma YOK/).length).toBeGreaterThan(0);
   });
 
+  it("a plan whose recipe reads ONE retained local file says so in the step and never says anything is downloaded", async () => {
+    backend.planOverride = (r) =>
+      makePlan(r, {
+        artifactOrigin: "local_retained_file",
+        network: { plannedUse: false, destinations: [], usedToBuildPreview: false },
+        steps: makePlan(r).steps.map((s) =>
+          s.kind === "fetch-release-artifact"
+            ? { ...s, network: "no", summary: "Dosya, bu bilgisayarda daha önce edinilip doğrulanmış YEREL bir dosyadan okunacaktı (indirme yok; ağ kullanılmaz)." }
+            : s,
+        ),
+      });
+    await open();
+    await choose();
+    await show();
+    const steps = screen.getByRole("list", { name: "Önerilen adımlar" });
+    expect(within(steps).getByText("Saklanan yerel dosyayı oku (indirme yok)")).toBeInTheDocument();
+    expect(within(steps).getByText(/YEREL bir dosyadan okunacaktı \(indirme yok; ağ kullanılmaz\)/)).toBeInTheDocument();
+    expect(within(steps).queryByText("Sürüm dosyasını indir")).not.toBeInTheDocument();
+    expect(within(steps).queryByText(/adresten indirilecekti/)).not.toBeInTheDocument();
+  });
+
   it("presents steps as proposals that will not be applied, with what is missing, the network and the targets", async () => {
     await open();
     await choose();

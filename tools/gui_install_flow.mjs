@@ -166,6 +166,10 @@ if (PHASE === "first") {
   await openCatalog();
   await check("retained file back: preview opens; the file is swapped for other content BEFORE the confirmation", async () => {
     await ev(click(RETAINED, "/Kurulum önizlemesini aç/")); await sleep(900);
+    // the preview itself says where the bytes come from: a LOCAL retained file, nothing downloaded, no network
+    const originOk = await ev(`(() => { const t = document.querySelector('.preview-card')?.innerText ?? ''; return /Dosyanın kaynağı/.test(t) && /YEREL bir dosyadan okunur/.test(t) && /Hiçbir şey indirilmez; ağ kullanılmaz/.test(t) && /Ağ kullanılmayacak/.test(t); })()`);
+    results.push({ label: "preview states: bytes come from the LOCAL retained file, nothing is downloaded", value: originOk });
+    console.log("preview states the local origin".padEnd(96), "->", originOk);
     writeFileSync(INPUT, Buffer.alloc(retainedOriginal.length, 9));
     await ev(`document.querySelector('.preview-card input[type=checkbox]')?.click()`); await sleep(300);
     await ev(clickAnywhere("/Onaylıyorum ve kur/")); await sleep(1200);
