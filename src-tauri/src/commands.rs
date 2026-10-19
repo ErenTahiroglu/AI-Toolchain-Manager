@@ -21,7 +21,7 @@ use crate::{
 use serde::Serialize;
 use serde_json::Value;
 use std::{collections::BTreeMap, sync::atomic::Ordering};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 
 const MAX_UI_ERRORS_PER_SESSION: u32 = 50;
@@ -56,7 +56,7 @@ pub fn get_app_info(state: State<'_, AppState>) -> AppResult<AppInfo> {
     let db_version = state.with_db(db::user_version).ok();
     Ok(AppInfo {
         version: env!("CARGO_PKG_VERSION"),
-        phase: "3A",
+        phase: "3D-2",
         platform: std::env::consts::OS,
         arch: std::env::consts::ARCH,
         db_version,
@@ -93,7 +93,12 @@ pub fn get_dashboard(state: State<'_, AppState>) -> AppResult<Dashboard> {
             catalog_count: n("SELECT count(*) FROM catalog_entries WHERE removed_at IS NULL")?,
             catalog_enabled_count: n("SELECT count(*) FROM catalog_entries WHERE removed_at IS NULL AND enabled = 1")?,
             unreviewed_count: n("SELECT count(*) FROM catalog_entries WHERE removed_at IS NULL AND review_state = 'unreviewed'")?,
-            installed_count: n("SELECT count(*) FROM catalog_entries WHERE install_state <> 'not_managed'")?,
+            // what this manager installed AND verified itself (the old catalog column can only ever say "not managed")
+            installed_count: state
+                .install
+                .list_states(c)
+                .map(|v| v.iter().filter(|s| s.status == crate::install_flow::Status::InstalledVerified).count() as i64)
+                .unwrap_or(0),
             validated_count: n("SELECT count(*) FROM catalog_entries WHERE verification_state = 'passed'")?,
             sample_project_count: n("SELECT count(*) FROM project_registry WHERE removed_at IS NULL AND kind = 'synthetic'")?,
             reference_project_count: n("SELECT count(*) FROM project_registry WHERE removed_at IS NULL AND kind = 'reference'")?,
@@ -233,6 +238,52 @@ pub fn preview_backup_cleanup(state: State<'_, AppState>) -> AppResult<crate::ba
 #[tauri::command]
 pub fn plan_install(state: State<'_, AppState>, request: crate::plan::PlanRequest) -> AppResult<crate::plan::InstallPlan> {
     state.with_db(|c| crate::plan::plan_for(c, &request, &crate::plan::HostFacts::detect()))
+}
+
+/// The installation workflow. The interface sends identifiers and one acknowledgement; Rust decides everything else (see
+/// `install_flow.rs`). In a release build the supply behind these commands is empty: every tool is "verification incomplete".
+#[tauri::command]
+pub fn list_install_states(state: State<'_, AppState>) -> AppResult<Vec<crate::install_flow::ToolState>> {
+    state.with_db(|c| state.install.list_states(c))
+}
+
+/// Opens an installation (or removal) preview and its single-use, short-lived offer. It changes nothing.
+#[tauri::command]
+pub fn prepare_install(
+    state: State<'_, AppState>,
+    request: crate::install_flow::PrepareRequest,
+) -> AppResult<crate::install_flow::InstallPreview> {
+    state.with_db(|c| state.install.prepare(c, &request))
+}
+
+#[tauri::command]
+pub fn cancel_install(state: State<'_, AppState>, request: crate::install_flow::CancelRequest) -> AppResult<()> {
+    state.with_db(|c| state.install.cancel(c, &request))
+}
+
+/// The explicit affirmative action. Runs on a worker thread so the window stays responsive while the transaction works.
+#[tauri::command]
+pub async fn confirm_install(
+    app: AppHandle,
+    request: crate::install_flow::ConfirmRequest,
+) -> AppResult<crate::install_flow::InstallResult> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state.install.confirm(&state.db, &request)
+    })
+    .await
+    .map_err(|_| AppError::new("INSTALL_TASK_FAILED", "İşlem arka planda beklenmedik biçimde sonlandı; durumu denetleyin."))
+}
+
+#[tauri::command]
+pub fn get_installed_details(state: State<'_, AppState>, entry_id: String) -> AppResult<crate::install_flow::InstalledDetails> {
+    state.with_db(|c| state.install.details(c, &entry_id))
+}
+
+/// Finishes or undoes the unfinished work of this manager's own earlier run. Never touches anything it cannot prove to be its own.
+#[tauri::command]
+pub fn recover_installations(state: State<'_, AppState>) -> AppResult<crate::install_flow::RecoverySummary> {
+    state.with_db(|c| state.install.recover(c))
 }
 
 #[tauri::command]

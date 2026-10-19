@@ -24,6 +24,20 @@ pub struct NewEvent {
     pub tool_id: Option<String>,
     pub project_alias: Option<String>,
     pub target_id: Option<&'static str>,
+    /// Phase 3D-2: the context the Phase 0 schema requires of an `install`/`uninstall`/`approve` that PASSED. Slugs, UUIDs and
+    /// digests only, never paths or free text.
+    pub context: EventContext,
+}
+
+/// Optional identifiers an installation event carries (all validated by the caller; all `None` for a plain event).
+#[derive(Default, Clone)]
+pub struct EventContext {
+    pub recipe_id: Option<String>,
+    pub tool_version: Option<String>,
+    pub approval_reference: Option<String>,
+    pub approved_recipe_digest: Option<String>,
+    pub artifact_digest: Option<String>,
+    pub evidence_digest: Option<String>,
 }
 
 impl NewEvent {
@@ -36,7 +50,25 @@ impl NewEvent {
         verdict_source: &'static str,
         actor_type: &'static str,
     ) -> Self {
-        Self { event_type, outcome, check_id, error_code, verdict_source, actor_type, tool_id: None, project_alias: None, target_id: None }
+        Self {
+            event_type,
+            outcome,
+            check_id,
+            error_code,
+            verdict_source,
+            actor_type,
+            tool_id: None,
+            project_alias: None,
+            target_id: None,
+            context: EventContext::default(),
+        }
+    }
+
+    /// An event about one tool, with the identifiers the schema asks for.
+    pub fn for_tool(mut self, tool_id: &str, context: EventContext) -> Self {
+        self.tool_id = Some(tool_id.to_string());
+        self.context = context;
+        self
     }
 }
 
@@ -138,6 +170,19 @@ fn append_inner(tx: &Connection, event: &NewEvent) -> AppResult<Value> {
     }
     if let Some(alias) = &event.project_alias {
         record.insert("projectAlias".into(), json!(alias));
+    }
+    let c = &event.context;
+    for (key, value) in [
+        ("recipeId", &c.recipe_id),
+        ("toolVersion", &c.tool_version),
+        ("approvalReference", &c.approval_reference),
+        ("approvedRecipeDigest", &c.approved_recipe_digest),
+        ("artifactDigest", &c.artifact_digest),
+        ("evidenceDigest", &c.evidence_digest),
+    ] {
+        if let Some(v) = value {
+            record.insert(key.into(), json!(v));
+        }
     }
     record.insert("checkId".into(), json!(event.check_id));
     record.insert("checkVersion".into(), json!("1"));

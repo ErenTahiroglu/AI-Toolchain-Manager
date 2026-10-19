@@ -61,7 +61,7 @@ export default function App() {
             </li>
           ))}
         </ul>
-        <p className="phase small">Faz 3A · taslak kurulum planı, salt okunur envanter ve yalnızca SENTETİK yaşam döngüsü denemesi (gerçek kurulum yok)</p>
+        <p className="phase small">Faz 3D-2 · kurulum önizlemesi, açık onay ve yalnızca SENTETİK deneme araçlarının kurulumu; gerçek bir araç kurulamaz ve hiçbir program çalıştırılmaz</p>
       </nav>
       <main id="main" className="content">
         {info.data?.degraded && (

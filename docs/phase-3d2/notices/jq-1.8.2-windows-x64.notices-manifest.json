@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "id": "jq-1.8.2-windows-x64-notices",
+  "tool": "jq",
+  "version": "1.8.2",
+  "platform": "windows-x64",
+  "decision": "application-presented-notices",
+  "notBundledWithInstaller": true,
+  "writtenIntoToolFolder": false,
+  "licenseDecision": "LICENSE_CONDITIONAL",
+  "recipeLicenseState": "unknown",
+  "bundleFile": "THIRD-PARTY-NOTICES.jq-1.8.2.windows-x64.txt",
+  "bundleSha256": "9209879a46288f9c68397bdffd9574106c4a9544578e7eb905ba10c113ed57df",
+  "bundleBytes": 36205,
+  "components": [
+    {
+      "id": "jq",
+      "name": "jq 1.8.2 and bundled vendor code (dtoa, decNumber/ICU, Heimdal, strptime)",
+      "spdx": "MIT AND ICU AND BSD-style",
+      "evidenceFile": "docs/phase-3d1/evidence/license/jq-COPYING.txt",
+      "evidenceSha256": "ad2b4a266b2268939c1446979759706077421cf906a203aa188c6f396e8cfd74",
+      "linkedState": "confirmed linked",
+      "legalStatus": "resolved operationally"
+    },
+    {
+      "id": "oniguruma",
+      "name": "Oniguruma regex library (statically linked)",
+      "spdx": "BSD-2-Clause",
+      "evidenceFile": "docs/phase-3d1/evidence/license/onig-COPYING.txt",
+      "evidenceSha256": "70ba5469ea0bab6e18a32d7009068f996503168d27be57747e08da34337ff26f",
+      "linkedState": "confirmed linked",
+      "legalStatus": "resolved operationally"
+    },
+    {
+      "id": "mingw-w64",
+      "name": "mingw-w64 CRT (ZPL 2.1 text for the project's own code)",
+      "spdx": "ZPL-2.1",
+      "evidenceFile": "docs/phase-3d1/evidence/license/mingw-w64-COPYING.txt",
+      "evidenceSha256": "99a69660981156c21336fdb5661f89341b013c94e4bf9e1c7467b4745718397f",
+      "linkedState": "confirmed linked",
+      "legalStatus": "resolved operationally"
+    },
+    {
+      "id": "mingw-w64-runtime-notices",
+      "name": "mingw-w64 runtime notices (complete file, not a hand-picked subset)",
+      "spdx": "various permissive",
+      "evidenceFile": "docs/phase-3d1/evidence/license/mingw-w64-COPYING.MinGW-w64-runtime.txt",
+      "evidenceSha256": "1db8da07b436c68833c0673ffee3d9fcb2526047f3820b81661865dfedc79a1f",
+      "linkedState": "subset linked is UNKNOWN (stripped exe)",
+      "legalStatus": "included completely; exact subset NOT claimed"
+    },
+    {
+      "id": "winpthreads",
+      "name": "winpthreads",
+      "spdx": "MIT-style",
+      "evidenceFile": "docs/phase-3d1/evidence/license/winpthreads-COPYING.txt",
+      "evidenceSha256": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177",
+      "linkedState": "confirmed linked",
+      "legalStatus": "resolved operationally"
+    },
+    {
+      "id": "gcc-runtime-exception",
+      "name": "GCC Runtime Library Exception 3.1 (libssp confirmed linked; libgcc unknown)",
+      "spdx": "GPL-3.0-or-later WITH GCC-exception-3.1",
+      "evidenceFile": "docs/phase-3d1/evidence/license/gcc-COPYING.RUNTIME.txt",
+      "evidenceSha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74",
+      "linkedState": "libssp confirmed; libgcc neither confirmed nor excluded",
+      "legalStatus": "OPEN: legal reading not accepted"
+    },
+    {
+      "id": "unicode",
+      "name": "Unicode License V3 (Oniguruma tables derive from Unicode 16.0)",
+      "spdx": "Unicode-3.0",
+      "evidenceFile": "docs/phase-3d1/evidence/license/unicode-license-v3.txt",
+      "evidenceSha256": "5cba0cc0b60a659761e6c6a1a581e6fa64148aa6a3b118e89bcfcdbcf9a6fb8a",
+      "linkedState": "included conservatively",
+      "legalStatus": "OPEN: whether compiled tables count as Data Files or Software"
+    }
+  ],
+  "unresolved": [
+    {
+      "id": "Q1",
+      "text": "Whether Oniguruma's compiled Unicode 16.0 tables count as 'Data Files or Software' under Unicode License V3. The notice is included conservatively.",
+      "status": "open"
+    },
+    {
+      "id": "Q2",
+      "text": "Which parts of the mingw-w64 runtime are linked (getopt, gdtoa, Wine-derived code). The executable is stripped; the complete runtime notice file is included.",
+      "status": "open"
+    },
+    {
+      "id": "Q3",
+      "text": "Whether libgcc proper is linked and whether the upstream build meets every detail of the GCC Runtime Library Exception. libssp IS linked.",
+      "status": "open"
+    },
+    {
+      "id": "C1-C5",
+      "text": "The conditions C1-C5 of the licence review must be accepted in writing before LICENSE_PASS.",
+      "status": "open"
+    }
+  ]
+}

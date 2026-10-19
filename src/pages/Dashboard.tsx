@@ -41,6 +41,11 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: string) => vo
           <div className="card"><dt>Kayıtlı proje kararı</dt><dd>{data.preferenceCount}</dd></div>
           <div className="card"><dt>İstem kaynağı (planlı)</dt><dd>{data.promptSourceCount}</dd></div>
         </dl>
+        {data.installedCount > 0 && (
+          <p className="muted small" role="note">
+            “Kurulu / yönetilen araç” sayısı yalnızca bu uygulamanın kendi klasöründe kurup doğruladığı SENTETİK deneme araçlarını sayar; hiçbiri çalıştırılmadı.
+          </p>
+        )}
         <p className="muted small">
           Bu sürüm (Faz 1B) hiçbir aracı kurmaz veya çalıştırmaz, hiçbir ajan ayarını değiştirmez ve internete istek göndermez.
           "Örnek" etiketli projeler <strong>örnek veridir</strong>. Kayıtlı kararlar yalnızca isteğinizdir; gerçek kurulum durumu değildir.

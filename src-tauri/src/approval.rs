@@ -57,26 +57,43 @@ impl Actor {
     pub fn synthetic(id: &str) -> Actor {
         Actor { kind: "synthetic_test".to_string(), id: id.to_string() }
     }
+
+    /// Phase 3D-2: a person who pressed the visible confirmation control inside this application. This is NOT an authentication: the
+    /// application cannot tell the person from another program of the same Windows account that can drive its window or its IPC.
+    /// The only constructor lives in `consent.rs`, next to the single-use grant that justifies it.
+    pub(crate) fn in_app(id: &str) -> Actor {
+        Actor { kind: IN_APP_ACTOR.to_string(), id: id.to_string() }
+    }
 }
+
+pub(crate) const IN_APP_ACTOR: &str = "in_app_confirmation";
 
 /// Which actors a verifier accepts. Production accepts none: there is no real approval flow yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ApprovalPolicy {
     allow_synthetic: bool,
+    allow_in_app: bool,
 }
 
 impl ApprovalPolicy {
     pub const fn production() -> ApprovalPolicy {
-        ApprovalPolicy { allow_synthetic: false }
+        ApprovalPolicy { allow_synthetic: false, allow_in_app: false }
     }
 
     /// For tests and the self-check probe, which exercise the synthetic engine only.
     pub const fn synthetic_only() -> ApprovalPolicy {
-        ApprovalPolicy { allow_synthetic: true }
+        ApprovalPolicy { allow_synthetic: true, allow_in_app: false }
+    }
+
+    /// Phase 3D-2: the first-pilot policy -- an in-app confirmation is the only accepted actor. It does not make anything installable
+    /// by itself: the recipe/artifact/adapter gates (synthetic-only, empty production lists, fail-closed production adapter) are separate.
+    pub const fn in_app_confirmation() -> ApprovalPolicy {
+        ApprovalPolicy { allow_synthetic: false, allow_in_app: true }
     }
 
     fn accepts(self, actor: &Actor) -> bool {
-        self.allow_synthetic && actor.kind == "synthetic_test" && actor.id.len() >= 3 && actor.id.len() <= 64
+        let id_ok = actor.id.len() >= 3 && actor.id.len() <= 64;
+        id_ok && ((self.allow_synthetic && actor.kind == "synthetic_test") || (self.allow_in_app && actor.kind == IN_APP_ACTOR))
     }
 }
 

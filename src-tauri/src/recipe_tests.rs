@@ -483,3 +483,125 @@ fn a_reviewed_looking_edit_of_the_draft_changes_its_digest_so_a_review_never_car
     let p = problems(&claimed, &no_refs());
     assert_eq!(p, vec!["artifact_not_authenticated", "license_not_accepted"], "{p:?}");
 }
+
+// ---- Phase 3D-2: the minimum reviewable transition from the blocked jq draft to a future approved Windows pilot -----------------------
+// Everything below happens on COPIES inside tests. No reference is added anywhere, no recipe is registered, no review is recorded.
+
+fn jq_pilot_revision() -> ReviewedRecipe {
+    // The first pilot copies the retained, re-verified file: it needs NO network and NO download permission (revision 2 of the draft).
+    let mut d = jq_draft();
+    d.recipe.revision = 2;
+    d.recipe.recipe_id = "jq-1.8.2-windows-x64".to_string();
+    d.recipe.permissions = vec!["current_user_account".to_string(), "write_manager_folders".to_string()];
+    d.recipe.network = vec![];
+    d
+}
+
+fn hypothetical_reference(d: &ReviewedRecipe) -> ReferenceDigest {
+    ReferenceDigest {
+        entry_id: "jq".into(),
+        kind: ArtifactKind::Executable,
+        format: "pe-x64".into(),
+        platform_target: "windows-x64".into(),
+        version: "1.8.2".into(),
+        sha256: d.recipe.artifact.sha256.clone(),
+        source: "hypothetical reference used only by this test".into(),
+    }
+}
+
+#[test]
+fn the_jq_pilot_transition_closes_exactly_four_blockers_in_a_fixed_order_and_a_review_never_carries_over() {
+    let mut d = jq_pilot_revision();
+    let mut refs = no_refs();
+    // 0. the revision-2 shape (no network) has the same four blockers as the draft, and nothing else
+    assert_eq!(problems(&d, &refs), vec!["artifact_not_authenticated", "license_not_accepted", "not_reviewed", "staging_evidence"]);
+    // 1. an independently authenticated reference for the exact file (a separately reviewed change to the compiled-in list)
+    refs.authenticated.push(hypothetical_reference(&d));
+    assert_eq!(problems(&d, &refs), vec!["license_not_accepted", "not_reviewed", "staging_evidence"]);
+    // 2. a written licence acceptance (LICENSE_PASS) changes the recipe, so it changes the digest
+    let digest_before = recipe_digest(&d.recipe);
+    d.recipe.license.state = "accepted".to_string();
+    // the evidence id names a RESEARCH-SOURCES entry ("R..."); the SPDX expression must cover the whole static bundle, not only jq's own MIT
+    d.recipe.license.evidence_id = "R99".to_string();
+    d.recipe.license.spdx_id = "MIT AND BSD-2-Clause AND Unicode-3.0".to_string();
+    assert_ne!(recipe_digest(&d.recipe), digest_before);
+    assert_eq!(problems(&d, &refs), vec!["not_reviewed", "staging_evidence"]);
+    // 3. a review of THIS content (a review recorded before step 2 would now be `changed_after_review`)
+    let mut early = d.clone();
+    early.review.state = "reviewed".to_string();
+    early.review.reviewer_id = "independent-reviewer-1".to_string();
+    early.review.reviewed_recipe_digest = digest_before.clone();
+    early.review.staging_evidence = vec![];
+    assert!(problems(&early, &refs).contains(&"changed_after_review"));
+    d.review.state = "reviewed".to_string();
+    d.review.reviewer_id = "independent-reviewer-1".to_string();
+    d.review.reviewed_recipe_digest = recipe_digest(&d.recipe);
+    assert_eq!(problems(&d, &refs), vec!["staging_evidence"]);
+    // 4. independent staging evidence
+    d.review.staging_evidence = vec![StagingEvidence {
+        check_id: "staging-check-1".into(),
+        state: "passed".into(),
+        independent: true,
+        evidence_digest: "e".repeat(64),
+    }];
+    assert_eq!(problems(&d, &refs), Vec::<&str>::new());
+    assert!(validate(&d, &refs).is_ok(), "after exactly these four changes the validator accepts the recipe");
+    // what stayed fixed all along: target, artifact, effects, rollback contract
+    let r = &d.recipe;
+    assert_eq!((r.tool_id.as_str(), r.version.as_str(), r.target.platform_target.as_str()), ("jq", "1.8.2", "windows-x64"));
+    assert_eq!(r.artifact.size_bytes, 1_035_264);
+    assert!(r.network.is_empty() && !r.permissions.iter().any(|p| p == "network_download"));
+    assert_eq!(r.rollback.state, "designed");
+}
+
+#[test]
+fn even_a_fully_valid_jq_recipe_cannot_be_registered_or_applied_by_this_build_and_its_plan_is_fixed() {
+    let mut d = jq_pilot_revision();
+    let mut refs = no_refs();
+    refs.authenticated.push(hypothetical_reference(&d));
+    d.recipe.license.state = "accepted".to_string();
+    d.review.state = "reviewed".to_string();
+    d.review.reviewer_id = "independent-reviewer-1".to_string();
+    d.review.reviewed_recipe_digest = recipe_digest(&d.recipe);
+    d.review.staging_evidence = vec![StagingEvidence {
+        check_id: "staging-check-1".into(),
+        state: "passed".into(),
+        independent: true,
+        evidence_digest: "e".repeat(64),
+    }];
+    assert!(validate(&d, &refs).is_ok());
+    // (a) it cannot enter the registry (only the compiled-in list, which is empty, may hold a real recipe) ...
+    assert!(RecipeRegistry::synthetic(vec![d.clone()]).is_err());
+    assert_eq!(BUILT_IN_RECIPES_JSON.trim(), "[]");
+    // (b) ... and the engine's own gate still refuses a non-synthetic recipe, in the shared authority check
+    let gate = include_str!("lifecycle.rs");
+    assert!(gate.contains("!r.synthetic || !r.tool_id.starts_with(\"synthetic-\")") && gate.contains("not_a_synthetic_recipe"));
+    // (c) the plan such a recipe would produce is fixed and honest: no network, four typed steps, the only blocker is the missing approval
+    let c = conn();
+    let entry = synthetic::catalog_entry(&base(&c), "jq");
+    let request = plan::PlanRequest {
+        entry_id: "jq".into(),
+        platform_target: "windows-x64".into(),
+        agent_surface: "local-cli".into(),
+        scope: "user".into(),
+        method_id: None,
+        project_alias: None,
+    };
+    let host = plan::HostFacts { platform: "windows-x64".into(), elevated: Some(false) };
+    let p = plan::build_plan_with(&entry, &request, &host, &[], &[&d], &refs).unwrap();
+    assert_eq!(p.recipe.state, "validated");
+    // A FIFTH blocker survives the four recipe blockers: the commit is only declared, and no evidence kind exists through which a REAL recipe
+    // can have its source attested (only the synthetic one). Closing it needs its own reviewed change (a real attestation kind built from the
+    // Request A evidence) or a written Red Team decision that, for an installation-only pilot, the authenticated file digest suffices.
+    assert_eq!(codes(&p), vec!["user_approval_missing", "source_origin_unverified"]);
+    assert_eq!(p.entry.source_pin, "declared_unverified");
+    let mut claims = d.clone();
+    claims.recipe.source.source_attested = true;
+    claims.review.reviewed_recipe_digest = recipe_digest(&claims.recipe);
+    assert!(problems(&claims, &refs).contains(&"source_attestation_unverifiable"), "a real recipe cannot simply claim an attestation");
+    assert!(!p.network.planned_use && p.network.destinations.is_empty());
+    assert_eq!(p.steps.len(), 4);
+    assert_eq!(p.rollback.reliability, "designed");
+    assert!(p.rollback.text.contains("yalnızca TASARLANMIŞ"));
+    assert!(!p.executable && !p.executed && !p.modifies_anything);
+}

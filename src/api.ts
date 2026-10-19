@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppError, AppInfo, AuditEvent, CatalogEntry, ChainReport, Dashboard, DiagnosticRow, Evaluation, ExecutionBlock, HealthReport,
-  CleanupPlan, InstallPlan, Inventory, PlanRequest, PreferenceView, ProjectView, PromptSourceRow, ScanRequest, ScanSummary, Scenario, Settings, StartupState, TaskInput, UrlPreview,
+  CleanupPlan, InstallAction, InstalledDetails, InstallPlan, InstallPreview, InstallResult, Inventory, PlanRequest, PreferenceView, ProjectView,
+  PromptSourceRow, RecoverySummary, ScanRequest, ScanSummary, Scenario, Settings, StartupState, TaskInput, ToolState, UrlPreview,
 } from "./types";
 
 /** Normalises whatever the IPC layer throws into the AppError shape the UI renders. */
@@ -58,6 +59,16 @@ export const api = {
 
   // Installation PLAN preview. Reads the catalog and stored observations only; nothing is installed, run or written.
   planInstall: (request: PlanRequest) => call<InstallPlan>("plan_install", { request }),
+
+  // The installation workflow (Phase 3D-2). The interface sends identifiers and one acknowledgement; Rust decides everything else:
+  // there is no parameter for a path, a URL, a command line, bytes or a digest to trust.
+  listInstallStates: () => call<ToolState[]>("list_install_states"),
+  prepareInstall: (entryId: string, action: InstallAction) => call<InstallPreview>("prepare_install", { request: { entryId, action } }),
+  cancelInstall: (offerId: string) => call<void>("cancel_install", { request: { offerId } }),
+  confirmInstall: (offerId: string, previewDigest: string, acknowledged: boolean) =>
+    call<InstallResult>("confirm_install", { request: { offerId, previewDigest, acknowledged } }),
+  getInstalledDetails: (entryId: string) => call<InstalledDetails>("get_installed_details", { entryId }),
+  recoverInstallations: () => call<RecoverySummary>("recover_installations"),
 
   // Read-only discovery. Never installs, runs or verifies anything.
   runDiscoveryScan: (request: ScanRequest) => call<ScanSummary>("run_discovery_scan", { request }),

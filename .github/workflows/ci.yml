@@ -89,6 +89,14 @@ jobs:
           cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings
           cargo test --target ${{ matrix.target }}
 
+      # Phase 3D-2: the SYNTHETIC pilot supply (made-up tools and bytes, acting adapter constructor) is compiled only with this non-default
+      # feature. This step lints and tests that configuration; the release build below never enables it.
+      - name: Synthetic-pilot feature configuration (lint and tests; never part of the release build)
+        working-directory: src-tauri
+        run: |
+          cargo clippy --target ${{ matrix.target }} --all-targets --features synthetic-pilot -- -D warnings
+          cargo test --target ${{ matrix.target }} --features synthetic-pilot
+
       - name: Build Tauri app (no bundle, no signing)
         run: npx tauri build --no-bundle --target ${{ matrix.target }}
 

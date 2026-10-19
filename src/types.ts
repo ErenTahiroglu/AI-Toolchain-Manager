@@ -493,3 +493,79 @@ export interface InstallPlan {
   /** Always "not_given": a plan is a draft; an approval is a separate, bound object. */
   approvalState: "not_given";
 }
+
+// ---- Phase 3D-2: the installation workflow (identifiers in, structured answers out; see src-tauri/src/install_flow.rs) ----------------
+export type InstallStatus =
+  | "verification_incomplete" | "license_review_required" | "available" | "ready_for_approval"
+  | "installing" | "installed_verified" | "failed_needs_attention" | "removed";
+export type InstallAction = "install" | "uninstall";
+export interface InstallReason { code: string; text: string }
+export interface ToolState {
+  entryId: string;
+  status: InstallStatus;
+  reasons: InstallReason[];
+  version: string | null;
+  installedVersion: string | null;
+  pendingAction: InstallAction | null;
+  offerExpiresAt: string | null;
+  synthetic: boolean;
+  canInstall: boolean;
+  canRemove: boolean;
+}
+export interface InstallEffect { place: string; change: "create" | "replace" | "remove" | "read"; remains: boolean; text: string }
+export interface PreviewContent {
+  action: InstallAction;
+  entryId: string;
+  displayName: string;
+  version: string;
+  platformTarget: string;
+  architecture: string;
+  source: { repository: string; immutableCommit: string; sourceAttested: boolean };
+  artifact: { fileName: string; sizeBytes: number; sha256: string; format: string; digestScope: string };
+  authentication: string;
+  licenseState: string;
+  licenseSpdx: string;
+  notices: { title: string; sha256: string; components: string[]; unresolved: string[] } | null;
+  effects: InstallEffect[];
+  notDone: string[];
+  networkUsed: boolean;
+  rollback: { reliability: string; undoes: string[]; doesNotUndo: string[]; text: string };
+  synthetic: boolean;
+  installedVersion: string | null;
+  managerFolderExists: boolean;
+  planId: string;
+  recipeId: string;
+  recipeDigest: string;
+  effectsDigest: string;
+  consentStatement: string;
+}
+export interface InstallPreview { offerId: string; createdAt: string; expiresAt: string; previewDigest: string; content: PreviewContent }
+export interface ReceiptView { txnId: string; action: "install" | "update" | "uninstall"; version: string | null; completedAt: string; artifactSha256: string | null; kept: string[] }
+export interface RollbackOutcome { status: string; undone: string[]; notUndone: string[]; notCovered: string[] }
+export interface InstallResult {
+  outcome: "completed" | "already_applied" | "failed" | "refused";
+  action: InstallAction | "update" | null;
+  entryId: string | null;
+  version: string | null;
+  code: string | null;
+  message: string;
+  receipt: ReceiptView | null;
+  rollback: RollbackOutcome | null;
+  state: ToolState | null;
+}
+export interface InstalledDetails {
+  entryId: string;
+  displayName: string;
+  state: ToolState;
+  version: string | null;
+  artifact: { fileName: string; sizeBytes: number; sha256: string; format: string; digestScope: string } | null;
+  location: string | null;
+  receipt: ReceiptView | null;
+  checks: { text: string; passed: boolean }[];
+  history: ReceiptView[];
+  notices: { title: string; sha256: string; components: string[]; unresolved: string[]; text: string } | null;
+  kept: string[];
+  never: string[];
+  lastResult: InstallResult | null;
+}
+export interface RecoverySummary { examined: boolean; rolledBack: number; rolledForward: number; needsAttention: number; notes: string[] }

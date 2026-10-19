@@ -15,6 +15,8 @@ pub struct AppState {
     pub last_report: Mutex<Option<HealthReport>>,
     /// Caps UI error reports per session so a render loop cannot flood the log.
     pub ui_error_count: AtomicU32,
+    /// The installation workflow (catalog -> preview -> confirm -> result). Its supply is empty in a release build.
+    pub install: crate::install_flow::InstallService,
 }
 
 impl AppState {

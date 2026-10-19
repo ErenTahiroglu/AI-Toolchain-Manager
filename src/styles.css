@@ -118,3 +118,15 @@ button.secondary { background: var(--surface); color: var(--text); border-color:
 fieldset.panel { border: 1px solid var(--border); }
 fieldset.panel legend { font-weight: 700; padding: 0 .4rem; }
 .choice span { display: block; }
+
+/* Phase 3D-2: installation workflow. Status is always text AND symbol, never colour alone. */
+.install-panel { border-top: 1px solid var(--border); margin-top: .75rem; padding-top: .5rem; }
+.install-panel h3 { margin: .25rem 0 .5rem; }
+.install-panel h4 { font-size: .95rem; margin: .9rem 0 .3rem; }
+.install-status { font-weight: 600; }
+.install-installed_verified, .install-available { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-fg); }
+.install-failed_needs_attention { background: var(--bad-bg); color: var(--bad-fg); border-color: var(--bad-fg); }
+.install-verification_incomplete, .install-license_review_required, .install-ready_for_approval, .install-installing { background: var(--unk-bg); color: var(--unk-fg); border-color: var(--unk-fg); }
+.install-removed { background: var(--skip-bg); color: var(--skip-fg); }
+.preview-card, .result-card, .details-card { border: 2px solid var(--accent); border-radius: 10px; padding: .75rem 1rem; margin: .5rem 0 1rem; background: var(--surface); }
+.notice-text { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: .5rem .75rem; max-height: 18rem; overflow: auto; font-size: .8rem; }

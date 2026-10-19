@@ -23,6 +23,7 @@
 use crate::{
     approval::Action,
     audit::{canonical_json, sha256_hex},
+    consent::ConsentGrant,
     device_trust::{self, ApprovalLedger, AuditSink, DeviceApproval, Expected, KeyStore, TrustPolicy},
     discovery::reference::ReferenceSet,
     lifecycle::{
@@ -71,6 +72,16 @@ fn unpair(p: [u64; 2]) -> Identity {
 enum Mode {
     Production,
     TestSynthetic,
+    /// Phase 3D-2: the application workflow with synthetic data, in a non-release build (`synthetic-pilot` feature) or a test.
+    MvpSynthetic,
+}
+
+/// What authorises one transaction.
+enum Auth<'x> {
+    /// Phase 3C/3D-1: a device approval (key-store signed, user-present, single-use in a ledger).
+    Device(&'x DeviceApproval),
+    /// Phase 3D-2: an in-app confirmation grant, consumed by value.
+    Consent(Box<ConsentGrant>),
 }
 
 /// The collaborators that decide whether an approval is real.
@@ -87,7 +98,8 @@ pub struct Adapter<'a> {
     host_platform: &'a str,
     clock: ClockFn<'a>,
     fault: Option<FaultFn<'a>>,
-    trust: Trust<'a>,
+    /// The device-approval collaborators. `None` for the in-app-confirmation workflow, which has no key store.
+    trust: Option<Trust<'a>>,
     mode: Mode,
 }
 
@@ -164,7 +176,7 @@ impl<'a> Adapter<'a> {
         clock: ClockFn<'a>,
         trust: Trust<'a>,
     ) -> Adapter<'a> {
-        Adapter { root, refs, host_platform, clock, fault: None, trust, mode: Mode::Production }
+        Adapter { root, refs, host_platform, clock, fault: None, trust: Some(trust), mode: Mode::Production }
     }
 
     /// The only adapter that can act, and it exists in test builds only.
@@ -177,13 +189,27 @@ impl<'a> Adapter<'a> {
         fault: Option<FaultFn<'a>>,
         trust: Trust<'a>,
     ) -> Adapter<'a> {
-        Adapter { root, refs, host_platform, clock, fault, trust, mode: Mode::TestSynthetic }
+        Adapter { root, refs, host_platform, clock, fault, trust: Some(trust), mode: Mode::TestSynthetic }
+    }
+
+    /// The acting adapter of the Phase 3D-2 workflow: synthetic artifacts only (the recipe gate is unchanged), authorised by an in-app
+    /// confirmation grant instead of a device approval. It exists in tests and in a build made with the `synthetic-pilot` feature, never
+    /// in a release build; [`Adapter::production`] stays closed.
+    #[cfg(any(test, feature = "synthetic-pilot"))]
+    pub fn mvp_synthetic(
+        root: &'a ManagedRoot,
+        refs: &'a ReferenceSet,
+        host_platform: &'a str,
+        clock: ClockFn<'a>,
+        fault: Option<FaultFn<'a>>,
+    ) -> Adapter<'a> {
+        Adapter { root, refs, host_platform, clock, fault, trust: None, mode: Mode::MvpSynthetic }
     }
 
     fn gate(&self) -> R<()> {
         match self.mode {
             Mode::Production => Err(TxnError::Refused("production_adapter_not_enabled")),
-            Mode::TestSynthetic => Ok(()),
+            Mode::TestSynthetic | Mode::MvpSynthetic => Ok(()),
         }
     }
 
@@ -756,19 +782,14 @@ impl<'a> Adapter<'a> {
             scope: &r.target.scope,
             project_alias: ap.project_alias.as_deref(),
         };
+        let Some(trust) = &self.trust else {
+            self.abort(d, t);
+            return Err(TxnError::Refused("device_approval_not_configured"));
+        };
         let outcome = if dev.approval.approval_id != ap.approval_id {
             Err(device_trust::TrustError::BindingMismatch)
         } else {
-            device_trust::authorize(
-                dev,
-                &want,
-                &t.txn_id,
-                (self.clock)(),
-                self.trust.keys,
-                self.trust.ledger,
-                self.trust.audit,
-                self.trust.policy,
-            )
+            device_trust::authorize(dev, &want, &t.txn_id, (self.clock)(), trust.keys, trust.ledger, trust.audit, trust.policy)
         };
         match outcome {
             Ok(auth) => {
@@ -782,17 +803,69 @@ impl<'a> Adapter<'a> {
         }
     }
 
+    /// The in-app confirmation path of the first pilot. The grant is consumed HERE, by value, after the lock is held and before the first
+    /// change: every field it was bound to is re-derived from the recipe and this transaction, and any difference (or an expired
+    /// grant) ends the transaction without touching managed state. A grant that was refused is gone: the user confirms again.
+    fn consent_authorize(&self, d: &Dirs, t: &mut Txn, a: &Authority, grant: ConsentGrant) -> R<()> {
+        let r = a.recipe.recipe();
+        let ap = a.approval.approval();
+        let b = grant.binding();
+        let bound = b.action == t.action
+            && b.tool_id == r.tool_id
+            && b.version == r.version
+            && b.platform_target == self.host_platform
+            && b.computer_id == self.root.computer_id()
+            && b.recipe_digest == a.recipe.digest()
+            && b.artifact_sha256 == r.artifact.sha256
+            && b.effects_digest == a.recipe.permissions_digest()
+            && b.plan_id == ap.plan_id
+            && b.from_version == t.from_version;
+        let refused = if !bound {
+            Some("consent_binding_mismatch")
+        } else if (self.clock)() >= grant.expires_at() || (self.clock)() < grant.granted_at() {
+            Some("consent_expired")
+        } else if ap.actor.kind != grant.actor().kind || ap.actor.id != grant.actor().id {
+            Some("consent_actor_mismatch")
+        } else {
+            None
+        };
+        if let Some(code) = refused {
+            self.abort(d, t);
+            return Err(TxnError::Refused(code));
+        }
+        t.device_approval_id = Some(format!("in-app:{}", grant.grant_id()));
+        // `grant` ends here: it has no clone and no further use
+        drop(grant);
+        self.save(d, t)
+    }
+
+    fn authorize_step(&self, d: &Dirs, t: &mut Txn, a: &Authority, auth: Auth) -> R<()> {
+        match auth {
+            Auth::Device(dev) => self.device_authorize(d, t, a, dev),
+            Auth::Consent(grant) => self.consent_authorize(d, t, a, *grant),
+        }
+    }
+
     // ---- install / update ---------------------------------------------------------------------------------------------------
 
     pub fn install(&self, a: &Authority, dev: &DeviceApproval, artifact: &[u8]) -> R<Outcome> {
-        self.apply(a, dev, Action::Install, artifact)
+        self.apply(a, Auth::Device(dev), Action::Install, artifact)
     }
 
     pub fn update(&self, a: &Authority, dev: &DeviceApproval, artifact: &[u8]) -> R<Outcome> {
-        self.apply(a, dev, Action::Update, artifact)
+        self.apply(a, Auth::Device(dev), Action::Update, artifact)
     }
 
-    fn apply(&self, a: &Authority, dev: &DeviceApproval, action: Action, artifact: &[u8]) -> R<Outcome> {
+    /// Install authorised by an in-app confirmation grant (Phase 3D-2).
+    pub fn install_with_consent(&self, a: &Authority, grant: ConsentGrant, artifact: &[u8]) -> R<Outcome> {
+        self.apply(a, Auth::Consent(Box::new(grant)), Action::Install, artifact)
+    }
+
+    pub fn update_with_consent(&self, a: &Authority, grant: ConsentGrant, artifact: &[u8]) -> R<Outcome> {
+        self.apply(a, Auth::Consent(Box::new(grant)), Action::Update, artifact)
+    }
+
+    fn apply(&self, a: &Authority, auth: Auth, action: Action, artifact: &[u8]) -> R<Outcome> {
         self.gate()?;
         let d = self.dirs()?;
         let (sha, current, existing) = self.preflight_apply(&d, a, action, artifact)?;
@@ -814,7 +887,7 @@ impl<'a> Adapter<'a> {
             }
         }
         // the first thing that consumes anything: the single-use device approval, after the lock and before any change
-        self.device_authorize(&d, &mut t, a, dev)?;
+        self.authorize_step(&d, &mut t, a, auth)?;
         let result = self.run_apply(&d, a, &mut t, artifact, current.is_some());
         self.finish(&d, t, result)
     }
@@ -1096,6 +1169,15 @@ impl<'a> Adapter<'a> {
     }
 
     pub fn uninstall(&self, a: &Authority, dev: &DeviceApproval) -> R<Outcome> {
+        self.remove(a, Auth::Device(dev))
+    }
+
+    /// Removal authorised by an in-app confirmation grant (Phase 3D-2).
+    pub fn uninstall_with_consent(&self, a: &Authority, grant: ConsentGrant) -> R<Outcome> {
+        self.remove(a, Auth::Consent(Box::new(grant)))
+    }
+
+    fn remove(&self, a: &Authority, auth: Auth) -> R<Outcome> {
         self.gate()?;
         let d = self.dirs()?;
         check_authority(a, Action::Uninstall, self.root.computer_id(), self.host_platform, (self.clock)())?;
@@ -1121,7 +1203,7 @@ impl<'a> Adapter<'a> {
                 return Err(e);
             }
         }
-        self.device_authorize(&d, &mut t, a, dev)?;
+        self.authorize_step(&d, &mut t, a, auth)?;
         // before anything moves: every installed item must be recognised
         match self.uninstall_manifest(&d, &t) {
             Ok(items) => t.owned.extend(items),
@@ -1608,6 +1690,98 @@ impl<'a> Adapter<'a> {
         let d = self.dirs().ok()?;
         Self::read_receipt_in(&d, txn)
     }
+
+    /// Every committed receipt of a tool whose own digest holds (a receipt that fails its digest is ignored, never trusted).
+    fn receipts_for(d: &Dirs, tool: &str) -> R<Vec<Receipt>> {
+        let mut out = Vec::new();
+        for (name, kind) in d.receipts.list().map_err(fs_err)? {
+            if kind != Kind::File || !name.ends_with(".json") {
+                continue;
+            }
+            let Ok(bytes) = d.receipts.read_file(&name, MAX_JSON) else { continue };
+            if let Ok(r) = serde_json::from_slice::<Receipt>(&bytes) {
+                if receipt_digest(&r) == r.receipt_digest && r.tool_id == tool && r.state == "committed" {
+                    out.push(r);
+                }
+            }
+        }
+        out.sort_by(|a, b| a.completed_at.cmp(&b.completed_at).then_with(|| a.txn_id.cmp(&b.txn_id)));
+        Ok(out)
+    }
+
+    /// The committed receipts of a tool, oldest first (read-only).
+    pub fn history(&self, tool: &str) -> R<Vec<Receipt>> {
+        self.gate()?;
+        let d = self.dirs()?;
+        if !crate::managed_fs::valid_name(tool) {
+            return Err(TxnError::Refused("unsafe_path_component"));
+        }
+        Self::receipts_for(&d, tool)
+    }
+
+    /// A read-only judgement of one tool's installed state for the interface. It changes nothing and repairs nothing: drift is
+    /// reported with a code, and a transaction that is (or was) in flight is reported as busy.
+    pub fn inspect(&self, tool: &str, version: &str, size: u64) -> R<Inspection> {
+        self.gate()?;
+        let d = self.dirs()?;
+        if !crate::managed_fs::valid_name(tool) || !crate::managed_fs::valid_name(version) {
+            return Err(TxnError::Refused("unsafe_path_component"));
+        }
+        if d.locks.stat(&lock_name(tool)).map_err(fs_err)?.is_some() {
+            return Ok(Inspection::Busy { txn: None });
+        }
+        if let Some(p) = Self::pending_for(&d, tool, "")? {
+            return Ok(Inspection::Busy { txn: Some(p) });
+        }
+        let pointer = match Self::read_pointer(&d, tool) {
+            Ok(p) => p,
+            Err(TxnError::Refused(code)) => return Ok(Inspection::Attention { code }),
+            Err(e) => return Err(e),
+        };
+        let history = Self::receipts_for(&d, tool)?;
+        match pointer {
+            None => {
+                let installed = history.iter().any(|r| matches!(r.action, Action::Install | Action::Update));
+                let removed = history.iter().any(|r| r.action == Action::Uninstall);
+                Ok(match (installed, removed) {
+                    (false, _) => Inspection::NotInstalled { removed: false },
+                    (true, true) => Inspection::NotInstalled { removed: true },
+                    // receipts say it was installed and never removed, yet nothing is active: someone else changed the manager's folders
+                    (true, false) => Inspection::Attention { code: "installed_state_missing" },
+                })
+            }
+            Some(p) if p.version != version => Ok(Inspection::Attention { code: "installed_version_differs_from_recipe" }),
+            Some(p) => match self.verify_installed(&d, tool, version, &p.artifact_sha256, size, &p) {
+                Ok(receipt) => {
+                    Ok(Inspection::Installed { version: p.version, artifact_sha256: p.artifact_sha256, receipt: Box::new(receipt) })
+                }
+                Err(TxnError::Refused(code)) => Ok(Inspection::Attention { code }),
+                Err(e) => Err(e),
+            },
+        }
+    }
+}
+
+/// What [`Adapter::inspect`] found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Inspection {
+    /// Nothing is active. `removed` is true when a committed removal receipt exists for the tool.
+    NotInstalled {
+        removed: bool,
+    },
+    Installed {
+        version: String,
+        artifact_sha256: String,
+        receipt: Box<Receipt>,
+    },
+    /// Something is wrong and a person has to look. Never repaired automatically.
+    Attention {
+        code: &'static str,
+    },
+    /// A transaction holds the tool's lock or left an unfinished journal.
+    Busy {
+        txn: Option<String>,
+    },
 }
 
 #[cfg(test)]

@@ -183,3 +183,45 @@ const LAYER_REASON: Record<string, string> = {
 };
 export const layerLabel = (l: { layer: string; outcome: string; reason: string }) =>
   `${LAYER[l.layer] ?? l.layer}: ${OUTCOME[l.outcome] ?? l.outcome}${LAYER_REASON[l.reason] ? ` (${LAYER_REASON[l.reason]})` : ""}`;
+
+// ---- Phase 3D-2: installation status of a tool --------------------------------------------------------------------------------------
+import type { InstallStatus } from "./types";
+
+export const INSTALL_STATUS: Record<InstallStatus, string> = {
+  verification_incomplete: "Doğrulama tamamlanmadı",
+  license_review_required: "Lisans incelemesi gerekli",
+  available: "Kurulabilir",
+  ready_for_approval: "Onayınız bekleniyor",
+  installing: "Kuruluyor…",
+  installed_verified: "Kurulu ve doğrulandı",
+  failed_needs_attention: "Başarısız / dikkat gerekiyor",
+  removed: "Kaldırıldı",
+};
+export const installStatusLabel = (s: string) => INSTALL_STATUS[s as InstallStatus] ?? s;
+
+export const INSTALL_STATUS_HELP: Record<InstallStatus, string> = {
+  verification_incomplete: "Bu araç için incelenmiş bir tarif ve bağımsız doğrulanmış bir dosya özeti yok; bu yüzden kurulamaz.",
+  license_review_required: "Diğer koşullar tamam, ancak lisans henüz bir incelemeden “kabul edildi” sonucuyla geçmedi; kurulamaz.",
+  available: "Kurulum önizlemesini açabilirsiniz. Önizleme hiçbir şeyi değiştirmez.",
+  ready_for_approval: "Bir önizleme açık ve sizin açık onayınızı bekliyor. Onaylamadıkça hiçbir şey yapılmaz.",
+  installing: "Kurulum sürüyor. Bu sırada bu araç için başka bir işlem başlatılamaz.",
+  installed_verified: "Kurulu dosya, kurulum sırasında kaydedilenle bire bir eşleşiyor. Uygulama hiçbir şeyi çalıştırmaz.",
+  failed_needs_attention: "Bir şey beklenen durumda değil. Hiçbir şey otomatik düzeltilmedi veya silinmedi.",
+  removed: "Bu uygulamanın kurduğu sürüm kaldırıldı. İsterseniz yeniden kurabilirsiniz.",
+};
+
+const CHANGE: Record<string, string> = { create: "Oluşturulur", replace: "Değiştirilir", remove: "Kaldırılır", read: "Dokunulmaz" };
+export const changeLabel = (s: string) => CHANGE[s] ?? s;
+
+const RESULT: Record<string, string> = {
+  completed: "Tamamlandı", already_applied: "Zaten geçerliydi", failed: "Başarısız — geri alındı", refused: "Reddedildi — hiçbir şey yapılmadı",
+};
+export const resultLabel = (s: string) => RESULT[s] ?? s;
+
+const ROLLBACK_STATUS: Record<string, string> = {
+  restored: "Önceki durum eksiksiz geri getirildi",
+  not_needed: "Geri almaya gerek kalmadı",
+  partial: "KISMEN geri alındı — bir kişinin bakması gerekiyor",
+  failed: "Geri alma TAMAMLANAMADI — bir kişinin bakması gerekiyor",
+};
+export const rollbackStatusLabel = (s: string) => ROLLBACK_STATUS[s] ?? s;

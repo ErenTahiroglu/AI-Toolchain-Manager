@@ -37,6 +37,12 @@ windows = { version = "0.62", features = ["Foundation", "Security_Credentials", 
 # raw-dylib import of the one WinRT apartment function (no import library needed)
 windows-link = "0.2"
 
+[features]
+# Phase 3D-2: compiles the SYNTHETIC pilot supply (made-up tools, recipes, references and bytes) and the acting adapter constructor into a
+# NON-release build, so the real application workflow can be exercised end to end in an isolated data directory. It is off by default,
+# CI's release build does not enable it, and no installation of a real tool can pass the adapter's synthetic-only gate in either case.
+synthetic-pilot = []
+
 [dev-dependencies]
 tempfile = "3"
 

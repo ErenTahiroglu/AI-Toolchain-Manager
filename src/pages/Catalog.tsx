@@ -1,11 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, toAppError } from "../api";
 import { ErrorNotice, UnavailableButton, useLoad } from "../components/common";
+import { InstallPanel } from "../components/InstallPanel";
 import {
   KIND_HELP, compatLabel, installLabel, kindLabel, licenseLabel, metadataLabel, platformLabel, policyLabel, reviewLabel, surfaceLabel,
   validationLabel,
 } from "../labels";
-import type { AppError, CatalogEntry, EntryKind, ExecutionBlock, UrlPreview } from "../types";
+import type { AppError, CatalogEntry, EntryKind, ExecutionBlock, ToolState, UrlPreview } from "../types";
 
 const KINDS: EntryKind[] = ["executable_tool", "agent_plugin", "skill_collection", "prompt_source"];
 
@@ -109,10 +110,12 @@ function ExecutionNote({ entryId }: { entryId: string }) {
   return <UnavailableButton label="Kur / çalıştır" reason={block?.message ?? "Faz 1B'de araç kurulumu ve çalıştırma yoktur."} />;
 }
 
-function EntryCard({ entry, onChanged }: { entry: CatalogEntry; onChanged: () => void }) {
+function EntryCard({ entry, onChanged, install, onInstallChanged }: { entry: CatalogEntry; onChanged: () => void; install?: ToolState; onInstallChanged: () => void }) {
   const [error, setError] = useState<AppError | null>(null);
   const [confirming, setConfirming] = useState(false);
   const removed = entry.removedAt !== null;
+  // a tool that has (or can have) a verified installation is described by its installation status, not by the old "not managed" tag
+  const managed = !!install && install.status !== "verification_incomplete" && install.status !== "license_review_required";
 
   const run = async (action: () => Promise<unknown>) => {
     setError(null);
@@ -132,7 +135,7 @@ function EntryCard({ entry, onChanged }: { entry: CatalogEntry; onChanged: () =>
       <p className="small">
         <span className="tag">{kindLabel(entry.kind)}</span>{" "}
         <span className="tag">{reviewLabel(entry.reviewState)}</span>{" "}
-        <span className="tag">{installLabel(entry.installState)}</span>{" "}
+        {!managed && <><span className="tag">{installLabel(entry.installState)}</span>{" "}</>}
         <span className="tag">{validationLabel(entry.verificationState)}</span>{" "}
         <span className="tag">{entry.origin === "user" ? "Sizin eklediğiniz aday" : "Hazır kayıt"}</span>
         {removed && <> <span className="tag">Katalogdan kaldırıldı</span></>}
@@ -169,6 +172,7 @@ function EntryCard({ entry, onChanged }: { entry: CatalogEntry; onChanged: () =>
           </div>
         </details>
       )}
+      {!removed && <InstallPanel entryId={entry.entryId} state={install} onChanged={onInstallChanged} />}
       {error && <ErrorNotice error={error} />}
       {!removed ? (
         <div className="actions">
@@ -176,7 +180,11 @@ function EntryCard({ entry, onChanged }: { entry: CatalogEntry; onChanged: () =>
             <input type="checkbox" checked={entry.enabled} onChange={(e) => run(() => api.setCatalogEntryEnabled(entry.entryId, e.target.checked))} />
             Katalogda etkin (öneri ve proje seçimlerinde kullanılsın)
           </label>
-          <ExecutionNote entryId={entry.entryId} />
+          {managed ? (
+            <UnavailableButton label="Çalıştır" reason="Bu uygulama kurduğu programları çalıştırmaz; çalıştırma bu sürümde yoktur." />
+          ) : (
+            <ExecutionNote entryId={entry.entryId} />
+          )}
           {!confirming ? (
             <button type="button" className="secondary" onClick={() => setConfirming(true)}>Katalogdan kaldır</button>
           ) : (
@@ -196,6 +204,10 @@ function EntryCard({ entry, onChanged }: { entry: CatalogEntry; onChanged: () =>
 
 export function CatalogPage() {
   const { data, error, loading, reload } = useLoad(api.listCatalog);
+  const installs = useLoad(api.listInstallStates);
+  const stateOf = (id: string) => installs.data?.find((s) => s.entryId === id);
+  // is there anything at all that this build can install? (a release build: nothing)
+  const anyInstallable = (installs.data ?? []).some((s) => s.status !== "verification_incomplete" && s.status !== "license_review_required");
   const [filter, setFilter] = useState<"all" | EntryKind>("all");
   const [notice, setNotice] = useState("");
 
@@ -204,10 +216,18 @@ export function CatalogPage() {
 
   return (
     <>
-      <p className="muted">
-        Burası araç, eklenti, yetenek koleksiyonu ve istem kaynaklarının <strong>katalogudur</strong>. Hiçbiri kurulu değil ve hiçbirinin çalıştığı
-        doğrulanmadı. Bu uygulama bu sürümde hiçbir şeyi kurmaz, çalıştırmaz veya ajan ayarlarına dokunmaz.
-      </p>
+      {anyInstallable ? (
+        <p className="muted">
+          Burası araç, eklenti, yetenek koleksiyonu ve istem kaynaklarının <strong>katalogudur</strong>. Bu sürümde yalnızca <strong>SENTETİK deneme araçları</strong>
+          {" "}kurulabilir ve kaldırılabilir; hepsi yöneticinin kendi klasörüne, önizleme ve açık onayla yapılır. Hiçbir program çalıştırılmaz, ajan ayarlarına
+          ve PATH'e dokunulmaz. Diğer kayıtların hiçbiri kurulu değil ve hiçbirinin çalıştığı doğrulanmadı.
+        </p>
+      ) : (
+        <p className="muted">
+          Burası araç, eklenti, yetenek koleksiyonu ve istem kaynaklarının <strong>katalogudur</strong>. Hiçbiri kurulu değil ve hiçbirinin çalıştığı
+          doğrulanmadı. Bu uygulama bu sürümde hiçbir şeyi kurmaz, çalıştırmaz veya ajan ayarlarına dokunmaz.
+        </p>
+      )}
       <AddForm onAdded={(e) => { setNotice(`${e.displayName} aday olarak eklendi. Hiçbir şey indirilmedi veya çalıştırılmadı.`); reload(); }} />
       {error && <ErrorNotice error={error} onRetry={reload} />}
       {loading && !data && <p role="status">Yükleniyor…</p>}
@@ -219,12 +239,12 @@ export function CatalogPage() {
           {KINDS.map((k) => <option key={k} value={k}>{kindLabel(k)}</option>)}
         </select>
       </div>
-      {live.map((e) => <EntryCard key={e.entryId} entry={e} onChanged={reload} />)}
+      {live.map((e) => <EntryCard key={e.entryId} entry={e} onChanged={reload} install={stateOf(e.entryId)} onInstallChanged={installs.reload} />)}
       {data && live.length === 0 && <p className="muted">Bu türde kayıt yok.</p>}
       {removed.length > 0 && (
         <section aria-labelledby="h-removed">
           <h2 id="h-removed">Katalogdan kaldırılanlar ({removed.length})</h2>
-          {removed.map((e) => <EntryCard key={e.entryId} entry={e} onChanged={reload} />)}
+          {removed.map((e) => <EntryCard key={e.entryId} entry={e} onChanged={reload} onInstallChanged={installs.reload} />)}
         </section>
       )}
     </>

@@ -1,6 +1,7 @@
 // In-memory stand-in for the Rust commands. It mirrors the wire shapes in src/types.ts so the UI can be
 // tested; the real behaviour of every command (validation, gates, migration, audit) is covered by the
 // Rust tests and by the --self-check contract test, not by this mock.
+import { createInstallMock, installCommand, type InstallMock } from "./installMock";
 import type { CatalogEntry, CleanupPlan, Evaluation, HealthReport, InstallPlan, Inventory, PlanRequest, PreferenceView, ProjectView, Recommendation, StoredObservation } from "../types";
 
 export const SEED_IDS = [
@@ -108,6 +109,8 @@ export interface Backend {
   backupPlan: CleanupPlan;
   /** Lets a test return a plan with another recipe status. */
   planOverride: ((r: PlanRequest) => InstallPlan) | null;
+  /** The installation workflow stand-in (Phase 3D-2): by default every tool is "verification incomplete". */
+  install: InstallMock;
   handle: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -138,6 +141,7 @@ export function createBackend(): Backend {
     inventory: emptyInventory(),
     backupPlan: { entries: [], preconditions: [], examined: ["Tüm tablolardaki metin değerleri (örüntü taraması)"], notExamined: ["Hiçbir örüntüye uymayan kişisel metin taranamaz"], reviewCandidates: [], noViolationDetected: [], partiallyScanned: [], notAssessable: [], directoryStatus: "ok", limits: { maxTextCells: 500000, maxRawBytes: 268435456, maxSqliteImageBytes: 134217728, timeoutSeconds: 30 }, unrecognisedFiles: 0, deletionAvailable: false, executed: false, notes: ["Bu bir ÖNİZLEMEDİR: hiçbir yedek silinmedi, taşınmadı veya değiştirilmedi."] },
     planOverride: null,
+    install: createInstallMock(),
     async handle(cmd, args) {
       b.calls.push({ cmd, args });
       if (b.failures[cmd]) throw b.failures[cmd];
@@ -237,7 +241,11 @@ export function createBackend(): Backend {
         case "get_startup_state": return { ...b.startup };
         case "set_startup_enabled": b.startup = { preference: Boolean(args?.enabled), osEnabled: Boolean(args?.enabled) }; return { ...b.startup };
         case "report_ui_error": return undefined;
-        default: throw { code: "UNKNOWN_COMMAND", message: cmd };
+        default: {
+          const r = installCommand(b, cmd, args);
+          if (r.handled) return r.value;
+          throw { code: "UNKNOWN_COMMAND", message: cmd };
+        }
       }
     },
   };

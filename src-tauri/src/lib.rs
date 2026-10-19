@@ -10,6 +10,7 @@ mod closure_tests;
 #[cfg(windows)]
 mod cng_verify;
 mod commands;
+mod consent;
 mod crash;
 mod db;
 mod device_trust;
@@ -20,6 +21,7 @@ mod error;
 mod gate;
 mod github_url;
 mod health;
+mod install_flow;
 mod lifecycle;
 mod managed_fs;
 mod managed_fs_probe;
@@ -133,6 +135,10 @@ fn setup(app: &mut tauri::App) -> Result<(), BoxError> {
         crash::record_fatal(&data_dir, e.code);
     }
 
+    let install = install_flow::InstallService::for_app(data_dir.clone());
+    if let Some(conn) = &conn {
+        install.startup(conn);
+    }
     app.manage(AppState {
         db: Mutex::new(conn),
         startup_error,
@@ -141,6 +147,7 @@ fn setup(app: &mut tauri::App) -> Result<(), BoxError> {
         previous_shutdown,
         last_report: Mutex::new(None),
         ui_error_count: AtomicU32::new(0),
+        install,
     });
     let state = app.state::<AppState>();
 
@@ -226,6 +233,12 @@ pub fn run() {
             commands::list_inventory,
             commands::preview_backup_cleanup,
             commands::plan_install,
+            commands::list_install_states,
+            commands::prepare_install,
+            commands::cancel_install,
+            commands::confirm_install,
+            commands::get_installed_details,
+            commands::recover_installations,
             commands::list_prompt_sources,
             commands::run_health_checks,
             commands::list_audit_events,

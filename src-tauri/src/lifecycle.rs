@@ -852,7 +852,17 @@ pub(crate) fn check_authority(
 
 /// The bytes must be exactly what the recipe names AND what the authenticated reference set vouches for on this platform.
 pub(crate) fn check_artifact(refs: &ReferenceSet, host_platform: &str, a: &Authority, bytes: &[u8]) -> Result<String, TxnError> {
-    let r = a.recipe.recipe();
+    check_artifact_for(refs, host_platform, a.recipe, bytes)
+}
+
+/// The same judgement without an approval: what a PREVIEW may check before anyone has confirmed anything.
+pub(crate) fn check_artifact_for(
+    refs: &ReferenceSet,
+    host_platform: &str,
+    recipe: &ValidatedRecipe,
+    bytes: &[u8],
+) -> Result<String, TxnError> {
+    let r = recipe.recipe();
     let sha = sha256_hex_bytes(bytes);
     if bytes.len() as u64 != r.artifact.size_bytes || sha != r.artifact.sha256 {
         return Err(TxnError::Refused("artifact_does_not_match_recipe"));
