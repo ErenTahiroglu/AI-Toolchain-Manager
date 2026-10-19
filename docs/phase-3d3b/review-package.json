@@ -1,0 +1,236 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Everything an independent reviewer needs to review the jq 1.8.2 / Windows x64 candidate recipe (Issue #23, blocker B1) and to reproduce its staging checks on synthetic fixture bytes. It records evidence and its CLASS; it contains no reviewer identity, signature, review date or independent approval, and does not mark anything reviewed.",
+  "candidateCommit": "d1370a10d4b9d257ee8f53dc2769eadc9df66a43",
+  "packageRule": "The package is committed after the candidate commit and may change only files under docs/phase-3d3b/ (tools/verify_review_package.py enforces it).",
+  "target": {
+    "tool": "jq",
+    "version": "1.8.2",
+    "platform": "windows-x64",
+    "file": "jq-windows-amd64.exe",
+    "sizeBytes": 1035264,
+    "sha256": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627"
+  },
+  "recipe": {
+    "recipeId": "jq-1.8.2-windows-x64",
+    "revision": 2,
+    "recipeDigest": "9c7a020d65d233e86577464a06c32b8f08fd4fd8403110e68fd551b674f7cca1",
+    "digestRule": "SHA-256 of the canonical JSON (sorted keys, no spaces, UTF-8) of the `recipe` object; the `review` block is not part of it",
+    "offlineSourceContract": {
+      "artifactOrigin": "local_retained_file",
+      "network": [],
+      "permissions": [
+        "current_user_account",
+        "write_manager_folders"
+      ],
+      "firstStep": {
+        "operation": "fetch-release-artifact",
+        "artifactId": "primary"
+      },
+      "decision": "The first step keeps the kind `fetch-release-artifact` as a LOGICAL acquisition step. The recipe declares `artifact.origin: local_retained_file` (digest-bound, validator-enforced: no network list, no download permission), the plan and the preview say the bytes come from one local retained file and that nothing is downloaded, and no code interprets recipe steps as a command (see staging check S11)."
+    }
+  },
+  "reviewState": {
+    "recipeReviewState": "draft",
+    "reviewerId": "none-yet",
+    "stagingEvidence": [],
+    "note": "Left exactly as authored: `draft`. Only an independent reviewer may set `reviewed`, over the digest above, and only independent staging evidence may be recorded as `independent: true`."
+  },
+  "artifacts": [
+    {
+      "title": "candidate recipe (revision 2, review state draft)",
+      "path": "docs/phase-3d3/jq-1.8.2-windows-x64.recipe.candidate.json",
+      "sha256": "43373e3abf38df4ac2e43d12ac8433506255fe71a8c667cb7a21e069837e5221",
+      "canonicalSha256": "1c9d28fb36a4cac24ff7b8a2ef20ad7463f9cc60bb6de95f2f57d3d89328e2ad"
+    },
+    {
+      "title": "independently computed recipe digest",
+      "path": "docs/phase-3d3b/evidence/candidate-recipe-digest.json",
+      "sha256": "97ba623f13eb4c5c8fd25cb7ea163600459caa929711f94416c81a716f221a91",
+      "canonicalSha256": "95c2db6e07f9104e62f16523d6d1414b7b610c3a75058f774ebfda9002b49955"
+    },
+    {
+      "title": "exact authenticated-reference entry (what the activation would add)",
+      "path": "docs/phase-3d3b/evidence/reference-entry.json",
+      "sha256": "cff1cf6e2b8fe8d7dc27d05d00be4078fbd926a4f28e24da7d8f456aadfb9aab",
+      "canonicalSha256": "346a25be2c6972a2878ef252c17d5460a0bdff8645195b422e2e9ad4f0abffcf"
+    },
+    {
+      "title": "retained source-attestation record",
+      "path": "docs/phase-3d3/evidence/jq-1.8.2-windows-x64.source-attestation.json",
+      "sha256": "96a136b4d357957a82bcb491c4d53686862faad8e09500f90c0cbc0f971b8856",
+      "canonicalSha256": "eefbfc63c1d961be6dd0d6e3eca7d09278589d425a7f86e9335b8cfa1cfecbec"
+    },
+    {
+      "title": "local-use licence record (R34)",
+      "path": "docs/phase-3d3/evidence/jq-1.8.2-windows-x64.local-use-license.json",
+      "sha256": "baf4bc99af2d8e56a1e9a5859b074b63f60efea7c9e30c6a6cfc1b6bb8ce14f4",
+      "canonicalSha256": "17e4927e259fc15dd867593c52e83be9c8c73884a816bdfe86418d9875039b6d"
+    },
+    {
+      "title": "written licence review record",
+      "path": "docs/phase-3d3/LICENSE-LOCAL-USE-REVIEW.md",
+      "sha256": "9b8a0e9b2dbcb73834d86cd262f26c7c954da590e79e4b1e054285701e002f00"
+    },
+    {
+      "title": "notice manifest",
+      "path": "docs/phase-3d2/notices/jq-1.8.2-windows-x64.notices-manifest.json",
+      "sha256": "cdf33dbe890c02dc4806207658cd8c3732d0b10ce3fb8fbb22af6edc07b4ad31",
+      "canonicalSha256": "d694863e59cce66e22a7d532119a0abf43e35e675cd4288e03c5b483b5cfab17"
+    },
+    {
+      "title": "notice bundle (verbatim texts)",
+      "path": "docs/phase-3d2/notices/THIRD-PARTY-NOTICES.jq-1.8.2.windows-x64.txt",
+      "sha256": "9209879a46288f9c68397bdffd9574106c4a9544578e7eb905ba10c113ed57df"
+    },
+    {
+      "title": "staging fixture identity",
+      "path": "docs/phase-3d3b/staging-fixture.json",
+      "sha256": "82f463d364d85edfb8a3eafa27008b3b77b19d1687c146847f37a84786442c53",
+      "canonicalSha256": "a2b8fce1b5e81add490414432decc3ac6aa7a5e9690baf81b329712854b13ef5"
+    },
+    {
+      "title": "staging manifest (requirement -> exact test identifiers)",
+      "path": "docs/phase-3d3b/staging-manifest.json",
+      "sha256": "6de460517e9226e17ca637116810b4861c39bbbad9d3e82c72898a472a9b424d",
+      "canonicalSha256": "8971a4628415f1edfb177a54a20ad640d2b841e54a0addd2a41b1fb6bbb4480a"
+    },
+    {
+      "title": "the reviewed-recipe schema",
+      "path": "schemas/reviewed-recipe.schema.json",
+      "sha256": "4ee6c04c108c1801e4000f3d208c7fbf77341f5f61cb6257ae644c34dcdbc248",
+      "canonicalSha256": "084b13a00bb40ce6b37ea34d95b1a4a1646b9b87a4cc8d68f81f8de237604d41"
+    }
+  ],
+  "retainedEvidence": [
+    {
+      "path": "docs/phase-3d0/evidence/jq-1.8.2-windows-amd64.attestations.json",
+      "sha256": "91da51db9953c757ba91a8565e5c8c76ef291ba8e8dd1a1e9630f87718383198"
+    },
+    {
+      "path": "docs/phase-3d0/evidence/report-windows-amd64.json",
+      "sha256": "1af7c9f7ac83b28ca5f5cbef1272ab086c94cb8a499d141fbbd40ee3b37a2223"
+    },
+    {
+      "path": "docs/phase-3d0/evidence/jq-1.8.2-sha256sum.txt",
+      "sha256": "dc86824a41c165ece971ff691aff6e08bbfe6e1d1f531688b47ee78c283a85cd"
+    },
+    {
+      "path": "docs/phase-3d0/evidence/request-a-session-20261018/review-v2.json",
+      "sha256": "c192a8c9af39abe195c9416e0c6986d90a9d49f1f9c05f5b0357c6df7d91d7ae"
+    },
+    {
+      "path": "docs/phase-3d0/evidence/request-a-session-20261018/jq-windows-amd64.exe.gh.json",
+      "sha256": "2acf6875c9eaa273f7022dc76e5ba747ca05adf4cf6a9338a0085588d6586196"
+    },
+    {
+      "path": "docs/phase-3d0/evidence/request-a-session-20261018/jq-windows-amd64.exe.gpg.status",
+      "sha256": "ea534fe121629598e5bddd448b8c3c42326f381d8cf4b82b79a923bd59c7d74c"
+    },
+    {
+      "path": "docs/phase-3d0/evidence/request-a-session-20261018/jq-windows-amd64.exe.custom.json",
+      "sha256": "5b5cc9e10ba64c3a6b77c990f34e6e1263ef5b72cf01b49013fe7ab40af348e8"
+    },
+    {
+      "path": "docs/phase-3d0/evidence/request-a-session-20261018/authenticode-windows.json",
+      "sha256": "971c2a98f91cd0742216e888228349562d555e60a08a026b1343f2ed0ca58618"
+    },
+    {
+      "path": "docs/phase-3d0/evidence/request-a-session-20261018/static-header-facts.json",
+      "sha256": "4e93e2c79a8b2360f22fa971fdda621a6f9f000cbf306e03d6a01eabeabfe8fd"
+    },
+    {
+      "path": "docs/phase-3d0/evidence/request-a-session-20261018/network-incident.json",
+      "sha256": "c8c166608fd8ea0d5e500e24b9ab51ba978fde4f2e51e790270d86eb72fea4ee"
+    }
+  ],
+  "retainedSessionListingSha256": "f32cadfe6954284ecbf74ac36f81fd48bbb4590449eb2c9b18c657024e757711",
+  "staging": {
+    "manifest": "docs/phase-3d3b/staging-manifest.json",
+    "runner": "tools/run_staging.py",
+    "fixture": "docs/phase-3d3b/staging-fixture.json",
+    "reproduce": [
+      "python tools/verify_review_package.py",
+      "python tools/staging_fixture.py print",
+      "python tools/run_staging.py --report my-staging-report.json"
+    ]
+  },
+  "ci": {
+    "runId": 39342041547,
+    "headSha": "d1370a10d4b9d257ee8f53dc2769eadc9df66a43",
+    "status": "completed",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "macos-arm64",
+        "conclusion": "success",
+        "failedOrSkippedSteps": []
+      },
+      {
+        "name": "windows-x64",
+        "conclusion": "success",
+        "failedOrSkippedSteps": []
+      }
+    ],
+    "whatItIs": "CI-generated SUPPORTING evidence: the jobs built and tested this exact commit on a clean Windows and a clean macOS image, and ran tools/run_staging.py (exit status 0 = every named check passed). It does not make the developer-authored assertions independent."
+  },
+  "evidenceClasses": {
+    "1_developerGenerated": [
+      "the candidate recipe, the reference entry, the attestation record, the licence record and review text, the notice manifest and bundle (assembled by the author from retained primary texts)",
+      "all staging tests named in the staging manifest, the fixture and its independent rebuild, the review tools",
+      "the local run of tools/run_staging.py (devRun) and the real-window runs in docs/phase-3d3/evidence/gui and docs/phase-3d3b/evidence/gui"
+    ],
+    "2_ciGenerated": [
+      "the exact-commit Windows x64 and macOS ARM64 jobs recorded under `ci` (pass/fail of steps; per-test results are not read from the logs)"
+    ],
+    "3_independentlyReviewedByChatGPT": [
+      "Request A cryptographic evidence of jq 1.8.2: recorded in the repository as conditionally accepted at the Issue #19 closure (the network contact of its first online run is NOT accepted); this package does not re-verify the cryptography",
+      "the instruction to replace the sidecar notice requirement by the application-presented, digest-bound notice manifest for the local-use pilot only: recorded as given in Phase 3D-3",
+      "NOTHING ELSE. No reviewer has yet reviewed this recipe, its staging evidence, the licence record or the reference entry."
+    ],
+    "4_awaitingIndependentReview": [
+      "the candidate recipe itself (review state, over the digest above)",
+      "independent staging evidence (the developer-authored tests are not it)",
+      "the local-use licence record and its single legal assumption",
+      "the source-attestation record and the reference entry",
+      "completeness of the notice bundle",
+      "the real-window run reproduced on a machine the author does not control",
+      "the activation diff (B2), the user's authorisation (B3)"
+    ]
+  },
+  "knownLimitations": [
+    "Developer-authored tests prove the code matches the author's own understanding; they are not scientifically independent.",
+    "The Request A verification (151 checks, official verifier, GPG) is recorded, and the hashes of its retained records are checked here; the cryptography is NOT redone in this package. A reviewer can replay it offline from the retained session (docs/phase-3d0/evidence/request-a-session-20261018/closure-replay).",
+    "The first online run of Request A contacted a host outside the approved list (recorded in the attestation record; not repeated; the offline replay contacted none).",
+    "The fixture is a made-up stand-in with a minimal native header. The real file has never been passed through check_artifact_for in any test (it was not opened in this or the previous phase); its PE/x64 format, size and digest are checked at the moment of a real preview.",
+    "No operating-system-level network isolation is available without administrator rights. The offline claim rests on code evidence (no network client in the application, the workflow never reads recipe steps, the window can reach only its own IPC, no http/shell/opener/fs permission) and on the recipe/plan/preview contract.",
+    "The licence decision is an engineering evaluation, not legal advice, and rests on one stated legal assumption.",
+    "The installed file will be named `artifact.bin` (the adapter's fixed name), and no `jq` catalog entry exists yet (the recipe's tool id must equal a catalog entry id): both belong to the activation change.",
+    "The Phase 3D-0 guard that forbids the jq digest as a literal in Rust sources will have to be replaced by an exact-one-entry guard in the activation change.",
+    "One intermittent test failure was seen once on a fresh binary in Phase 3D-3 and is unexplained (docs/phase-3d3/INTERMITTENT-TEST-NOTE.md).",
+    "Smart App Control may block a freshly built test binary; such a run is BLOCKED / NOT RUN and is never counted as passed (docs/phase-3d3/SMART-APP-CONTROL-RECORD.md).",
+    "The macOS runner is not a Mac desktop; the candidate is Windows x64 only. Issue #14 stays open."
+  ],
+  "devRun": {
+    "report": "docs/phase-3d3b/evidence/staging-report.dev.json",
+    "sha256": "cdde1e434275431be22617b4a7b9f9c00e255b92a675db38ec83268258131e8a",
+    "commit": "d1370a10d4b9d257ee8f53dc2769eadc9df66a43",
+    "workingTreeClean": true,
+    "tools": {
+      "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+      "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+      "python": "3.14.6",
+      "node": "v24.20.0"
+    },
+    "counts": {
+      "passed": 52,
+      "failed": 0,
+      "missing": 0,
+      "ignored": 0,
+      "blocked_not_run": 0,
+      "not_requested": 0
+    },
+    "allPassed": true,
+    "evidenceClass": "developer-generated"
+  }
+}
