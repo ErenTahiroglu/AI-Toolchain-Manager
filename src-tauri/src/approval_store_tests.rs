@@ -293,3 +293,454 @@ fn the_store_is_reachable_from_no_command_and_the_application_never_creates_one(
         }
     }
 }
+
+// =====================================================================================================================================
+// RT-3D1-02: issuance + audit and consumption + audit are each ONE durable transaction
+// =====================================================================================================================================
+
+use crate::{
+    approval::{Action, Approval},
+    device_trust::{
+        self,
+        fakes::{FakeKeyStore, FakePresence, VecAudit},
+        DeviceApproval, Expected, Presence, TrustPolicy,
+    },
+    synthetic::testkit::*,
+};
+
+const COMPUTER: &str = "synthetic-computer-1";
+
+struct Owned {
+    tool: String,
+    version: String,
+    platform: String,
+    recipe_digest: String,
+    artifact: String,
+    effects: String,
+    scope: String,
+}
+
+impl Owned {
+    fn of(f: &Fx) -> Owned {
+        let r = f.valid.recipe();
+        Owned {
+            tool: r.tool_id.clone(),
+            version: r.version.clone(),
+            platform: r.target.platform_target.clone(),
+            recipe_digest: f.valid.digest().to_string(),
+            artifact: r.artifact.sha256.clone(),
+            effects: f.valid.permissions_digest(),
+            scope: r.target.scope.clone(),
+        }
+    }
+
+    fn expected(&self) -> Expected<'_> {
+        Expected {
+            action: Action::Install,
+            tool_id: &self.tool,
+            version: &self.version,
+            platform_target: &self.platform,
+            computer_id: COMPUTER,
+            recipe_digest: &self.recipe_digest,
+            artifact_sha256: &self.artifact,
+            effects_digest: &self.effects,
+            scope: &self.scope,
+            project_alias: None,
+        }
+    }
+}
+
+/// A ledger that behaves exactly like the store but makes every caller wait, after it has READ the approval as `issued`, until all callers
+/// have read it: the deterministic form of the race ("two concurrent calls can both read `Issued`").
+struct BarrierLedger<'a> {
+    inner: &'a ApprovalStore,
+    barrier: &'a std::sync::Barrier,
+}
+
+impl ApprovalLedger for BarrierLedger<'_> {
+    fn next_counter(&self) -> Result<u64, TrustError> {
+        self.inner.next_counter()
+    }
+    fn record_issue(&self, id: &str, counter: u64) -> Result<(), TrustError> {
+        self.inner.record_issue(id, counter)
+    }
+    fn status(&self, id: &str) -> Result<Option<LedgerStatus>, TrustError> {
+        let st = self.inner.status(id);
+        self.barrier.wait();
+        st
+    }
+    fn consume(&self, id: &str, txn: &str) -> Result<(), TrustError> {
+        self.inner.consume(id, txn)
+    }
+    fn revoke(&self, id: &str) -> Result<(), TrustError> {
+        self.inner.revoke(id)
+    }
+    fn atomic_with_audit(&self) -> bool {
+        self.inner.atomic_with_audit()
+    }
+    fn record_issue_audited(&self, id: &str, counter: u64, audit: &dyn AuditSink, record: AuditRecord) -> Result<(), TrustError> {
+        self.inner.record_issue_audited(id, counter, audit, record)
+    }
+    fn consume_audited(&self, id: &str, txn: &str, audit: &dyn AuditSink, record: AuditRecord) -> Result<(), TrustError> {
+        self.inner.consume_audited(id, txn, audit, record)
+    }
+}
+
+struct Rig {
+    _d: tempfile::TempDir,
+    dir: PathBuf,
+    path: PathBuf,
+    f: Fx,
+    keys: FakeKeyStore,
+}
+
+fn rig() -> Rig {
+    let d = tempfile::tempdir().unwrap();
+    let dir = d.path().to_path_buf();
+    std::fs::write(dir.join("canary.txt"), b"untouched").unwrap();
+    let path = dir.join(FILE_NAME);
+    Rig { _d: d, dir, path, f: fx("synthetic-tool", "1.0.0", b"payload one"), keys: FakeKeyStore::new("k") }
+}
+
+impl Rig {
+    fn store(&self) -> ApprovalStore {
+        ApprovalStore::open(&self.path).unwrap()
+    }
+
+    fn approval(&self) -> Approval {
+        make_approval(&self.f, Action::Install, None, COMPUTER, t0())
+    }
+
+    fn issue(&self, s: &ApprovalStore) -> Result<DeviceApproval, TrustError> {
+        let o = Owned::of(&self.f);
+        device_trust::issue(
+            &self.approval(),
+            &o.artifact,
+            &o.effects,
+            &self.keys,
+            &FakePresence(Presence::Confirmed),
+            s,
+            s,
+            TrustPolicy::test_doubles(),
+        )
+    }
+
+    fn authorize_with(&self, s: &ApprovalStore, d: &DeviceApproval, want: &Expected, txn: &str) -> Result<(), TrustError> {
+        device_trust::authorize(d, want, txn, t0() + chrono::Duration::seconds(30), &self.keys, s, s, TrustPolicy::test_doubles())
+            .map(|_| ())
+    }
+
+    fn authorize(&self, s: &ApprovalStore, d: &DeviceApproval, txn: &str) -> Result<(), TrustError> {
+        let o = Owned::of(&self.f);
+        self.authorize_with(s, d, &o.expected(), txn)
+    }
+
+    fn rows(&self) -> Vec<(String, String)> {
+        let c = raw(&self.path);
+        let mut st = c.prepare("SELECT approval_id, status FROM approvals ORDER BY counter").unwrap();
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|r| r.unwrap()).collect()
+    }
+
+    fn count(&self, event: &str, outcome: &str) -> usize {
+        self.store().audit_events().unwrap().iter().filter(|e| e.0 == event && e.1 == outcome).count()
+    }
+
+    fn unrelated_is_untouched(&self) {
+        assert_eq!(std::fs::read(self.dir.join("canary.txt")).unwrap(), b"untouched");
+        let mut names: Vec<String> =
+            std::fs::read_dir(&self.dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        names.retain(|n| !n.starts_with(FILE_NAME));
+        assert_eq!(names, vec!["canary.txt".to_string()]);
+    }
+}
+
+#[test]
+fn eight_simultaneous_authorizations_from_separate_connections_commit_exactly_one_success_and_exactly_one_success_row() {
+    let r = rig();
+    let d = r.issue(&r.store()).unwrap();
+    let o = Owned::of(&r.f);
+    let path = r.path.clone();
+    let barrier = std::sync::Barrier::new(8);
+    let results: Vec<Result<(), TrustError>> = std::thread::scope(|sc| {
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let (path, d, o, keys, barrier) = (&path, &d, &o, &r.keys, &barrier);
+                sc.spawn(move || {
+                    let s = ApprovalStore::open(path).unwrap();
+                    // every thread has READ the approval as issued before any of them consumes it
+                    let ledger = BarrierLedger { inner: &s, barrier };
+                    device_trust::authorize(
+                        d,
+                        &o.expected(),
+                        &format!("txn-{i}"),
+                        t0() + chrono::Duration::seconds(30),
+                        keys,
+                        &ledger,
+                        &s,
+                        TrustPolicy::test_doubles(),
+                    )
+                    .map(|_| ())
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    assert_eq!(results.iter().filter(|x| x.is_ok()).count(), 1, "{results:?}");
+    assert!(results.iter().filter(|x| x.is_err()).all(|x| *x == Err(TrustError::Replayed)), "{results:?}");
+    let s = r.store();
+    assert_eq!(r.rows(), vec![(d.approval.approval_id.clone(), "consumed".to_string())]);
+    assert_eq!(r.count("approval_use", "authorized"), 1, "exactly one success row, for the one that won");
+    assert_eq!(r.count("approval_use", "refused"), 7, "every loser has an honest refusal row, never a success row");
+    assert_eq!(s.verify_audit_chain(), Ok(s.audit_events().unwrap().len()));
+    assert_eq!(s.verify_consistency(), Ok(()));
+    r.unrelated_is_untouched();
+}
+
+#[test]
+fn an_audit_failure_during_issuance_leaves_no_approval_behind_and_the_failure_is_recorded_honestly() {
+    let r = rig();
+    let s = r.store();
+    let before = (r.rows(), r.count("approval_issue", "issued"));
+    raw(&r.path)
+        .execute_batch("CREATE TRIGGER audit_down BEFORE INSERT ON audit WHEN NEW.event = 'approval_issue' AND NEW.outcome = 'issued' BEGIN SELECT RAISE(ABORT, 'journal down'); END;")
+        .unwrap();
+    assert_eq!(r.issue(&s).unwrap_err(), TrustError::AuditUnavailable);
+    assert_eq!(r.rows(), before.0, "no orphaned 'issued' approval");
+    assert_eq!(r.count("approval_issue", "issued"), 0);
+    assert_eq!(r.count("approval_issue", "refused"), 1, "the refusal itself is journalled");
+    raw(&r.path).execute_batch("DROP TRIGGER audit_down;").unwrap();
+    let d = r.issue(&s).unwrap();
+    assert_eq!(r.rows(), vec![(d.approval.approval_id.clone(), "issued".to_string())]);
+    assert_eq!(s.verify_consistency(), Ok(()));
+    assert_eq!(s.verify_audit_chain(), Ok(s.audit_events().unwrap().len()));
+}
+
+#[test]
+fn an_audit_failure_during_consumption_prevents_it_and_never_leaves_a_success_row() {
+    let r = rig();
+    let s = r.store();
+    let d = r.issue(&s).unwrap();
+    raw(&r.path)
+        .execute_batch("CREATE TRIGGER audit_down BEFORE INSERT ON audit WHEN NEW.event = 'approval_use' AND NEW.outcome = 'authorized' BEGIN SELECT RAISE(ABORT, 'journal down'); END;")
+        .unwrap();
+    assert_eq!(r.authorize(&s, &d, "txn-1").unwrap_err(), TrustError::AuditUnavailable);
+    assert_eq!(r.rows(), vec![(d.approval.approval_id.clone(), "issued".to_string())], "NOT consumed");
+    assert_eq!(r.count("approval_use", "authorized"), 0);
+    assert_eq!(r.count("approval_use", "refused"), 1);
+    raw(&r.path).execute_batch("DROP TRIGGER audit_down;").unwrap();
+    assert!(r.authorize(&s, &d, "txn-2").is_ok(), "once the journal works the same approval is still usable, exactly once");
+    assert_eq!(r.authorize(&s, &d, "txn-3").unwrap_err(), TrustError::Replayed);
+    assert_eq!(r.count("approval_use", "authorized"), 1);
+    assert_eq!(s.verify_consistency(), Ok(()));
+}
+
+#[test]
+fn a_failing_commit_changes_nothing_for_issuance_and_for_consumption() {
+    let r = rig();
+    let s = r.store();
+    // issuance: the commit fails
+    s.fault.store(1, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(r.issue(&s).unwrap_err(), TrustError::LedgerUnavailable);
+    assert!(r.rows().is_empty());
+    assert_eq!(r.count("approval_issue", "issued"), 0);
+    let d = r.issue(&s).unwrap();
+    // consumption: the commit fails
+    s.fault.store(1, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(r.authorize(&s, &d, "txn-1").unwrap_err(), TrustError::LedgerUnavailable);
+    assert_eq!(r.rows(), vec![(d.approval.approval_id.clone(), "issued".to_string())]);
+    assert_eq!(r.count("approval_use", "authorized"), 0, "the success row was rolled back with the state change");
+    assert!(r.authorize(&s, &d, "txn-2").is_ok());
+    assert_eq!(s.verify_consistency(), Ok(()));
+    assert_eq!(s.verify_audit_chain(), Ok(s.audit_events().unwrap().len()));
+}
+
+/// Run only by [`a_process_that_dies_inside_the_consumption_transaction_…`] as a child process: it starts the consumption and aborts before the commit.
+#[test]
+#[ignore]
+fn child_abort_during_consume() {
+    let (Some(path), Some(id)) = (std::env::var_os("ATM_STORE_TEST_PATH"), std::env::var("ATM_STORE_TEST_APPROVAL").ok()) else {
+        return;
+    };
+    let s = ApprovalStore::open(std::path::Path::new(&path)).unwrap();
+    s.fault.store(2, std::sync::atomic::Ordering::SeqCst);
+    let record = AuditRecord {
+        event: "approval_use",
+        outcome: "authorized",
+        approval_id: Some(id.clone()),
+        tool_id: "synthetic-tool".into(),
+        version: "1.0.0".into(),
+        action: "install",
+        code: None,
+    };
+    let _ = s.consume_audited(&id, "txn-child", &s, record);
+}
+
+#[test]
+fn a_process_that_dies_inside_the_consumption_transaction_leaves_the_approval_issued_and_the_journal_whole_after_a_restart() {
+    let r = rig();
+    let s = r.store();
+    let d = r.issue(&s).unwrap();
+    let id = d.approval.approval_id.clone();
+    drop(s);
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "approval_store::tests::child_abort_during_consume", "--include-ignored", "--nocapture", "--test-threads=1"])
+        .env("ATM_STORE_TEST_PATH", &r.path)
+        .env("ATM_STORE_TEST_APPROVAL", &id)
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "the child must have died inside the transaction");
+    // restart: the interrupted transaction left nothing
+    let s = r.store();
+    assert_eq!(r.rows(), vec![(id.clone(), "issued".to_string())]);
+    assert_eq!(r.count("approval_use", "authorized"), 0);
+    assert_eq!(s.verify_audit_chain(), Ok(s.audit_events().unwrap().len()));
+    assert_eq!(s.verify_consistency(), Ok(()));
+    assert!(r.authorize(&s, &d, "txn-after-restart").is_ok(), "and the approval is intact and usable exactly once");
+    assert_eq!(r.authorize(&s, &d, "txn-again").unwrap_err(), TrustError::Replayed);
+    r.unrelated_is_untouched();
+}
+
+#[test]
+fn replayed_and_revoked_approvals_never_produce_a_success_row_and_stay_that_way_after_a_restart() {
+    let r = rig();
+    let s = r.store();
+    let (a, b) = (r.issue(&s).unwrap(), r.issue(&s).unwrap());
+    assert!(r.authorize(&s, &a, "txn-1").is_ok());
+    s.revoke(&b.approval.approval_id).unwrap();
+    for round in 0..2 {
+        // round 1 is a "restart": a new store object over the same file
+        let again = r.store();
+        assert_eq!(r.authorize(&again, &a, "txn-replay").unwrap_err(), TrustError::Replayed);
+        assert_eq!(r.authorize(&again, &b, "txn-revoked").unwrap_err(), TrustError::Revoked);
+        assert_eq!(r.count("approval_use", "authorized"), 1, "round {round}");
+        assert_eq!(r.count("approval_revoke", "revoked"), 1);
+        assert_eq!(again.verify_consistency(), Ok(()));
+    }
+    // revoking something used or already revoked is a no-op that writes nothing more
+    s.revoke(&a.approval.approval_id).unwrap();
+    s.revoke(&b.approval.approval_id).unwrap();
+    assert_eq!(r.count("approval_revoke", "revoked"), 1);
+}
+
+#[test]
+fn a_forged_audit_row_or_an_altered_approval_state_is_detected_and_never_honoured() {
+    let r = rig();
+    let s = r.store();
+    let d = r.issue(&s).unwrap();
+    // (1) a forged row with an invalid chain: the chain check stops every transaction
+    raw(&r.path).execute("INSERT INTO audit (ts, event, outcome, approval_id, tool_id, version, action, code, prev_hash, hash) VALUES ('2027-01-01T00:00:00Z','approval_use','authorized',?1,'t','1','install',NULL,'forged-prev','forged-hash')", [&d.approval.approval_id]).unwrap();
+    assert_eq!(s.verify_audit_chain(), Err(StoreError::AuditChainBroken));
+    assert_eq!(r.authorize(&s, &d, "txn-1").unwrap_err(), TrustError::AuditUnavailable);
+    assert_eq!(r.rows(), vec![(d.approval.approval_id.clone(), "issued".to_string())]);
+    // (2) a forged row with a VALID chain (the chain has no secret) is a journal that contradicts the ledger: refused as inconsistent
+    let r = rig();
+    let s = r.store();
+    let d = r.issue(&s).unwrap();
+    s.record(AuditRecord {
+        event: "approval_use",
+        outcome: "authorized",
+        approval_id: Some(d.approval.approval_id.clone()),
+        tool_id: "synthetic-tool".into(),
+        version: "1.0.0".into(),
+        action: "install",
+        code: None,
+    })
+    .unwrap();
+    assert_eq!(s.verify_consistency(), Err(StoreError::Inconsistent));
+    assert_eq!(r.authorize(&s, &d, "txn-1").unwrap_err(), TrustError::LedgerInconsistent);
+    assert_eq!(
+        r.rows(),
+        vec![(d.approval.approval_id.clone(), "issued".to_string())],
+        "nothing consumed on the strength of a contradicting journal"
+    );
+    assert_eq!(r.count("approval_use", "authorized"), 1, "no second success row");
+    // (3) an altered approval state: a consumed approval is reset to issued (the file owner drops the trigger)
+    let r = rig();
+    let s = r.store();
+    let d = r.issue(&s).unwrap();
+    assert!(r.authorize(&s, &d, "txn-1").is_ok());
+    raw(&r.path).execute_batch("DROP TRIGGER approvals_terminal; UPDATE approvals SET status = 'issued', txn_id = NULL;").unwrap();
+    assert_eq!(s.verify_consistency(), Err(StoreError::Inconsistent));
+    assert_eq!(
+        r.authorize(&s, &d, "txn-replay").unwrap_err(),
+        TrustError::LedgerInconsistent,
+        "the journal remembers what the ledger forgot"
+    );
+    assert_eq!(r.count("approval_use", "authorized"), 1);
+    // (4) a revoked approval reset to issued
+    let r = rig();
+    let s = r.store();
+    let d = r.issue(&s).unwrap();
+    s.revoke(&d.approval.approval_id).unwrap();
+    raw(&r.path).execute_batch("DROP TRIGGER approvals_terminal; UPDATE approvals SET status = 'issued';").unwrap();
+    assert_eq!(r.authorize(&s, &d, "txn-x").unwrap_err(), TrustError::LedgerInconsistent);
+    assert_eq!(r.count("approval_use", "authorized"), 0);
+}
+
+#[test]
+fn a_change_of_computer_recipe_artifact_or_effects_is_refused_and_changes_nothing() {
+    let r = rig();
+    let s = r.store();
+    let other = r.issue(&s).unwrap(); // an unrelated approval that must stay untouched
+    let d = r.issue(&s).unwrap();
+    let o = Owned::of(&r.f);
+    let rows_before = r.rows();
+    let events_before = r.count("approval_use", "authorized");
+    type Mutation = Box<dyn Fn(&mut Expected)>;
+    let variants: Vec<(&str, Mutation)> = vec![
+        ("computer", Box::new(|w| w.computer_id = "another-computer")),
+        ("recipe", Box::new(|w| w.recipe_digest = "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0")),
+        ("artifact", Box::new(|w| w.artifact_sha256 = "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1")),
+        ("effects", Box::new(|w| w.effects_digest = "d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2")),
+        ("version", Box::new(|w| w.version = "9.9.9")),
+        ("tool", Box::new(|w| w.tool_id = "synthetic-other")),
+    ];
+    for (name, mutate) in variants {
+        let mut want = o.expected();
+        mutate(&mut want);
+        assert_eq!(r.authorize_with(&s, &d, &want, "txn-x").unwrap_err(), TrustError::BindingMismatch, "{name}");
+    }
+    assert_eq!(r.rows(), rows_before, "no approval changed state");
+    assert_eq!(r.count("approval_use", "authorized"), events_before);
+    assert_eq!(r.count("approval_use", "refused"), 6);
+    assert_eq!(s.status(&other.approval.approval_id).unwrap(), Some(LedgerStatus::Issued));
+    assert!(r.authorize(&s, &d, "txn-ok").is_ok(), "the exact operation still works");
+    r.unrelated_is_untouched();
+}
+
+#[test]
+fn the_atomic_path_refuses_a_journal_that_is_not_the_ledgers_own_and_a_policy_that_needs_atomicity_refuses_a_non_atomic_ledger() {
+    let r = rig();
+    let s = r.store();
+    let o = Owned::of(&r.f);
+    let other = VecAudit::default();
+    let e = device_trust::issue(
+        &r.approval(),
+        &o.artifact,
+        &o.effects,
+        &r.keys,
+        &FakePresence(Presence::Confirmed),
+        &s,
+        &other,
+        TrustPolicy::test_doubles(),
+    )
+    .unwrap_err();
+    assert_eq!(e, TrustError::AuditUnavailable);
+    assert!(r.rows().is_empty());
+    let d = r.issue(&s).unwrap();
+    let e = device_trust::authorize(
+        &d,
+        &o.expected(),
+        "t",
+        t0() + chrono::Duration::seconds(30),
+        &r.keys,
+        &s,
+        &other,
+        TrustPolicy::test_doubles(),
+    )
+    .unwrap_err();
+    assert_eq!(e, TrustError::AuditUnavailable);
+    assert_eq!(r.rows(), vec![(d.approval.approval_id.clone(), "issued".to_string())]);
+    assert!(s.atomic_with_audit());
+    assert!(!device_trust::fakes::InMemoryLedger::default().atomic_with_audit());
+}

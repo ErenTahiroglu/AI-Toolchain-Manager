@@ -94,7 +94,9 @@ mod windows_impl {
 pub mod backend {
     use crate::{
         approval_store::EnrollmentPermit,
-        os_approval::{key_id_of, Assurance, BackendError, KeyInfo, OsCredentialBackend, PresenceSignature, UserVerification},
+        os_approval::{
+            bind_attestation, key_id_of, Assurance, BackendError, KeyInfo, OsCredentialBackend, PresenceSignature, UserVerification,
+        },
     };
     use sha2::{Digest, Sha256};
     use windows::{
@@ -126,22 +128,37 @@ pub mod backend {
         Ok(arr.to_vec())
     }
 
-    fn describe(cred: &KeyCredential) -> Result<KeyInfo, BackendError> {
+    /// The credential's identity; with `with_attestation` also the evidence the OS reports (this may take longer and may involve the OS
+    /// vendor's services: it is therefore asked for only at enrollment, at key-store opening and just before a signature, never on every
+    /// check). The evidence digest covers the CERTIFICATE CHAIN only (the attestation statement itself changes with every call) and is
+    /// bound to this exact public key. Whether the chain digest is stable across calls is UNVERIFIED: if it is not, the key store fails
+    /// closed (`approval_attestation_evidence_changed`). Nothing here claims verification: the claim is at most `OsReportedHardware`, and
+    /// it only counts if the evidence is bound to the key (`established_assurance`).
+    fn describe(cred: &KeyCredential, with_attestation: bool) -> Result<KeyInfo, BackendError> {
         let public =
             cred.RetrievePublicKeyWithBlobType(CryptographicPublicKeyBlobType::BCryptPublicKey).map_err(|_| BackendError::Failed)?;
         let public_key = bytes_of(&public)?;
-        // What the OS reports about hardware backing. It is RECORDED, not validated: the key is at most `OsReportedHardware`.
-        let (assurance, attestation_digest) = match cred.GetAttestationAsync().and_then(|op| op.join()) {
-            Ok(att) if att.Status().ok() == Some(KeyCredentialAttestationStatus::Success) => {
-                let mut h = Sha256::new();
-                for b in [att.CertificateChainBuffer(), att.AttestationBuffer()].into_iter().flatten() {
-                    h.update(bytes_of(&b).unwrap_or_default());
-                }
-                (Assurance::OsReportedHardware, Some(h.finalize().iter().map(|b| format!("{b:02x}")).collect()))
-            }
-            _ => (Assurance::OsSoftware, None),
+        let key_id = key_id_of(&public_key);
+        let mut info = KeyInfo {
+            key_id: key_id.clone(),
+            public_key,
+            assurance: Assurance::OsSoftware,
+            attestation_material_digest: None,
+            attestation_digest: None,
         };
-        Ok(KeyInfo { key_id: key_id_of(&public_key), public_key, assurance, attestation_digest })
+        if with_attestation {
+            if let Ok(att) = cred.GetAttestationAsync().and_then(|op| op.join()) {
+                if att.Status().ok() == Some(KeyCredentialAttestationStatus::Success) {
+                    if let Some(chain) = att.CertificateChainBuffer().ok().and_then(|b| bytes_of(&b).ok()).filter(|c| !c.is_empty()) {
+                        let material: String = Sha256::digest(&chain).iter().map(|b| format!("{b:02x}")).collect();
+                        info.attestation_digest = Some(bind_attestation(&key_id, &material));
+                        info.attestation_material_digest = Some(material);
+                        info.assurance = Assurance::OsReportedHardware;
+                    }
+                }
+            }
+        }
+        Ok(info)
     }
 
     impl OsCredentialBackend for WindowsHelloBackend {
@@ -154,7 +171,19 @@ pub mod backend {
             in_apartment(move || {
                 let r = KeyCredentialManager::OpenAsync(&name).and_then(|op| op.join()).map_err(|_| BackendError::Unavailable)?;
                 match r.Status().map_err(|_| BackendError::Unavailable)? {
-                    KeyCredentialStatus::Success => describe(&r.Credential().map_err(|_| BackendError::Failed)?).map(Some),
+                    KeyCredentialStatus::Success => describe(&r.Credential().map_err(|_| BackendError::Failed)?, false).map(Some),
+                    KeyCredentialStatus::NotFound => Ok(None),
+                    _ => Err(BackendError::Unavailable),
+                }
+            })?
+        }
+
+        fn attest(&self, name: &str) -> Result<Option<KeyInfo>, BackendError> {
+            let name = HSTRING::from(name);
+            in_apartment(move || {
+                let r = KeyCredentialManager::OpenAsync(&name).and_then(|op| op.join()).map_err(|_| BackendError::Unavailable)?;
+                match r.Status().map_err(|_| BackendError::Unavailable)? {
+                    KeyCredentialStatus::Success => describe(&r.Credential().map_err(|_| BackendError::Failed)?, true).map(Some),
                     KeyCredentialStatus::NotFound => Ok(None),
                     _ => Err(BackendError::Unavailable),
                 }
@@ -168,7 +197,7 @@ pub mod backend {
                     .and_then(|op| op.join())
                     .map_err(|_| BackendError::Unavailable)?;
                 match r.Status().map_err(|_| BackendError::Unavailable)? {
-                    KeyCredentialStatus::Success => describe(&r.Credential().map_err(|_| BackendError::Failed)?),
+                    KeyCredentialStatus::Success => describe(&r.Credential().map_err(|_| BackendError::Failed)?, true),
                     KeyCredentialStatus::UserCanceled => Err(BackendError::Declined),
                     KeyCredentialStatus::CredentialAlreadyExists => Err(BackendError::KeyExists),
                     _ => Err(BackendError::Failed),

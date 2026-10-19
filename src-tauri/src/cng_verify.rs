@@ -31,11 +31,41 @@ pub(crate) fn init_apartment() {
     });
 }
 
-pub struct CngRsaSha256Verifier;
+/// The padding of the RSA signature. Microsoft Learn (`KeyCredentialManager` remarks, read 2026-10-19) states Windows Hello key credentials
+/// sign with "PKCS #1 RSA PSS with SHA256"; older community knowledge says PKCS#1 v1.5. The real behaviour is UNVERIFIED until the
+/// authorised enrollment test, so BOTH are implemented, exactly ONE is configured per verifier, and a signature of the other kind is
+/// refused (the approval's own post-signing verification then fails closed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignatureScheme {
+    RsaPkcs1Sha256,
+    RsaPssSha256,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CngRsaSha256Verifier {
+    scheme: SignatureScheme,
+}
 
 impl CngRsaSha256Verifier {
-    fn try_verify(public_key: &[u8], message: &[u8], signature: &[u8]) -> windows::core::Result<bool> {
-        let provider = AsymmetricKeyAlgorithmProvider::OpenAlgorithm(&AsymmetricAlgorithmNames::RsaSignPkcs1Sha256()?)?;
+    pub fn pkcs1() -> CngRsaSha256Verifier {
+        CngRsaSha256Verifier { scheme: SignatureScheme::RsaPkcs1Sha256 }
+    }
+
+    pub fn pss() -> CngRsaSha256Verifier {
+        CngRsaSha256Verifier { scheme: SignatureScheme::RsaPssSha256 }
+    }
+
+    /// The scheme the documentation names for Windows Hello key credentials (PSS). Not yet confirmed against a real credential.
+    pub fn for_windows_hello_as_documented() -> CngRsaSha256Verifier {
+        CngRsaSha256Verifier::pss()
+    }
+
+    fn try_verify(&self, public_key: &[u8], message: &[u8], signature: &[u8]) -> windows::core::Result<bool> {
+        let name = match self.scheme {
+            SignatureScheme::RsaPkcs1Sha256 => AsymmetricAlgorithmNames::RsaSignPkcs1Sha256()?,
+            SignatureScheme::RsaPssSha256 => AsymmetricAlgorithmNames::RsaSignPssSha256()?,
+        };
+        let provider = AsymmetricKeyAlgorithmProvider::OpenAlgorithm(&name)?;
         let key = provider.ImportPublicKeyWithBlobType(
             &CryptographicBuffer::CreateFromByteArray(public_key)?,
             CryptographicPublicKeyBlobType::BCryptPublicKey,
@@ -54,10 +84,11 @@ impl PublicKeyVerifier for CngRsaSha256Verifier {
             return false;
         }
         let (k, m, s) = (public_key.to_vec(), message.to_vec(), signature.to_vec());
+        let scheme_holder = *self;
         // WinRT needs an initialised apartment: use a private thread so no other thread's apartment is touched; any error is "not verified"
         std::thread::spawn(move || {
             init_apartment();
-            CngRsaSha256Verifier::try_verify(&k, &m, &s).unwrap_or(false)
+            scheme_holder.try_verify(&k, &m, &s).unwrap_or(false)
         })
         .join()
         .unwrap_or(false)
@@ -75,6 +106,8 @@ pub mod testkeys {
         pub public_blob: Vec<u8>,
     }
 
+    use super::SignatureScheme;
+
     // SAFETY: WinRT CryptographicKey objects are agile and the tests only use them from the thread that created them or after joining.
     unsafe impl Send for SoftKey {}
 
@@ -86,8 +119,16 @@ pub mod testkeys {
 
     impl SoftKey {
         pub fn generate() -> SoftKey {
+            SoftKey::generate_for(SignatureScheme::RsaPkcs1Sha256)
+        }
+
+        pub fn generate_for(scheme: SignatureScheme) -> SoftKey {
             init_apartment();
-            let provider = AsymmetricKeyAlgorithmProvider::OpenAlgorithm(&AsymmetricAlgorithmNames::RsaSignPkcs1Sha256().unwrap()).unwrap();
+            let name = match scheme {
+                SignatureScheme::RsaPkcs1Sha256 => AsymmetricAlgorithmNames::RsaSignPkcs1Sha256().unwrap(),
+                SignatureScheme::RsaPssSha256 => AsymmetricAlgorithmNames::RsaSignPssSha256().unwrap(),
+            };
+            let provider = AsymmetricKeyAlgorithmProvider::OpenAlgorithm(&name).unwrap();
             let key = provider.CreateKeyPair(2048).unwrap();
             let public_blob = bytes(&key.ExportPublicKeyWithBlobType(CryptographicPublicKeyBlobType::BCryptPublicKey).unwrap());
             SoftKey { key, public_blob }
@@ -109,7 +150,7 @@ mod tests {
         let k = SoftKey::generate();
         let msg = b"canonical approval payload";
         let sig = k.sign(msg);
-        let v = CngRsaSha256Verifier;
+        let v = CngRsaSha256Verifier::pkcs1();
         assert!(v.verify(&k.public_blob, msg, &sig));
         assert!(!v.verify(&k.public_blob, b"canonical approval payloaD", &sig), "another message");
         let mut bad = sig.clone();
@@ -129,7 +170,7 @@ mod tests {
         use sha2::{Digest, Sha256};
         let k = SoftKey::generate();
         let digest = Sha256::digest(b"m");
-        assert!(!CngRsaSha256Verifier.verify(&k.public_blob, b"m", &digest));
+        assert!(!CngRsaSha256Verifier::pkcs1().verify(&k.public_blob, b"m", &digest));
     }
 
     #[test]
@@ -137,5 +178,23 @@ mod tests {
         // BCRYPT_RSAPUBLIC_BLOB starts with the magic "RSA1" (0x31415352 little endian); this is what Windows Hello's public key blob type is asked for
         let k = SoftKey::generate();
         assert_eq!(&k.public_blob[..4], b"RSA1");
+    }
+
+    #[test]
+    fn pss_signatures_verify_with_a_pss_verifier_only_and_pkcs1_signatures_with_a_pkcs1_verifier_only() {
+        let msg = b"canonical approval payload";
+        let pss_key = SoftKey::generate_for(SignatureScheme::RsaPssSha256);
+        let pss_sig = pss_key.sign(msg);
+        assert!(CngRsaSha256Verifier::pss().verify(&pss_key.public_blob, msg, &pss_sig));
+        assert!(!CngRsaSha256Verifier::pkcs1().verify(&pss_key.public_blob, msg, &pss_sig), "a PSS signature is not accepted as PKCS#1");
+        assert!(!CngRsaSha256Verifier::pss().verify(&pss_key.public_blob, b"other", &pss_sig));
+        let mut bad = pss_sig.clone();
+        bad[3] ^= 1;
+        assert!(!CngRsaSha256Verifier::pss().verify(&pss_key.public_blob, msg, &bad));
+        let p1_key = SoftKey::generate_for(SignatureScheme::RsaPkcs1Sha256);
+        let p1_sig = p1_key.sign(msg);
+        assert!(CngRsaSha256Verifier::pkcs1().verify(&p1_key.public_blob, msg, &p1_sig));
+        assert!(!CngRsaSha256Verifier::pss().verify(&p1_key.public_blob, msg, &p1_sig), "a PKCS#1 signature is not accepted as PSS");
+        assert_eq!(CngRsaSha256Verifier::for_windows_hello_as_documented().scheme, SignatureScheme::RsaPssSha256);
     }
 }

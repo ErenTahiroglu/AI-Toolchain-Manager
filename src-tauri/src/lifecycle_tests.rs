@@ -106,11 +106,177 @@ impl Lab {
         v
     }
 
-    /// Nothing left over of an unfinished transaction: no staging, no snapshots, no locks.
+    /// Nothing left over of an unfinished transaction: no staging, no snapshots, no locks. The FIRST observation decides (a leftover is a
+    /// failure, never retried away); only when it fails does the message also record what the entries are and whether they were still
+    /// there a little later, so that an intermittent failure leaves its evidence (Phase 3D-1 closure, flaky-test investigation).
     fn assert_clean(&self) {
-        assert!(self.files("staging").is_empty(), "staging: {:?}", self.files("staging"));
-        assert!(self.files("snapshots").is_empty(), "snapshots: {:?}", self.files("snapshots"));
-        assert!(self.files("locks").is_empty(), "locks: {:?}", self.files("locks"));
+        for dir in ["staging", "snapshots", "locks"] {
+            let first = self.files(dir);
+            if !first.is_empty() {
+                panic!("{}", self.leftover_report(dir, &first));
+            }
+        }
+    }
+
+    /// What the sandbox looks like right now, for a failure message: every entry of the three work folders with the raw operating-system
+    /// error of a metadata query and of an open (a Windows file whose deletion is still pending lists fine but answers both with an
+    /// error), then the same listing again after short waits.
+    fn failure_context(&self) -> String {
+        #[cfg(windows)]
+        fn attrs(m: &fs::Metadata) -> String {
+            use std::os::windows::fs::MetadataExt;
+            format!("{:#x}", m.file_attributes())
+        }
+        #[cfg(not(windows))]
+        fn attrs(_m: &fs::Metadata) -> String {
+            "-".to_string()
+        }
+        let snapshot = || -> String {
+            let mut parts = Vec::new();
+            for dir in ["staging", "snapshots", "locks"] {
+                for name in self.files(dir) {
+                    let path = self.p(dir).join(&name);
+                    let meta = match fs::symlink_metadata(&path) {
+                        Ok(m) => format!(
+                            "meta ok ({})",
+                            if m.is_dir() {
+                                "dir"
+                            } else if m.is_file() {
+                                "file"
+                            } else {
+                                "other"
+                            }
+                        ),
+                        Err(e) => format!("meta ERROR raw_os_error={:?} kind={:?}", e.raw_os_error(), e.kind()),
+                    };
+                    let open = match fs::File::open(&path) {
+                        Ok(_) => "open ok".to_string(),
+                        Err(e) => format!("open ERROR raw_os_error={:?} kind={:?}", e.raw_os_error(), e.kind()),
+                    };
+                    parts.push(format!("{dir}/{name}: {meta}; {open}"));
+                    // one level deeper: the engine reports entries INSIDE the transaction folder
+                    if path.is_dir() {
+                        match fs::read_dir(&path) {
+                            Ok(rd) => {
+                                for inner in rd.flatten() {
+                                    let ip = inner.path();
+                                    let imeta = match fs::symlink_metadata(&ip) {
+                                        Ok(m) => format!(
+                                            "meta ok ({}) len={} attrs={}",
+                                            if m.is_dir() {
+                                                "dir"
+                                            } else if m.is_file() {
+                                                "file"
+                                            } else {
+                                                "other"
+                                            },
+                                            m.len(),
+                                            attrs(&m)
+                                        ),
+                                        Err(e) => format!("meta ERROR raw_os_error={:?}", e.raw_os_error()),
+                                    };
+                                    let iopen = match fs::File::open(&ip) {
+                                        Ok(_) => "open ok".to_string(),
+                                        Err(e) => format!("open ERROR raw_os_error={:?}", e.raw_os_error()),
+                                    };
+                                    parts.push(format!("   inside {dir}/{name}/{:?}: {imeta}; {iopen}", inner.file_name()));
+                                }
+                            }
+                            Err(e) => parts.push(format!("   inside {dir}/{name}: cannot list: raw_os_error={:?}", e.raw_os_error())),
+                        }
+                    }
+                }
+            }
+            if parts.is_empty() {
+                "<all work folders empty>".to_string()
+            } else {
+                parts.join(" | ")
+            }
+        };
+        let engine_saw = super::OTHER_LOG.lock().map(|l| l.clone()).unwrap_or_default();
+        let mut out = format!(
+            "\n  what the engine's own classifier recorded as \"other\" in this process: {engine_saw:?}\n  work folders now: {}",
+            snapshot()
+        );
+        let started = std::time::Instant::now();
+        for wait_ms in [50u64, 200, 750, 2000] {
+            std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+            out.push_str(&format!("\n  after {} ms: {}", started.elapsed().as_millis(), snapshot()));
+        }
+        out
+    }
+
+    /// Like `failure_context` for the receipts folder: raw OS errors of a metadata query and an open for every entry, and the listing again later.
+    fn receipts_context(&self) -> String {
+        let snapshot = || -> String {
+            self.files("receipts")
+                .into_iter()
+                .map(|name| {
+                    let path = self.p("receipts").join(&name);
+                    let meta = match fs::symlink_metadata(&path) {
+                        Ok(m) => format!("meta ok len={} readonly={}", m.len(), m.permissions().readonly()),
+                        Err(e) => format!("meta ERROR raw_os_error={:?}", e.raw_os_error()),
+                    };
+                    let open = match fs::File::open(&path) {
+                        Ok(_) => "open ok".to_string(),
+                        Err(e) => format!("open ERROR raw_os_error={:?}", e.raw_os_error()),
+                    };
+                    format!("{name}: {meta}; {open}")
+                })
+                .collect::<Vec<_>>()
+                .join(" | ")
+        };
+        let mut out = format!(
+            "
+  receipts now: {}",
+            snapshot()
+        );
+        let started = std::time::Instant::now();
+        for wait_ms in [50u64, 200, 750, 2000] {
+            std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+            out.push_str(&format!(
+                "
+  after {} ms: {}",
+                started.elapsed().as_millis(),
+                snapshot()
+            ));
+        }
+        out
+    }
+
+    fn leftover_report(&self, dir: &str, first: &[String]) -> String {
+        let describe = |name: &str| -> String {
+            let path = self.p(dir).join(name);
+            match fs::symlink_metadata(&path) {
+                Ok(m) => {
+                    let kind = if m.is_dir() { "directory" } else { "file" };
+                    let inside = if m.is_dir() {
+                        fs::read_dir(&path).map(|d| d.flatten().count().to_string()).unwrap_or_else(|e| format!("unreadable: {e}"))
+                    } else {
+                        "-".into()
+                    };
+                    format!("{name}: {kind}, entries inside: {inside}, readonly: {}", m.permissions().readonly())
+                }
+                Err(e) => format!("{name}: metadata error: {e} (kind {:?}, raw os error {:?})", e.kind(), e.raw_os_error()),
+            }
+        };
+        let mut out = format!(
+            "{dir} not clean on FIRST observation: {first:?}\n  first look: {:?}",
+            first.iter().map(|n| describe(n)).collect::<Vec<_>>()
+        );
+        let started = std::time::Instant::now();
+        for wait_ms in [50u64, 200, 750, 2000] {
+            std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+            let now = self.files(dir);
+            out.push_str(&format!("\n  after {} ms: {:?}", started.elapsed().as_millis(), now));
+            if now.is_empty() {
+                out.push_str(
+                    "  <- the entries disappeared by themselves (a deletion that was still pending, or a handle that was released)",
+                );
+                break;
+            }
+        }
+        out
     }
 
     fn artifact_of(&self, version: &str) -> Option<Vec<u8>> {
@@ -406,12 +572,21 @@ fn a_failed_update_puts_the_previous_version_back_exactly() {
         let receipts_before = l.files("receipts");
         let f = at(point, Fault::Fail);
         let (_, report) = failed(l.update(&l.v2, "1.0.0", Some(&f)));
-        assert!(matches!(report.status.as_str(), "restored" | "not_needed"), "{point:?}: {report:?}");
+        if !matches!(report.status.as_str(), "restored" | "not_needed") {
+            panic!("{point:?}: {report:?}{}", l.failure_context());
+        }
         assert_eq!(l.active().as_deref(), Some("1.0.0"), "{point:?}");
         assert_eq!(fs::read(l.p("state/synthetic-tool.json")).unwrap(), pointer_before, "{point:?}: byte-identical pointer");
         assert_eq!(l.artifact_of("1.0.0").unwrap(), l.v1.sc.bytes, "{point:?}");
         assert!(l.artifact_of("2.0.0").is_none(), "{point:?}");
-        assert_eq!(l.files("receipts"), receipts_before, "{point:?}");
+        if l.files("receipts") != receipts_before {
+            panic!(
+                "{point:?}: receipts differ: now {:?}, before {:?}; the RollbackReport said {report:?}{}",
+                l.files("receipts"),
+                receipts_before,
+                l.receipts_context()
+            );
+        }
         l.assert_clean();
         // and the update still works afterwards
         assert_eq!(l.update(&l.v2, "1.0.0", None).unwrap().receipt.to_version.as_deref(), Some("2.0.0"), "{point:?}");
@@ -1990,4 +2165,48 @@ fn leftovers_after_a_recovered_rollback_are_reported_not_dropped() {
     fs::remove_file(dir.join("extra.txt")).unwrap();
     assert!(matches!(&l.recover(None)[..], [Recovered::RolledBack(_)]));
     l.assert_clean();
+}
+
+// ---- the intermittent failure of a_failed_update_puts_the_previous_version_back_exactly (Phase 3D-1 closure) ---------------------------------
+
+#[test]
+fn an_entry_that_vanished_between_the_listing_and_its_inspection_is_not_unexpected_content() {
+    let d = tempfile::tempdir().unwrap();
+    // what a file that was just deleted looks like to a second look: not there any more
+    assert_eq!(entry_state(&d.path().join("ARTIFACT.BIN.PART.tmp")), None);
+    // real entries keep their kinds
+    fs::write(d.path().join("a.txt"), b"x").unwrap();
+    fs::create_dir(d.path().join("sub")).unwrap();
+    assert_eq!(entry_state(&d.path().join("a.txt")), Some("file"));
+    assert_eq!(entry_state(&d.path().join("sub")), Some("folder"));
+    assert_eq!(list_entries(d.path()).unwrap(), vec![("a.txt".to_string(), "file"), ("sub".to_string(), "folder")]);
+    // against a concurrent deleter: listing never reports a file that disappears under it as unknown "other" content
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    struct StopOnDrop<'a>(&'a std::sync::atomic::AtomicBool);
+    impl Drop for StopOnDrop<'_> {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst); // also when an assertion below fails: the churn thread must end
+        }
+    }
+    std::thread::scope(|sc| {
+        let _guard = StopOnDrop(&stop);
+        sc.spawn(|| {
+            let mut i = 0u64;
+            while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                let p = d.path().join(format!("churn-{}", i % 16));
+                let _ = fs::write(&p, b"payload");
+                let _ = fs::remove_file(&p);
+                i += 1;
+            }
+        });
+        for _ in 0..1500 {
+            let listed = list_entries(d.path()).unwrap();
+            assert!(
+                listed.iter().all(|(_, kind)| *kind != "other"),
+                "{listed:?}; the classifier recorded {:?}",
+                OTHER_LOG.lock().map(|l| l.clone()).unwrap_or_default()
+            );
+        }
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
 }

@@ -87,6 +87,8 @@ pub enum StoreError {
     NotEnabled,
     /// A key is already recorded for this setting.
     KeyAlreadyRecorded,
+    /// The ledger and the audit journal disagree (an approval state that its journal does not explain).
+    Inconsistent,
     /// The setting belongs to another computer.
     OtherComputer,
 }
@@ -100,6 +102,7 @@ impl StoreError {
             StoreError::PhraseMismatch => "approval_security_phrase_mismatch",
             StoreError::NotEnabled => "approval_security_not_enabled",
             StoreError::KeyAlreadyRecorded => "approval_key_already_recorded",
+            StoreError::Inconsistent => "approval_ledger_inconsistent",
             StoreError::OtherComputer => "approval_security_other_computer",
         }
     }
@@ -154,6 +157,9 @@ type Clock = Box<dyn Fn() -> DateTime<Utc> + Send + Sync>;
 pub struct ApprovalStore {
     conn: Mutex<Connection>,
     clock: Clock,
+    /// Test-only fault injection at the commit point: 1 = the commit fails (the transaction is rolled back), 2 = the process aborts.
+    #[cfg(test)]
+    pub(crate) fault: std::sync::atomic::AtomicU32,
 }
 
 fn stamp(t: DateTime<Utc>) -> String {
@@ -185,7 +191,12 @@ impl ApprovalStore {
             SCHEMA_VERSION => {}
             _ => return Err(StoreError::UnsupportedSchema),
         }
-        Ok(ApprovalStore { conn: Mutex::new(conn), clock })
+        Ok(ApprovalStore {
+            conn: Mutex::new(conn),
+            clock,
+            #[cfg(test)]
+            fault: std::sync::atomic::AtomicU32::new(0),
+        })
     }
 
     fn now(&self) -> String {
@@ -194,9 +205,26 @@ impl ApprovalStore {
 
     // ---- audit -----------------------------------------------------------------------------------------------------------------
 
+    /// The single commit point of every transaction of this store (the test seam sits here and nowhere else).
+    fn finish(&self, tx: rusqlite::Transaction) -> rusqlite::Result<()> {
+        #[cfg(test)]
+        match self.fault.swap(0, std::sync::atomic::Ordering::SeqCst) {
+            1 => return Err(rusqlite::Error::ExecuteReturnedResults), // injected commit failure: `tx` is dropped, i.e. rolled back
+            2 => std::process::abort(),                               // injected process death in the middle of the transaction
+            _ => {}
+        }
+        tx.commit()
+    }
+
     fn append_audit(&self, conn: &mut Connection, rec: &AuditRecord) -> rusqlite::Result<()> {
-        let ts = self.now();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        self.append_audit_tx(&tx, rec)?;
+        self.finish(tx)
+    }
+
+    /// Appends one chained row inside the caller's transaction.
+    fn append_audit_tx(&self, tx: &rusqlite::Transaction, rec: &AuditRecord) -> rusqlite::Result<()> {
+        let ts = self.now();
         let prev: String = tx
             .query_row("SELECT hash FROM audit ORDER BY seq DESC LIMIT 1", [], |r| r.get(0))
             .optional()?
@@ -206,45 +234,44 @@ impl ApprovalStore {
             "INSERT INTO audit (ts, event, outcome, approval_id, tool_id, version, action, code, prev_hash, hash) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
             params![ts, rec.event, rec.outcome, rec.approval_id, rec.tool_id, rec.version, rec.action, rec.code, prev, hash],
         )?;
-        tx.commit()
+        Ok(())
     }
 
     /// Recomputes the whole chain. `Ok(n)` is the number of rows.
     pub fn verify_audit_chain(&self) -> Result<usize, StoreError> {
         let conn = self.conn.lock().map_err(|_| StoreError::Unavailable)?;
-        let mut stmt = conn
-            .prepare("SELECT ts, event, outcome, approval_id, tool_id, version, action, code, prev_hash, hash FROM audit ORDER BY seq")
+        verify_chain_on(&conn)
+    }
+
+    /// Cross-checks every approval against the journal: each one was issued exactly once in the journal; a consumed one has exactly one
+    /// `authorized` row, any other state has none; a revoked one has exactly one revocation row.
+    pub fn verify_consistency(&self) -> Result<(), StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::Unavailable)?;
+        let mut stmt = conn.prepare("SELECT approval_id, status FROM approvals").map_err(|_| StoreError::Unavailable)?;
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(|_| StoreError::Unavailable)?
+            .collect::<Result<_, _>>()
             .map_err(|_| StoreError::Unavailable)?;
-        let rows = stmt
-            .query_map([], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, Option<String>>(3)?,
-                    r.get::<_, String>(4)?,
-                    r.get::<_, String>(5)?,
-                    r.get::<_, String>(6)?,
-                    r.get::<_, Option<String>>(7)?,
-                    r.get::<_, String>(8)?,
-                    r.get::<_, String>(9)?,
-                ))
-            })
-            .map_err(|_| StoreError::Unavailable)?;
-        let mut prev = GENESIS.to_string();
-        let mut n = 0;
-        for row in rows {
-            let (ts, event, outcome, approval_id, tool_id, version, action, code, prev_hash, hash) =
-                row.map_err(|_| StoreError::Unavailable)?;
-            let v = serde_json::json!({ "ts": ts, "event": event, "outcome": outcome, "approvalId": approval_id, "toolId": tool_id, "version": version, "action": action, "code": code });
-            let expect = sha256_hex(&format!("{prev}{}", canonical_json(&v)));
-            if prev_hash != prev || hash != expect {
-                return Err(StoreError::AuditChainBroken);
+        for (id, status) in rows {
+            let (issued, authorized, revoked) = journal_counts(&conn, &id).map_err(|_| StoreError::Unavailable)?;
+            let ok = issued == 1
+                && match status.as_str() {
+                    "issued" => authorized == 0 && revoked == 0,
+                    "consumed" => authorized == 1 && revoked == 0,
+                    "revoked" => authorized == 0 && revoked == 1,
+                    _ => false,
+                };
+            if !ok {
+                return Err(StoreError::Inconsistent);
             }
-            prev = hash;
-            n += 1;
         }
-        Ok(n)
+        Ok(())
+    }
+
+    /// Is `audit` this very store? The atomic operations write the journal in the ledger's own transaction, so a different sink is refused.
+    fn is_this_store(&self, audit: &dyn AuditSink) -> bool {
+        std::ptr::eq(audit as *const dyn AuditSink as *const (), self as *const ApprovalStore as *const ())
     }
 
     /// The journal in order (for tests and for the person's review): `(event, outcome, approval_id, code)`.
@@ -389,6 +416,55 @@ fn chain_hash(prev: &str, ts: &str, rec: &AuditRecord) -> String {
     sha256_hex(&format!("{prev}{}", canonical_json(&v)))
 }
 
+/// Recomputes the chain on any connection or transaction.
+fn verify_chain_on(conn: &Connection) -> Result<usize, StoreError> {
+    let mut stmt = conn
+        .prepare("SELECT ts, event, outcome, approval_id, tool_id, version, action, code, prev_hash, hash FROM audit ORDER BY seq")
+        .map_err(|_| StoreError::Unavailable)?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, Option<String>>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, String>(6)?,
+                r.get::<_, Option<String>>(7)?,
+                r.get::<_, String>(8)?,
+                r.get::<_, String>(9)?,
+            ))
+        })
+        .map_err(|_| StoreError::Unavailable)?;
+    let mut prev = GENESIS.to_string();
+    let mut n = 0;
+    for row in rows {
+        let (ts, event, outcome, approval_id, tool_id, version, action, code, prev_hash, hash) =
+            row.map_err(|_| StoreError::Unavailable)?;
+        let v = serde_json::json!({ "ts": ts, "event": event, "outcome": outcome, "approvalId": approval_id, "toolId": tool_id, "version": version, "action": action, "code": code });
+        let expect = sha256_hex(&format!("{prev}{}", canonical_json(&v)));
+        if prev_hash != prev || hash != expect {
+            return Err(StoreError::AuditChainBroken);
+        }
+        prev = hash;
+        n += 1;
+    }
+    Ok(n)
+}
+
+/// `(issued rows, authorized rows, revocation rows)` the journal holds for one approval.
+fn journal_counts(conn: &Connection, id: &str) -> rusqlite::Result<(i64, i64, i64)> {
+    let count = |event: &str, outcome: &str| -> rusqlite::Result<i64> {
+        conn.query_row(
+            "SELECT COUNT(*) FROM audit WHERE approval_id = ?1 AND event = ?2 AND outcome = ?3",
+            params![id, event, outcome],
+            |r| r.get(0),
+        )
+    };
+    Ok((count("approval_issue", "issued")?, count("approval_use", "authorized")?, count("approval_revoke", "revoked")?))
+}
+
 // ---- the device_trust interfaces, backed by the file -------------------------------------------------------------------------------
 
 impl ApprovalLedger for ApprovalStore {
@@ -459,7 +535,18 @@ impl ApprovalLedger for ApprovalStore {
             )
             .map_err(|_| TrustError::LedgerUnavailable)?;
         if n == 1 {
-            return tx.commit().map_err(|_| TrustError::LedgerUnavailable);
+            // the revocation and its journal row are one transaction
+            let rec = AuditRecord {
+                event: "approval_revoke",
+                outcome: "revoked",
+                approval_id: Some(approval_id.to_string()),
+                tool_id: "-".into(),
+                version: "-".into(),
+                action: "revoke",
+                code: None,
+            };
+            self.append_audit_tx(&tx, &rec).map_err(|_| TrustError::AuditUnavailable)?;
+            return self.finish(tx).map_err(|_| TrustError::LedgerUnavailable);
         }
         let status: Option<String> = tx
             .query_row("SELECT status FROM approvals WHERE approval_id = ?1", params![approval_id], |r| r.get(0))
@@ -469,6 +556,70 @@ impl ApprovalLedger for ApprovalStore {
             Some("consumed") | Some("revoked") => Ok(()), // too late or already done: the transaction/revocation already stands
             _ => Err(TrustError::UnknownApproval),
         }
+    }
+
+    fn atomic_with_audit(&self) -> bool {
+        true
+    }
+
+    /// Issuance and its `issued` journal row: ONE transaction. If the journal cannot be written, no approval row survives.
+    fn record_issue_audited(&self, approval_id: &str, counter: u64, audit: &dyn AuditSink, record: AuditRecord) -> Result<(), TrustError> {
+        if !self.is_this_store(audit) {
+            return Err(TrustError::AuditUnavailable);
+        }
+        let mut conn = self.conn.lock().map_err(|_| TrustError::LedgerUnavailable)?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate).map_err(|_| TrustError::LedgerUnavailable)?;
+        verify_chain_on(&tx).map_err(|_| TrustError::AuditUnavailable)?;
+        match tx.execute(
+            "INSERT INTO approvals (approval_id, counter, status, issued_at) VALUES (?1, ?2, 'issued', ?3)",
+            params![approval_id, counter as i64, self.now()],
+        ) {
+            Ok(_) => {}
+            Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == rusqlite::ErrorCode::ConstraintViolation => {
+                return Err(TrustError::Replayed)
+            }
+            Err(_) => return Err(TrustError::LedgerUnavailable),
+        }
+        self.append_audit_tx(&tx, &record).map_err(|_| TrustError::AuditUnavailable)?;
+        self.finish(tx).map_err(|_| TrustError::LedgerUnavailable)
+    }
+
+    /// Single-use consumption and its `authorized` journal row: ONE transaction. `authorized` is written only if THIS transaction changed
+    /// the approval from `issued` to `consumed`; a replayed, revoked, unknown or inconsistent approval writes no such row. The chain and the
+    /// approval's own journal history are verified first, so a ledger edited behind the journal's back is refused.
+    fn consume_audited(&self, approval_id: &str, txn_id: &str, audit: &dyn AuditSink, record: AuditRecord) -> Result<(), TrustError> {
+        if !self.is_this_store(audit) {
+            return Err(TrustError::AuditUnavailable);
+        }
+        let mut conn = self.conn.lock().map_err(|_| TrustError::LedgerUnavailable)?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate).map_err(|_| TrustError::LedgerUnavailable)?;
+        verify_chain_on(&tx).map_err(|_| TrustError::AuditUnavailable)?;
+        let status: Option<String> = tx
+            .query_row("SELECT status FROM approvals WHERE approval_id = ?1", params![approval_id], |r| r.get(0))
+            .optional()
+            .map_err(|_| TrustError::LedgerUnavailable)?;
+        match status.as_deref() {
+            None => return Err(TrustError::UnknownApproval),
+            Some("revoked") => return Err(TrustError::Revoked),
+            Some("consumed") => return Err(TrustError::Replayed),
+            Some("issued") => {}
+            Some(_) => return Err(TrustError::LedgerInconsistent),
+        }
+        let (issued, authorized, revoked) = journal_counts(&tx, approval_id).map_err(|_| TrustError::AuditUnavailable)?;
+        if issued != 1 || authorized != 0 || revoked != 0 {
+            return Err(TrustError::LedgerInconsistent);
+        }
+        let n = tx
+            .execute(
+                "UPDATE approvals SET status = 'consumed', txn_id = ?2, finished_at = ?3 WHERE approval_id = ?1 AND status = 'issued'",
+                params![approval_id, txn_id, self.now()],
+            )
+            .map_err(|_| TrustError::LedgerUnavailable)?;
+        if n != 1 {
+            return Err(TrustError::Replayed);
+        }
+        self.append_audit_tx(&tx, &record).map_err(|_| TrustError::AuditUnavailable)?;
+        self.finish(tx).map_err(|_| TrustError::LedgerUnavailable)
     }
 }
 

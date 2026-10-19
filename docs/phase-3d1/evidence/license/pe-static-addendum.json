@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "file": "jq-windows-amd64.exe",
+  "bytes": 1035264,
+  "note": "Read as data only. The executable is STRIPPED (LDFLAGS=-s), so the absence of a marker is not proof of absence; the presence of one is evidence of presence.",
+  "markers": {
+    "libssp (GCC stack-protector runtime) message": {
+      "occurrences": 1
+    },
+    "winpthreads source path": {
+      "occurrences": 1
+    },
+    "mingw-w64 CRT message": {
+      "occurrences": 1
+    },
+    "getopt": {
+      "occurrences": 0
+    },
+    "gdtoa": {
+      "occurrences": 0
+    },
+    "mingw printf (__mingw_)": {
+      "occurrences": 0
+    },
+    "libgcc": {
+      "occurrences": 0
+    },
+    "Wine": {
+      "occurrences": 0
+    }
+  },
+  "conclusions": [
+    "libssp is statically linked: its message string is in the executable (jq builds with -fstack-protector-all). libssp is part of GCC (GPL-3.0-or-later with the GCC Runtime Library Exception).",
+    "winpthreads and the mingw-w64 CRT are statically linked (their strings are present).",
+    "No marker for the optional runtime components getopt, gdtoa or Wine-derived code was found; this is not proof they are absent.",
+    "libgcc itself is neither confirmed nor excluded."
+  ]
+}

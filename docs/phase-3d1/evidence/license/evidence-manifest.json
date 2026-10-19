@@ -150,6 +150,36 @@
       "bytes": 2099,
       "sha256": "eaf72f192835c0006f7aadcdad09a57f65ef4ba35f9f3a0f7b9fd586c118124a",
       "source": "excerpt: jq src/parser.c header (Bison exception)"
+    },
+    {
+      "file": "unicode-license-v3.txt",
+      "bytes": 2033,
+      "sha256": "5cba0cc0b60a659761e6c6a1a581e6fa64148aa6a3b118e89bcfcdbcf9a6fb8a",
+      "source": "verbatim section 'UNICODE LICENSE V3' of unicode-org/icu LICENSE at commit ad484f3d6c036ba06193ac7c3bc2233a53ab68b8 (whole file 27718 bytes, SHA-256 e09827667e0bb3c808b2a463548ba814a5e6249b67353234d70c8dfc2bcc417d); cross-read against https://www.unicode.org/license.txt on 2026-10-19"
+    },
+    {
+      "file": "pe-static-addendum.json",
+      "bytes": 1215,
+      "sha256": "1a23e60c8f03a05944b00010cd4ed318b23fa62dedd5c56aeda5e4c9b8698d9f",
+      "source": "static marker search over the retained jq-windows-amd64.exe bytes (Phase 3D-1 closure)"
+    },
+    {
+      "file": "source-excerpts-3.txt",
+      "bytes": 8532,
+      "sha256": "adb76919ba4b651e3dfd854e60db79e97a715022074351c79643911638420a11",
+      "source": "heads of Oniguruma Unicode data files at 4ef89209 (Unicode data version 160000 = Unicode 16.0; only K. Kosako's BSD notice in the heads)"
+    },
+    {
+      "file": "guard-report-5.json",
+      "bytes": 617,
+      "sha256": "f1943304628bcdac548043d289e3149bfd683167d763b8f761176a0a5701ffa0",
+      "source": "egress guard report, closure research round 5 (api.github.com only)"
+    },
+    {
+      "file": "guard-report-6.json",
+      "bytes": 615,
+      "sha256": "e5be63576b003ea0f221de6892ba6af3c7d13041bb5b5934014ab8c84099f5b3",
+      "source": "egress guard report, closure research round 6 (api.github.com only)"
     }
   ]
 }

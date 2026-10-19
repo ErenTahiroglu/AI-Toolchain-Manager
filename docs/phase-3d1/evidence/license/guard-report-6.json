@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "guard": {
+    "used": true,
+    "allowedHosts": [
+      "api.github.com"
+    ],
+    "residualLimits": "not an operating-system firewall: a program that ignores proxy variables and connects directly is neither stopped nor seen; prefer offline verification"
+  },
+  "command": "python.exe",
+  "childExit": 0,
+  "contactedHosts": [
+    {
+      "host": "api.github.com",
+      "how": "observed",
+      "by": "egress_guard",
+      "tunnels": 2,
+      "bytesUp": 4152,
+      "bytesDown": 40264
+    }
+  ],
+  "incidents": [],
+  "exitStatusRule": "97 if any incident, otherwise the child's exit status"
+}

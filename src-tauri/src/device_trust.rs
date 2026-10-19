@@ -49,24 +49,30 @@ pub enum KeyProtection {
 pub struct TrustPolicy {
     accept_fakes: bool,
     accept_os_reported_hardware: bool,
+    /// Only a ledger that writes the journal row in the SAME durable transaction as the state change may back this policy.
+    require_atomic_book: bool,
 }
 
 impl TrustPolicy {
     /// What production will require: an OS-protected key. Fakes are refused.
     pub const fn production() -> TrustPolicy {
-        TrustPolicy { accept_fakes: false, accept_os_reported_hardware: false }
+        TrustPolicy { accept_fakes: false, accept_os_reported_hardware: false, require_atomic_book: true }
     }
 
     /// For the isolated test-mode adapter only.
     pub const fn test_doubles() -> TrustPolicy {
-        TrustPolicy { accept_fakes: true, accept_os_reported_hardware: false }
+        TrustPolicy { accept_fakes: true, accept_os_reported_hardware: false, require_atomic_book: false }
     }
 
     /// PROPOSAL for the first Windows pilot, NOT used anywhere: additionally accepts an OS key credential the OS reports as hardware
     /// backed (Windows Hello with TPM attestation reported). It still refuses fakes and software keys. Whether this is acceptable
     /// instead of a verified attestation is a decision for the user and the Red Team (docs/phase-3d1/WINDOWS-HELLO-APPROVAL.md).
     pub const fn pilot_candidate_os_reported_hardware() -> TrustPolicy {
-        TrustPolicy { accept_fakes: false, accept_os_reported_hardware: true }
+        TrustPolicy { accept_fakes: false, accept_os_reported_hardware: true, require_atomic_book: true }
+    }
+
+    fn accepts_book(self, ledger: &dyn ApprovalLedger) -> bool {
+        !self.require_atomic_book || ledger.atomic_with_audit()
     }
 
     fn accepts(self, p: KeyProtection) -> bool {
@@ -94,6 +100,10 @@ pub enum TrustError {
     BindingMismatch,
     AuditUnavailable,
     LedgerUnavailable,
+    /// The ledger and the audit journal disagree about an approval (e.g. a consumed approval reset to issued).
+    LedgerInconsistent,
+    /// The recorded assurance is stronger than the live credential establishes, or its attestation evidence changed.
+    AssuranceRejected,
 }
 
 impl TrustError {
@@ -112,6 +122,8 @@ impl TrustError {
             TrustError::BindingMismatch => "approval_binding_mismatch",
             TrustError::AuditUnavailable => "audit_unavailable",
             TrustError::LedgerUnavailable => "approval_ledger_unavailable",
+            TrustError::LedgerInconsistent => "approval_ledger_inconsistent",
+            TrustError::AssuranceRejected => "approval_assurance_rejected",
         }
     }
 }
@@ -165,6 +177,32 @@ pub trait ApprovalLedger {
     /// Atomically `Issued` -> `Consumed` for exactly one transaction; anything else is refused.
     fn consume(&self, approval_id: &str, txn_id: &str) -> Result<(), TrustError>;
     fn revoke(&self, approval_id: &str) -> Result<(), TrustError>;
+
+    /// `true` only for a DURABLE ledger whose `*_audited` operations write the journal row in the same transaction as the state change.
+    fn atomic_with_audit(&self) -> bool {
+        false
+    }
+
+    /// Records the approval as issued AND writes `record` to `audit`. The default (non-durable doubles) writes the journal row first and
+    /// records the approval only if that succeeded. A durable ledger overrides this with ONE transaction.
+    fn record_issue_audited(&self, approval_id: &str, counter: u64, audit: &dyn AuditSink, record: AuditRecord) -> Result<(), TrustError> {
+        audit.record(record)?;
+        self.record_issue(approval_id, counter)
+    }
+
+    /// Consumes the approval for `txn_id` AND writes the success `record`. The default (non-durable doubles) checks the approval, writes the
+    /// journal row, then consumes. A durable ledger overrides this with ONE transaction in which the success row exists only if the
+    /// consumption itself succeeded.
+    fn consume_audited(&self, approval_id: &str, txn_id: &str, audit: &dyn AuditSink, record: AuditRecord) -> Result<(), TrustError> {
+        match self.status(approval_id)? {
+            None => return Err(TrustError::UnknownApproval),
+            Some(LedgerStatus::Revoked) => return Err(TrustError::Revoked),
+            Some(LedgerStatus::Consumed { .. }) => return Err(TrustError::Replayed),
+            Some(LedgerStatus::Issued) => {}
+        }
+        audit.record(record)?;
+        self.consume(approval_id, txn_id)
+    }
 }
 
 /// An audit event: closed vocabulary, ids only. Never a path, a credential or free text.
@@ -277,6 +315,9 @@ pub fn issue_with(
     if !policy.accepts(keys.protection()) {
         return Err(fail(TrustError::KeyNotOsProtected));
     }
+    if !policy.accepts_book(ledger) {
+        return Err(fail(TrustError::LedgerUnavailable)); // this policy needs a durable, atomic ledger-and-journal
+    }
     let prompt = PresencePrompt {
         action: approval.action,
         tool_id: approval.tool_id.clone(),
@@ -317,8 +358,8 @@ pub fn issue_with(
         return Err(fail(TrustError::SignatureInvalid)); // our own check: never record an approval its own key does not verify
     }
     d.signature = hex(&signature);
-    ledger.record_issue(&approval.approval_id, counter).map_err(fail)?;
-    audit.record(rec("issued", None))?;
+    // approval row + its `issued` journal row: one durable transaction on a durable ledger; if it fails, nothing is issued
+    ledger.record_issue_audited(&approval.approval_id, counter, audit, rec("issued", None)).map_err(fail)?;
     Ok(d)
 }
 
@@ -388,6 +429,9 @@ pub fn authorize(
     if !policy.accepts(keys.protection()) {
         return Err(refuse(TrustError::KeyNotOsProtected));
     }
+    if !policy.accepts_book(ledger) {
+        return Err(refuse(TrustError::LedgerUnavailable)); // this policy needs a durable, atomic ledger-and-journal
+    }
     // authenticity: the signature over every field, by the key this device holds
     if d.key_id != keys.key_id() {
         return Err(refuse(TrustError::KeyMismatch));
@@ -425,8 +469,8 @@ pub fn authorize(
         Some(LedgerStatus::Consumed { .. }) => return Err(refuse(TrustError::Replayed)),
         Some(LedgerStatus::Issued) => {}
     }
-    audit.record(rec("approval_use", "authorized", None))?;
-    ledger.consume(&a.approval_id, txn_id).map_err(refuse)?;
+    // single-use consumption + its `authorized` journal row: the success row exists only if THIS call consumed the approval
+    ledger.consume_audited(&a.approval_id, txn_id, audit, rec("approval_use", "authorized", None)).map_err(refuse)?;
     Ok(DeviceAuthorization { approval_id: a.approval_id.clone(), txn_id: txn_id.to_string(), key_protection: keys.protection() })
 }
 
@@ -507,6 +551,34 @@ pub mod fakes {
         fn record_issue(&self, approval_id: &str, _counter: u64) -> Result<(), TrustError> {
             let mut g = self.inner.lock().map_err(|_| TrustError::LedgerUnavailable)?;
             g.1.insert(approval_id.to_string(), LedgerStatus::Issued);
+            Ok(())
+        }
+        fn record_issue_audited(
+            &self,
+            approval_id: &str,
+            _counter: u64,
+            audit: &dyn AuditSink,
+            record: AuditRecord,
+        ) -> Result<(), TrustError> {
+            // under the ledger's own lock: the journal row first, the approval only if it was written
+            let mut g = self.inner.lock().map_err(|_| TrustError::LedgerUnavailable)?;
+            audit.record(record)?;
+            g.1.insert(approval_id.to_string(), LedgerStatus::Issued);
+            Ok(())
+        }
+        fn consume_audited(&self, approval_id: &str, txn_id: &str, audit: &dyn AuditSink, record: AuditRecord) -> Result<(), TrustError> {
+            if self.broken {
+                return Err(TrustError::LedgerUnavailable);
+            }
+            let mut g = self.inner.lock().map_err(|_| TrustError::LedgerUnavailable)?;
+            match g.1.get(approval_id) {
+                Some(LedgerStatus::Issued) => {}
+                Some(LedgerStatus::Consumed { .. }) => return Err(TrustError::Replayed),
+                Some(LedgerStatus::Revoked) => return Err(TrustError::Revoked),
+                None => return Err(TrustError::UnknownApproval),
+            }
+            audit.record(record)?; // nothing is consumed if the journal cannot be written; no success row for a refused consumption
+            g.1.insert(approval_id.to_string(), LedgerStatus::Consumed { txn_id: txn_id.to_string() });
             Ok(())
         }
         fn status(&self, approval_id: &str) -> Result<Option<LedgerStatus>, TrustError> {

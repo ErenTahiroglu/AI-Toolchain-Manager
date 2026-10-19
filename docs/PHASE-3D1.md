@@ -25,3 +25,8 @@ Baseline `acaaafa9cb9214181e363d4d997f6f07140312ca`. **Nothing in this phase ins
 ## Limitations stated up front
 
 Windows Hello creation/signing/attestation/deletion, prompt parenting and the signature format are **unexercised**; the licence review is an engineering reading, not legal advice, with three open questions; the rehearsal injects faults in-process rather than cutting power; a real second PC, a real Mac and any real jq installation are absent; the macOS pilot has its own blockers (signed app, Secure Enclave, Gatekeeper, real Mac).
+
+## Red Team closure (Issue #20)
+
+The independent review gave a CONDITIONAL PASS and two pre-real-approval blockers, both closed in [PHASE-3D1-CLOSURE.md](PHASE-3D1-CLOSURE.md): a stored assurance label is never an authority (RT-3D1-01) and issuance/consumption/revocation commit atomically with their audit rows (RT-3D1-02). New: [WINDOWS-HELLO-THREAT-MODEL.md](phase-3d1/WINDOWS-HELLO-THREAT-MODEL.md) (Option B is a **disabled candidate**), [LICENSE-Q1-Q3-RESOLUTION-PROPOSAL.md](phase-3d1/LICENSE-Q1-Q3-RESOLUTION-PROPOSAL.md) (`LICENSE_CONDITIONAL` unchanged), [FLAKY-LIFECYCLE-TEST.md](phase-3d1/FLAKY-LIFECYCLE-TEST.md).
+

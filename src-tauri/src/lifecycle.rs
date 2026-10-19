@@ -489,22 +489,74 @@ fn retry_io<T>(mut op: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T>
     Err(last.unwrap_or_else(|| std::io::Error::other("removal failed")))
 }
 
-fn entry_kind(p: &Path) -> &'static str {
+/// Test builds only: why an entry was classified "other" (raw operating-system error of the metadata query), so an intermittent failure of
+/// a lifecycle test can show what the engine actually saw at that moment. No effect on production builds.
+#[cfg(test)]
+pub(crate) static OTHER_LOG: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// What one directory entry is right now. `None` means the entry NO LONGER EXISTS when it is inspected: on Windows a file that was just
+/// deleted can still be listed for a moment (observed as a renamed temporary name such as `ARTIFACT.BIN.PART.tmp` whose metadata query
+/// answers "not found", Phase 3D-1 closure investigation) while another program still holds a handle. Something that is not there is
+/// neither unexpected content to protect nor a reason to refuse the cleanup; every OTHER failure to inspect an entry stays "other",
+/// i.e. unknown and never deleted.
+fn entry_state(p: &Path) -> Option<&'static str> {
     if is_link(p) {
-        return "link";
+        return Some("link");
     }
-    match fs::symlink_metadata(p) {
-        Ok(m) if m.is_file() => "file",
-        Ok(m) if m.is_dir() => "folder",
-        _ => "other",
+    // A file whose deletion is still pending answers a metadata query with "access denied" (reproduced in a test) or "not found" while it
+    // is still listed. Those states end within milliseconds, so the same read-only query is repeated a few times (about 0.3 s in total)
+    // before an entry is given up as unknown; an entry that stays unreadable is still "other" and is never deleted.
+    let mut result = fs::symlink_metadata(p);
+    for attempt in 0..5u32 {
+        match &result {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                std::thread::sleep(std::time::Duration::from_millis(10 << attempt));
+                result = fs::symlink_metadata(p);
+            }
+            _ => break,
+        }
     }
+    match result {
+        Ok(m) if m.is_file() => Some("file"),
+        Ok(m) if m.is_dir() => Some("folder"),
+        other => {
+            #[cfg(test)]
+            if let Ok(mut log) = OTHER_LOG.lock() {
+                let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                log.push(match &other {
+                    Ok(_) => format!("{name}: metadata ok but neither file nor folder"),
+                    Err(e) => format!("{name}: metadata ERROR raw_os_error={:?} kind={:?}", e.raw_os_error(), e.kind()),
+                });
+            }
+            match other {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                _ => Some("other"),
+            }
+        }
+    }
+}
+
+fn entry_kind(p: &Path) -> &'static str {
+    entry_state(p).unwrap_or("other")
+}
+
+/// After a removal reported success: wait (bounded, about 1 s) until the name is really gone. Windows can keep listing a deleted file
+/// while another program holds a handle on it; "removed" should mean the name no longer exists when the removal is reported.
+fn wait_until_gone(p: &Path) -> bool {
+    for attempt in 0..8u32 {
+        if matches!(fs::symlink_metadata(p), Err(e) if e.kind() == std::io::ErrorKind::NotFound) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(15 * (attempt as u64 + 1)));
+    }
+    matches!(fs::symlink_metadata(p), Err(e) if e.kind() == std::io::ErrorKind::NotFound)
 }
 
 fn list_entries(dir: &Path) -> Result<Vec<(String, &'static str)>, String> {
     let mut v: Vec<(String, &'static str)> = fs::read_dir(dir)
         .map_err(|e| format!("cannot list the folder: {e}"))?
         .flatten()
-        .map(|e| (e.file_name().to_string_lossy().into_owned(), entry_kind(&e.path())))
+        .filter_map(|e| entry_state(&e.path()).map(|kind| (e.file_name().to_string_lossy().into_owned(), kind)))
         .collect();
     v.sort();
     Ok(v)
@@ -1426,6 +1478,10 @@ impl<'a> Engine<'a> {
         if let Ok(rp) = self.root.join("receipts", &[&format!("{}.json", j.txn_id)]) {
             if rp.exists() {
                 match fs::remove_file(&rp) {
+                    Ok(()) if !wait_until_gone(&rp) => not_undone.push(NotUndone {
+                        what: "uncommitted receipt".to_string(),
+                        why: "it was removed, but its name is still present after a second".to_string(),
+                    }),
                     Ok(()) => undone.push("uncommitted receipt removed".to_string()),
                     Err(e) => not_undone.push(NotUndone { what: "uncommitted receipt".to_string(), why: format!("cannot remove it: {e}") }),
                 }

@@ -1661,7 +1661,7 @@ fn rehearsal() -> Rehearsal {
 
 impl Rehearsal {
     fn with_adapter<T>(&self, fault: Option<FaultFn>, f: impl FnOnce(&Adapter, &OsKeyStore) -> T) -> T {
-        let keys = OsKeyStore::open(&self.store, &self.backend, &self.backend).unwrap();
+        let keys = OsKeyStore::open(&self.store, &self.backend, &self.backend, COMPUTER).unwrap();
         let c = clock();
         let a = Adapter::test_mode(
             &self.l.root,
@@ -1678,7 +1678,7 @@ impl Rehearsal {
     fn auth(&self, f: &Fx, action: Action, from: Option<&str>) -> Auth {
         let a = make_approval(f, action, from, COMPUTER, t0());
         let v = verified(f, &a, action, from, COMPUTER, t0());
-        let keys = OsKeyStore::open(&self.store, &self.backend, &self.backend).unwrap();
+        let keys = OsKeyStore::open(&self.store, &self.backend, &self.backend, COMPUTER).unwrap();
         let dev = device_trust::issue_with(
             &a,
             &f.valid.recipe().artifact.sha256,
@@ -1922,7 +1922,7 @@ fn the_rehearsal_cannot_authorize_the_production_adapter_and_a_wrong_device_appr
     let before = r.tree();
     // the production adapter refuses everything, whatever approval it is shown
     let auth = r.auth(&r.l.v1, Action::Install, None);
-    let keys = OsKeyStore::open(&r.store, &r.backend, &r.backend).unwrap();
+    let keys = OsKeyStore::open(&r.store, &r.backend, &r.backend, COMPUTER).unwrap();
     let c = clock();
     let prod = Adapter::production(
         &r.l.root,
@@ -1942,4 +1942,47 @@ fn the_rehearsal_cannot_authorize_the_production_adapter_and_a_wrong_device_appr
     assert!(matches!(wrong, Err(TxnError::Refused(_))), "{wrong:?}");
     assert_eq!(r.l.active(), None);
     assert_eq!(r.l.files("receipts").len(), 0);
+}
+
+// ---- Phase 3D-1 closure: the future notice sidecar, tested with SYNTHETIC files only -------------------------------------------------
+
+#[test]
+fn a_synthetic_notice_sidecar_is_never_deleted_adopted_or_ignored_and_blocks_destructive_operations_until_the_adapter_owns_it() {
+    let l = lab();
+    l.install(&l.v1, None).unwrap();
+    // a made-up notice file beside the installed artifact (NOT a real licence text; nothing third-party is involved)
+    let sidecar = l.p(&format!("versions/{TOOL}/1.0.0/NOTICE.txt"));
+    let notice = b"SYNTHETIC notice text for a test: not a licence";
+    fs::write(&sidecar, notice).unwrap();
+    let artifact_before = fs::read(installed(&l)).unwrap();
+    // reported, never adopted: repeating the install is refused instead of calling the folder "installed", and nothing is consumed or changed
+    assert_refused_without_touching(&l, "installed_folder_has_unexpected_entries");
+    // uninstalling is refused BEFORE anything moves
+    let tree_before = snapshot(&l).0;
+    assert_eq!(refused(l.uninstall(&l.v1, None)), "unrecognised_installed_content");
+    let tree_after = snapshot(&l).0;
+    let without_journal = |t: &std::collections::BTreeMap<String, Vec<u8>>| {
+        t.iter().filter(|(k, _)| !k.starts_with("journal/")).map(|(k, v)| (k.clone(), v.clone())).collect::<Vec<_>>()
+    };
+    assert_eq!(
+        without_journal(&tree_before),
+        without_journal(&tree_after),
+        "apart from journal records of the refused attempt, the managed root is byte-identical"
+    );
+    assert_eq!(fs::read(&sidecar).unwrap(), notice);
+    assert_eq!(fs::read(installed(&l)).unwrap(), artifact_before);
+    assert_eq!(l.active().as_deref(), Some("1.0.0"));
+    l.assert_clean();
+    // an update to a NEW version works and leaves the old version folder, with its stray file, completely alone
+    assert!(l.update(&l.v2, "1.0.0", None).is_ok());
+    assert_eq!(fs::read(&sidecar).unwrap(), notice, "kept for rollback with the old version, byte for byte");
+    // ... but the stray file still blocks uninstalling until the OWNER removes it: the adapter never deletes what it did not create
+    assert_eq!(refused(l.uninstall(&l.v2, None)), "unrecognised_installed_content");
+    assert_eq!(fs::read(&sidecar).unwrap(), notice);
+    assert_eq!(l.active().as_deref(), Some("2.0.0"));
+    l.assert_clean();
+    l.outside_is_untouched_but_data();
+    // the owner removes it by hand; the normal operations work again
+    fs::remove_file(&sidecar).unwrap();
+    assert!(l.uninstall(&l.v2, None).is_ok());
 }

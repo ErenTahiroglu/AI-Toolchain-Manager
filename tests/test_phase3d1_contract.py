@@ -120,7 +120,7 @@ class Documents(unittest.TestCase):
 
     def test_links_in_the_new_documents_resolve(self):
         link = re.compile(r"\]\(([^)]+)\)")
-        files = [ROOT / "docs" / "PHASE-3D1.md", *sorted(D1.glob("*.md"))]
+        files = [ROOT / "docs" / "PHASE-3D1.md", ROOT / "docs" / "PHASE-3D1-CLOSURE.md", *sorted(D1.glob("*.md"))]
         for f in files:
             for target in link.findall(f.read_text(encoding="utf-8")):
                 target = unquote(target.split("#", 1)[0])
@@ -153,6 +153,90 @@ class Documents(unittest.TestCase):
 
 def a_sha():
     return WIN_SHA
+
+
+class ClosureRedTeam(unittest.TestCase):
+    """Phase 3D-1 closure (Issue #20): the documents and the invariants the Red Team asked for, checked independently of the Rust tests."""
+
+    SRC = ROOT / "src-tauri" / "src"
+
+    def text(self, *parts):
+        return ROOT.joinpath(*parts).read_text(encoding="utf-8")
+
+    def production_sources(self):
+        return [p for p in self.SRC.rglob("*.rs") if not p.name.endswith("_tests.rs") and p.name != "tests.rs"]
+
+    def test_option_b_exists_but_nothing_in_production_code_uses_it(self):
+        users = [p.name for p in self.production_sources() if "pilot_candidate_os_reported_hardware" in p.read_text(encoding="utf-8")]
+        self.assertEqual(users, ["device_trust.rs"], "only its definition may mention it")
+        trust = self.text("src-tauri", "src", "device_trust.rs")
+        prod = trust.split("pub const fn production() -> TrustPolicy {")[1].split("}")[0]
+        self.assertIn("accept_fakes: false", prod)
+        self.assertIn("accept_os_reported_hardware: false", prod)
+        self.assertIn("require_atomic_book: true", prod)
+
+    def test_no_real_backend_can_claim_verified_hardware_or_offers_a_verifier(self):
+        hello = self.text("src-tauri", "src", "os_hello.rs")
+        for needle in ["HardwareVerified", "AttestationVerifier", "fn attestation_verifier", "Assurance::Fake"]:
+            self.assertNotIn(needle, hello, needle)
+        approval = self.text("src-tauri", "src", "os_approval.rs")
+        self.assertNotIn("impl AttestationVerifier for", approval.split("pub mod fakes")[0])
+
+    def test_authority_is_never_read_from_the_database_label_alone(self):
+        approval = self.text("src-tauri", "src", "os_approval.rs")
+        for needle in ["established_assurance", "approval_assurance_exceeds_established", "approval_attestation_evidence_changed", "bind_attestation", "recorded.rank() > established.rank()"]:
+            self.assertIn(needle, approval, needle)
+        self.assertNotIn("Assurance::parse(&rec.assurance).map(", approval)
+
+    def test_issuance_and_consumption_are_single_store_transactions_with_their_journal_rows(self):
+        store = self.text("src-tauri", "src", "approval_store.rs")
+        for needle in ["fn record_issue_audited", "fn consume_audited", "verify_chain_on(&tx)", "journal_counts(&tx", "fn finish(", "TransactionBehavior::Immediate"]:
+            self.assertIn(needle, store, needle)
+        trust = self.text("src-tauri", "src", "device_trust.rs")
+        authorize = trust.split("pub fn authorize(")[1]
+        self.assertIn("ledger.consume_audited(", authorize)
+        self.assertNotIn('audit.record(rec("approval_use", "authorized", None))', authorize, "the success row is never written before the consumption")
+        self.assertNotIn("ledger.record_issue(&approval.approval_id", trust.split("pub fn issue_with(")[1].split("/// What the operation actually is")[0])
+
+    def test_the_new_documents_state_decisions_limits_and_the_unexercised(self):
+        tm = self.text("docs", "phase-3d1", "WINDOWS-HELLO-THREAT-MODEL.md")
+        for needle in ["RequestSignAsync", "no parameter", "PSS", "Option B", "activated", "same Windows user", "P6", "P7", "blind signing", "Test-only enrollment checklist", "Cleanup", "three times", "abort",
+                       "not documented as supported", "does **not** add"]:
+            self.assertIn(needle, tm, needle)
+        for url in ["learn.microsoft.com/en-us/uwp/api/windows.security.credentials.keycredential.requestsignasync", "learn.microsoft.com/en-us/uwp/api/windows.security.credentials.keycredentialmanager"]:
+            self.assertIn(url, tm)
+        q = self.text("docs", "phase-3d1", "LICENSE-Q1-Q3-RESOLUTION-PROPOSAL.md")
+        for needle in ["LICENSE_CONDITIONAL", "Unicode License V3", "libssp", "Q1", "Q2", "Q3", "not legal advice", "stays `unknown`", "sidecar", "Not implemented"]:
+            self.assertIn(needle, q, needle)
+
+    def test_the_unicode_licence_and_the_libssp_finding_are_stored_and_bundled(self):
+        uni = (LIC / "unicode-license-v3.txt").read_text(encoding="utf-8").strip()
+        self.assertTrue(uni.startswith("UNICODE LICENSE V3"))
+        self.assertIn("provided that either (a)", uni.replace("\n", " "))
+        draft = (D1 / "THIRD-PARTY-NOTICES.jq-1.8.2.windows-x64.DRAFT.txt").read_text(encoding="utf-8")
+        self.assertIn(uni, draft)
+        self.assertIn(f"SHA-256 {sha(LIC / 'unicode-license-v3.txt')}", draft)
+        self.assertIn("libssp", draft)
+        add = json.loads((LIC / "pe-static-addendum.json").read_text(encoding="utf-8"))
+        self.assertGreaterEqual(add["markers"]["libssp (GCC stack-protector runtime) message"]["occurrences"], 1)
+        self.assertEqual(add["markers"]["getopt"]["occurrences"], 0)
+        man = json.loads((LIC / "evidence-manifest.json").read_text(encoding="utf-8"))
+        for f in man["files"]:
+            self.assertEqual(sha(LIC / f["file"]), f["sha256"], f["file"])
+        self.assertIn("unicode-license-v3.txt", {f["file"] for f in man["files"]})
+
+    def test_the_flaky_test_investigation_is_documented_with_its_limits_and_the_closure_with_its_prerequisites(self):
+        f = self.text("docs", "phase-3d1", "FLAKY-LIFECYCLE-TEST.md")
+        for needle in ["without assuming antivirus", "first failing observation", "not proven", "never deleted", "none weakened", "Not established", "ARTIFACT.BIN.PART.tmp", "raw_os_error=Some(5)"]:
+            self.assertIn(needle, f, needle)
+        c = self.text("docs", "PHASE-3D1-CLOSURE.md")
+        for needle in ["898943bf3155e239289156004f279e4e238d510e", "RT-3D1-01", "RT-3D1-02", "disabled candidate", "Prerequisites for a SEPARATELY user-authorised", "Still missing before ANY real jq installation", "LICENSE_CONDITIONAL"]:
+            self.assertIn(needle, c, needle)
+
+    def test_the_recipe_licence_is_still_not_accepted(self):
+        recipe = json.loads((D1 / "jq-1.8.2-windows-x64.recipe.draft.json").read_text(encoding="utf-8"))
+        self.assertEqual(recipe["recipe"]["license"]["state"], "unknown")
+        self.assertEqual(recipe["review"]["state"], "draft")
 
 
 @unittest.skipUnless(SELFCHECK and pathlib.Path(SELFCHECK).is_file(), "ATM_SELFCHECK_JSON not provided; Rust self-check output not available")
