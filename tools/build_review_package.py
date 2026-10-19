@@ -148,7 +148,7 @@ def main():
         ],
     }
     if a.dev_report:
-        rp = Path(a.dev_report)
+        rp = Path(a.dev_report).resolve()
         d = json.loads(rp.read_text(encoding="utf-8"))
         pkg["devRun"] = {
             "report": str(rp.relative_to(ROOT)).replace("\\", "/"),
