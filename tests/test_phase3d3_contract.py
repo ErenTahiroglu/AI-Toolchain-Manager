@@ -21,7 +21,8 @@ def text(path):
 
 
 def sha(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    # hash of the committed (LF) form of a text file, whatever the working copy's line endings are
+    return hashlib.sha256(Path(path).read_bytes().replace(bytes([13, 10]), bytes([10]))).hexdigest()
 
 
 def production(name):

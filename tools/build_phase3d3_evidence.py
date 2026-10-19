@@ -39,7 +39,8 @@ SPDX = "LicenseRef-jq-1.8.2-win-x64"
 
 
 def sha(rel):
-    return hashlib.sha256((ROOT / rel).read_bytes()).hexdigest()
+    # the repository stores text as LF (.gitattributes), whatever a working copy looks like: the recorded hash is of the committed form
+    return hashlib.sha256((ROOT / rel).read_bytes().replace(bytes([13, 10]), bytes([10]))).hexdigest()
 
 
 def write(path, obj):

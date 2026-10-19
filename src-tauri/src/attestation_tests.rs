@@ -50,7 +50,14 @@ fn root() -> std::path::PathBuf {
 }
 
 fn sha_of(rel: &str) -> String {
-    let bytes = std::fs::read(root().join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"));
+    // the committed (LF) form of a text file, whatever the working copy's line endings are
+    let raw = std::fs::read(root().join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"));
+    let mut bytes = Vec::with_capacity(raw.len());
+    for (i, b) in raw.iter().enumerate() {
+        if !(*b == 13 && raw.get(i + 1) == Some(&10)) {
+            bytes.push(*b);
+        }
+    }
     Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
