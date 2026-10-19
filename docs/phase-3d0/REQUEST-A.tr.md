@@ -35,6 +35,13 @@ Asistanın scratch klasörü altında yeni bir oturum klasörü (depo dışında
 
 Yayımlama **atomik ve üzerine yazmaz**: doğrulanmış dosya önce hedef klasörde benzersiz adlı bir geçici dosyada bekler, sonra sert bağlantıyla (hard link) son adına yayımlanır; o ada ait herhangi bir şey (dosya, klasör, sembolik bağ) varsa — az önce oluşmuş olsa bile — işletim sistemi reddeder ve hiçbir şey ezilmez. Klasörün dosya sistemi bunu desteklemiyorsa ağa bağlanmadan önce işlem reddedilir. Yalnızca aracın kendi oluşturduğu dosyalar silinir; bilinmeyen içerik korunur.
 
+## 4b. Birinci uygulamadan sonra düzeltmeler (Issue #19)
+- **Ağ:** GitHub CLI'nin çevrimiçi doğrulaması onaylı listede olmayan `tmaproduction.blob.core.windows.net` adresine (GitHub'ın Azure üzerindeki kanıt paketi depolaması) bağlandı. Bu bağlantı **yetkisizdi, geriye dönük olarak da onaylanmadı** ve host listeye eklenmedi. Ayrıntı: [REQUEST-A-NETWORK-INCIDENT.md](REQUEST-A-NETWORK-INCIDENT.md).
+- **Varsayılan artık çevrimdışı:** saklı paketle yeniden doğrulama hiçbir hosta bağlanmaz. Yalnızca güven kökü yenilemesi (iki TUF hostu) ağ kullanır ve `tools/egress_guard.py` (varsayılan olarak her şeyi reddeden yerel koruma) arkasında çalışır: izin listesinde olmayan her deneme bağlantı kurulmadan reddedilir ve olay sayılır (çıkış kodu 97). Çevrimiçi kontrol ancak **ayrı ve açık bir yetkiyle** (her host adıyla) yapılabilir. Koruma bir güvenlik duvarı değildir; proxy ayarını yok sayan bir program durdurulamaz — bu yüzden çevrimdışı yol tercih edilir.
+- **Paket biçimi:** `tools/extract_sigstore_bundles.py` saklı API yanıtından her paketi bayt bayt aynen çıkarır (yeniden yazmaz).
+- **GPG:** Windows'ta Git'in GnuPG'si için `GNUPGHOME` POSIX yazımıyla (`/c/Users/...`) verilir; `gpg --version` çıktısındaki `Home:` satırı doğrulanır. Açık anahtar içe aktarırken görülen `gpg-agent` başlatma hatası (çıkış 2) yalnızca anahtarın gerçekten içe aktarıldığı (IMPORT_OK) kanıtlanırsa kabul edilir. Araç kullanım hataları ile kriptografik hatalar ayrılır; beklenmeyen her hata başarısız sayılır.
+- **Raporlama:** altı ayrı bilgi: kriptografik doğrulama, tam bayt eşleşmesi, resmî doğrulayıcı, ağ politikasına uyum, kurulum yetkisi (hep hayır), çalıştırma yetkisi (hep hayır). Yapılan oturum için ağ politikasına uyum **kalıcı olarak hayır** diye kayıtlıdır.
+
 ## 5. Kanıt saklama
 Oturum klasörünün **tamamı Red Team incelemesine kadar saklanır, otomatik silinmez** (aksini siz istemedikçe): iki dosya, sabit metinler, indirme günlüğü (hostlar), taze güven kökü, tüm doğrulama çıktıları, anahtarlık listesi, oybirliği sonucu. Dosyaların SHA-256 listesi depoya yazılır (ikililer değil). Mevcut yedeklere dokunulmaz.
 

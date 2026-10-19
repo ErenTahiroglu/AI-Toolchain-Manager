@@ -18,6 +18,18 @@ Reviewer tooling for a FUTURE, separately authorised download-and-verify session
 Rule: the official verifier is the authority for the attestation; the custom verifier is supporting evidence; if they DISAGREE the
 session FAILS. A missing or malformed input FAILS. Nothing here can promote a digest to an authenticated reference: that stays a
 reviewed code change after the Red Team has accepted the report.
+
+REPORTING MODEL (Request A closure, Issue #19). The 151-style check list is CRYPTOGRAPHIC AND CONSISTENCY evidence only. The verdict
+keeps six facts apart and never folds one into another:
+  artifact_crypto_verified  official verifier + supporting verifier + GPG all passed and AGREE
+  exact_bytes_verified      size, SHA-256, publisher checksum list and pinned text inputs equal the pins
+  official_verifier_passed  the maintained GitHub CLI passed (online record and offline replay)
+  network_policy_compliant  every network contact was inside the approved list AND is documented by a --network-report; a missing or
+                            unreadable report, any incident or any unlisted host makes it False (unknown is non-compliant)
+  installation_authorized   always False here: only a separate explicit user authorisation can change that, never this tool
+  execution_authorized      always False here, same reason
+Exit status: 0 = everything consistent AND network-compliant; 1 = a cryptographic/consistency check failed; 3 = consistent but the
+network policy was violated or cannot be shown to have been kept (the evidence stays usable, the session is NOT compliant).
 """
 
 import hashlib
@@ -49,16 +61,25 @@ PINS = {
     },
     # hosts that may be contacted by the download session itself (the TUF/Sigstore hosts of the GitHub CLI are reported separately)
     "allowedDownloadHosts": ["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com", "raw.githubusercontent.com"],
+    # every host the approved Request A policy names (download hosts + the GitHub CLI's API and TUF hosts); anything else is a violation.
+    # tmaproduction.blob.core.windows.net is deliberately NOT here: it was contacted without authorisation (Issue #19) and is not added.
+    "approvedNetworkHosts": ["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com", "raw.githubusercontent.com",
+                             "api.github.com", "tuf-repo-cdn.sigstore.dev", "tuf-repo.github.com"],
 }
 
 
 class Review:
     def __init__(self):
         self.checks = []
+        self.group = "bytes"
 
     def ok(self, name, cond, detail=""):
-        self.checks.append({"check": name, "ok": bool(cond), "detail": str(detail)[:300]})
+        self.checks.append({"check": name, "ok": bool(cond), "detail": str(detail)[:300], "group": self.group})
         return bool(cond)
+
+    def group_ok(self, *groups):
+        picked = [c for c in self.checks if c["group"] in groups]
+        return bool(picked) and all(c["ok"] for c in picked)
 
     @property
     def passed(self):
@@ -108,6 +129,7 @@ CERT_EXPECT = {
 
 
 def review_gh(r, name, pins, session, tag="gh"):
+    r.group = "official"
     label = "online" if tag == "gh" else "offline replay"
     exitcode = read_text(os.path.join(session, f"{name}.{tag}.exit"))
     exit_ok = r.ok(f"{name}: the GitHub CLI verification ({label}) exited 0", exitcode is not None and exitcode.strip() == "0", exitcode)
@@ -141,6 +163,7 @@ def review_gh(r, name, pins, session, tag="gh"):
 
 
 def review_custom(r, name, pins, session):
+    r.group = "supporting"
     c = read_json(os.path.join(session, name + ".custom.json"))
     art = pins["artifacts"][name]
     if not isinstance(c, dict):
@@ -165,7 +188,22 @@ def review_custom(r, name, pins, session):
     return all(results)
 
 
+def classify_gpg_status(status_text, stderr_text=""):
+    """Separates a TOOL-INVOCATION error from a CRYPTOGRAPHIC failure. Only a clearly environmental cause is an invocation error
+    (the keyring folder could not be opened, so no signature was ever checked); everything else that is not a clean pass is a
+    cryptographic failure and stays fail-closed (including BADSIG, EXPKEYSIG, REVKEYSIG, a signature by another key, no signature)."""
+    lines = [l for l in status_text.splitlines() if l.startswith("[GNUPG:] ")]
+    names = {l.split()[1] for l in lines if len(l.split()) > 1}
+    if "VALIDSIG" in names and "GOODSIG" in names and not names & {"BADSIG", "ERRSIG", "EXPKEYSIG", "REVKEYSIG", "EXPSIG", "NO_PUBKEY"}:
+        return "ok"
+    environmental = ("keyblock resource" in stderr_text and "No such file" in stderr_text) or "directory does not exist" in stderr_text
+    if environmental and names <= {"ERRSIG", "NO_PUBKEY", "NEWSIG"}:
+        return "invocation_error"
+    return "cryptographic_failure"
+
+
 def review_gpg(r, name, pins, session):
+    r.group = "gpg"
     status = read_text(os.path.join(session, name + ".gpg.status")) or ""
     fpr = pins["gpgFingerprint"]
     lines = [l for l in status.splitlines() if l.startswith("[GNUPG:] ")]
@@ -179,18 +217,21 @@ def review_gpg(r, name, pins, session):
 
 def review(session, pins=PINS):
     r = Review()
+    r.group = "bytes"
     # -- the pinned text inputs are exactly the pinned bytes
     for fname, want in pins["pinnedText"].items():
         p = os.path.join(session, "pinned", fname)
         r.ok(f"pinned file {fname} has the pinned SHA-256", os.path.isfile(p) and sha256_file(p) == want)
     listing = read_text(os.path.join(session, "pinned", "sha256sum.txt")) or ""
     # -- the isolated keyring holds exactly the pinned primary key
+    r.group = "gpg"
     colons = read_text(os.path.join(session, "keyring.colons")) or ""
     rows = colons.splitlines()
     primaries = [rows[i + 1].split(":")[9] for i, l in enumerate(rows[:-1]) if l.startswith("pub:") and rows[i + 1].startswith("fpr:")]
     r.ok("the isolated keyring contains exactly one primary key and it is the pinned fingerprint", primaries == [pins["gpgFingerprint"]], primaries)
     r.ok("the keyring has no second certificate", sum(1 for l in rows if l.startswith("pub:")) == 1)
-    # -- download log: hosts
+    # -- download log: hosts (the download tool's own hops only; the GitHub CLI's traffic is judged by --network-report)
+    r.group = "network"
     hosts, sessions_ok = set(), True
     log_text = read_text(os.path.join(session, "fetch.log")) or ""
     for line in log_text.splitlines():
@@ -205,6 +246,7 @@ def review(session, pins=PINS):
     r.ok("every download hop used https and an allowed host", sessions_ok and bool(log_text), sorted(hosts))
     # -- per artifact
     for name, art in pins["artifacts"].items():
+        r.group = "bytes"
         path = os.path.join(session, "artifacts", name, name)  # each downloaded file lives alone in its own new folder
         present = os.path.isfile(path)
         r.ok(f"{name}: the downloaded file exists", present)
@@ -215,21 +257,106 @@ def review(session, pins=PINS):
         r.ok(f"{name}: SHA-256 equals the pinned value", digest == art["sha256"], digest)
         r.ok(f"{name}: SHA-256 appears in the pinned publisher checksum list", re.search(rf"^{art['sha256']}\s+\*?{re.escape(name)}\s*$", listing, re.M) is not None)
         r.ok(f"{name}: the file has no execute permission", os.name == "nt" or (os.stat(path).st_mode & 0o111) == 0)
-        gh_ok = review_gh(r, name, pins, session, "gh")
+        # the OFFLINE replay is mandatory; the ONLINE record is optional (it needs hosts that must be separately authorised) but, if any
+        # part of it is present, all of it must pass
+        online_present = any(os.path.exists(os.path.join(session, f"{name}.gh.{ext}")) for ext in ("exit", "json"))
+        if online_present:
+            gh_ok = review_gh(r, name, pins, session, "gh")
+        else:
+            r.group = "official"
+            r.ok(f"{name}: no online verification record (offline replay only; informational)", True)
+            gh_ok = True
         gh_ok = review_gh(r, name, pins, session, "gh-offline") and gh_ok
         custom_ok = review_custom(r, name, pins, session)
+        r.group = "consensus"
         r.ok(f"{name}: the maintained verifier and the supporting verifier AGREE (both passed)", gh_ok and custom_ok, f"gh={gh_ok} custom={custom_ok}")
         review_gpg(r, name, pins, session)
     return r
 
 
+def tool_invocation_errors(session):
+    """Files of earlier attempts that failed for tool-usage reasons and were kept (named *attempt*). Informational: they never make a
+    session pass or fail by themselves; the verification that counts is the separate clean run reviewed above."""
+    found = []
+    try:
+        names = sorted(os.listdir(session))
+    except OSError:
+        return found
+    for n in names:
+        if "attempt" in n and os.path.isfile(os.path.join(session, n)):
+            found.append({"file": n, "bytes": os.path.getsize(os.path.join(session, n))})
+    return found
+
+
+def evaluate_network_report(report, pins=PINS):
+    """(compliant, reasons). `report` is the JSON an egress guard run writes, or a hand-written incident record of the same shape:
+    {"schema":1, "guard":{"used":bool}, "contactedHosts":[{"host":..,"how":"observed|inferred|expected"}], "incidents":[...]}.
+    Unknown, unreadable or incomplete input is NON-compliant."""
+    if not isinstance(report, dict) or report.get("schema") != 1:
+        return False, ["network report missing, unreadable or of an unknown schema"]
+    reasons = []
+    incidents = report.get("incidents")
+    contacted = report.get("contactedHosts")
+    if not isinstance(incidents, list) or not isinstance(contacted, list):
+        return False, ["network report lacks incidents/contactedHosts lists"]
+    if incidents:
+        reasons.append(f"{len(incidents)} recorded incident(s)")
+    for h in contacted:
+        host = h.get("host") if isinstance(h, dict) else None
+        if host not in pins["approvedNetworkHosts"]:
+            reasons.append(f"host outside the approved list: {host}")
+    if not (report.get("guard") or {}).get("used"):
+        reasons.append("no egress guard was used, so compliance of the GitHub CLI traffic cannot be shown")
+    return not reasons, reasons
+
+
+def summarize(r, network_report=None, session=None, pins=PINS):
+    net_ok, reasons = evaluate_network_report(network_report, pins)
+    hops_ok = r.group_ok("network")
+    if not hops_ok:
+        reasons.append("a download hop used a non-https scheme or an unlisted host")
+    official = r.group_ok("official")
+    summary = {
+        "artifact_crypto_verified": r.group_ok("official", "supporting", "gpg", "consensus"),
+        "exact_bytes_verified": r.group_ok("bytes"),
+        "official_verifier_passed": official,
+        "online_check_performed": all(any(os.path.exists(os.path.join(session, f"{n}.gh.{e}")) for e in ("exit", "json")) for n in pins["artifacts"]) if session else None,
+        "network_policy_compliant": bool(net_ok and hops_ok),
+        "network_policy_findings": reasons,
+        "installation_authorized": False,
+        "execution_authorized": False,
+        "toolInvocationErrors": tool_invocation_errors(session) if session else [],
+    }
+    if not r.passed:
+        summary["overall"] = "FAIL_CHECKS"
+    elif not summary["network_policy_compliant"]:
+        summary["overall"] = "CRYPTO_CONSISTENT_BUT_NETWORK_POLICY_NOT_COMPLIANT"
+    else:
+        summary["overall"] = "VERIFIED_AND_COMPLIANT_NOT_AUTHORIZED_FOR_INSTALL_OR_EXECUTION"
+    return summary
+
+
+def exit_status(checks_passed, summary):
+    """0 = consistent and network-compliant; 1 = a check failed; 3 = consistent but the network policy was violated or is unproven."""
+    if not checks_passed:
+        return 1
+    return 0 if summary["network_policy_compliant"] else 3
+
+
 def main():
-    if len(sys.argv) != 2:
-        print("usage: review_jq_verification.py <session-folder>", file=sys.stderr)
+    args = sys.argv[1:]
+    report_path = None
+    if len(args) == 3 and args[1] == "--network-report":
+        report_path = args[2]
+        args = args[:1]
+    if len(args) != 1:
+        print("usage: review_jq_verification.py <session-folder> [--network-report <file>]", file=sys.stderr)
         return 2
-    r = review(sys.argv[1])
-    print(json.dumps({"ok": r.passed, "failed": [c for c in r.checks if not c["ok"]], "checks": r.checks}, indent=2))
-    return 0 if r.passed else 1
+    r = review(args[0])
+    summary = summarize(r, read_json(report_path) if report_path else None, args[0])
+    print(json.dumps({"ok": r.passed, "ok_means": "cryptographic and consistency checks only; see summary for network compliance", "summary": summary,
+                      "failed": [c for c in r.checks if not c["ok"]], "checks": r.checks}, indent=2))
+    return exit_status(r.passed, summary)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "record": "Permanent record of the Request A network-policy incident (Issue #19). Never to be removed or rewritten; corrections are appended as new records.",
+  "session": "<scratch>/jq-review-20261018T2240Z",
+  "guard": {
+    "used": false,
+    "note": "The first online `gh attestation verify` ran WITHOUT any egress guard. The guard (tools/egress_guard.py) was created afterwards, in the Request A closure."
+  },
+  "contactedHosts": [
+    {"host": "raw.githubusercontent.com", "how": "observed", "by": "tools/fetch_pinned.py log (fetch.log.txt)"},
+    {"host": "github.com", "how": "observed", "by": "tools/fetch_pinned.py log (fetch.log.txt)"},
+    {"host": "release-assets.githubusercontent.com", "how": "observed", "by": "tools/fetch_pinned.py log (fetch.log.txt)"},
+    {"host": "api.github.com", "how": "observed", "by": "logging proxy re-run (proxy-observation-hosts.log.txt); the first unproxied run is inferred to have done the same"},
+    {"host": "tuf-repo-cdn.sigstore.dev", "how": "observed", "by": "logging proxy re-run (proxy-observation-hosts.log.txt); the first unproxied run is inferred to have done the same"},
+    {"host": "tuf-repo.github.com", "how": "observed", "by": "logging proxy re-run (proxy-observation-hosts.log.txt); the first unproxied run is inferred to have done the same"},
+    {"host": "tmaproduction.blob.core.windows.net", "how": "observed", "by": "the proxy re-run observed the GitHub CLI ATTEMPTING it (8 refused CONNECT requests, never tunnelled); that the first unproxied run really connected is INFERRED from the fact that it succeeded and produced the bundle, not observed"}
+  ],
+  "incidents": [
+    {
+      "id": "REQUEST-A-NET-001",
+      "type": "unlisted_host_contacted",
+      "host": "tmaproduction.blob.core.windows.net",
+      "step": "gh attestation verify (online form), first run, both files",
+      "authorised": false,
+      "discoveredBy": "the assistant, by re-running the same command through a local deny-by-default logging proxy after noticing bundle_url (an Azure blob address with a signed query) in the stored attestations API response and an empty bundle_url in the CLI output",
+      "disposition": "reported to the user and the Red Team; the host was NOT added to any list; not accessed again; a guard was designed so a future unlisted host is refused before connection"
+    }
+  ],
+  "authorisationRetroactive": false
+}

@@ -1,0 +1,4 @@
+Integrity re-check of the retained verification session (Request A closure, Issue #19), read-only.
+Method: every file listed in session-sha256.txt was re-hashed in the kept session folder; the folder was scanned for added files (the isolated gnupg keyring folder is excluded from the listing).
+Result: 54 files listed, 54 present, 0 changed, 0 missing, 0 added.
+The binaries, the original bundle files, the failed-attempt records, the proxy log and every verification output are exactly as at the time of the listing. Nothing in the session was modified, deleted or re-created by the closure; the closure replay used its own separate folder.

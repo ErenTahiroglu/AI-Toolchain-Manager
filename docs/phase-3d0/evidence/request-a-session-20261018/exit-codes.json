@@ -1,0 +1,85 @@
+{
+  "schema": 1,
+  "note": "Actual exit codes. 'sessionFile' values are read from files kept in the session; 'console' values come from the assistant's tool output at the time and were not stored as files.",
+  "downloads (tools/fetch_pinned.py, 4 text files + 2 executables)": {
+    "exit": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "source": "console"
+  },
+  "gh attestation trusted-root": {
+    "exit": 0,
+    "source": "console"
+  },
+  "gh attestation verify, online, jq-windows-amd64.exe": {
+    "exit": 0,
+    "source": "sessionFile"
+  },
+  "gh attestation verify, online, jq-macos-arm64": {
+    "exit": 0,
+    "source": "sessionFile"
+  },
+  "gh attestation verify, offline attempt 1 (API wrapper passed as --bundle), both files": {
+    "exit": [
+      1,
+      1
+    ],
+    "class": "tool_invocation_error",
+    "message": "bundle content could not be parsed: unknown field \"attestations\"",
+    "source": "sessionFile"
+  },
+  "gh attestation verify, offline replay (extracted bundles), both files": {
+    "exit": [
+      0,
+      0
+    ],
+    "source": "sessionFile"
+  },
+  "gpg --import, attempt 1 (Windows-style GNUPGHOME)": {
+    "exit": 2,
+    "class": "tool_invocation_error",
+    "cause": "GnuPG built for Git-for-Windows read the Windows path as a relative path: 'keyblock resource ... No such file or directory'",
+    "source": "console"
+  },
+  "gpg --verify, attempt 1, both files": {
+    "exit": [
+      2,
+      2
+    ],
+    "class": "tool_invocation_error",
+    "status": "ERRSIG + NO_PUBKEY because no keyring existed",
+    "source": "console"
+  },
+  "gpg --import, retry (POSIX-style GNUPGHOME)": {
+    "exit": 2,
+    "class": "tolerated_only_because_the_key_was_imported",
+    "message": "gpg: error running '/usr/bin/gpg-agent': exit status 2 ... imported: 1",
+    "source": "console"
+  },
+  "gpg --verify, retry, both files": {
+    "exit": [
+      0,
+      0
+    ],
+    "source": "console"
+  },
+  "gh attestation verify, online form, re-run through the logging proxy (windows file)": {
+    "exit": 1,
+    "class": "policy_refusal",
+    "message": "failed to fetch bundle with URL ... Forbidden (the proxy refused the unlisted host)",
+    "source": "console"
+  },
+  "gh attestation verify, offline replay under the logging proxy, both files": {
+    "exit": [
+      0,
+      0
+    ],
+    "networkConnections": 0,
+    "source": "console"
+  }
+}

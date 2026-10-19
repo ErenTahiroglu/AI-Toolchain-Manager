@@ -1,0 +1,1 @@
+error creating Sigstore verifier: no valid Sigstore verifiers could be initialized

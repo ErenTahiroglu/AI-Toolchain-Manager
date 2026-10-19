@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "note": "Offline replay with BYTE-EXACT bundles (tools/extract_sigstore_bundles.py) behind an empty-allowlist egress guard. No network was used. Compared with the offline outputs of the original session.",
+  "files": {
+    "jq-windows-amd64.exe": {
+      "extractedBundleFileSha256": "946ee950d8360af9e2fb885c6a6fecc738b77920b7ae6792e0ddd64adbd97098",
+      "sessionBundleFileSha256 (earlier, re-serialised by json.dumps)": "296ed9401659c2bb5354e0e9d8d5a810eb6b8407937687653f04c22a64924055",
+      "bundleFilesByteIdentical": false,
+      "ghOfflineOutputSha256": "2acf6875c9eaa273f7022dc76e5ba747ca05adf4cf6a9338a0085588d6586196",
+      "sessionGhOfflineOutputSha256": "2acf6875c9eaa273f7022dc76e5ba747ca05adf4cf6a9338a0085588d6586196",
+      "ghOfflineOutputIdenticalToSession": true,
+      "guardIncidents": [],
+      "guardContactedHosts": []
+    },
+    "jq-macos-arm64": {
+      "extractedBundleFileSha256": "630e0416466ae423438f7199e004c3e724f44c8e8f3ead4d1c5c5697ce34130a",
+      "sessionBundleFileSha256 (earlier, re-serialised by json.dumps)": "de882923360a012225aefe492ad4aede65263294238b5fe58ce1bc3f162582f3",
+      "bundleFilesByteIdentical": false,
+      "ghOfflineOutputSha256": "8adfa84512c4e6e3c516e4ec1a51fb86d8fa9bab4ba43a0ce18968c65f3ffbb5",
+      "sessionGhOfflineOutputSha256": "8adfa84512c4e6e3c516e4ec1a51fb86d8fa9bab4ba43a0ce18968c65f3ffbb5",
+      "ghOfflineOutputIdenticalToSession": true,
+      "guardIncidents": [],
+      "guardContactedHosts": []
+    }
+  }
+}

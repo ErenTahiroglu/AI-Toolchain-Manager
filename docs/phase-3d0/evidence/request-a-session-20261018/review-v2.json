@@ -1,0 +1,978 @@
+{
+  "ok": true,
+  "ok_means": "cryptographic and consistency checks only; see summary for network compliance",
+  "summary": {
+    "artifact_crypto_verified": true,
+    "exact_bytes_verified": true,
+    "official_verifier_passed": true,
+    "online_check_performed": true,
+    "network_policy_compliant": false,
+    "network_policy_findings": [
+      "1 recorded incident(s)",
+      "host outside the approved list: tmaproduction.blob.core.windows.net",
+      "no egress guard was used, so compliance of the GitHub CLI traffic cannot be shown"
+    ],
+    "installation_authorized": false,
+    "execution_authorized": false,
+    "toolInvocationErrors": [
+      {
+        "file": "attempt1-winpath-gpg-import.log",
+        "bytes": 898
+      },
+      {
+        "file": "attempt1-winpath-jq-macos-arm64.gpg.err",
+        "bytes": 487
+      },
+      {
+        "file": "attempt1-winpath-jq-macos-arm64.gpg.status",
+        "bytes": 302
+      },
+      {
+        "file": "attempt1-winpath-jq-windows-amd64.exe.gpg.err",
+        "bytes": 487
+      },
+      {
+        "file": "attempt1-winpath-jq-windows-amd64.exe.gpg.status",
+        "bytes": 302
+      },
+      {
+        "file": "attempt1-winpath-keyring.colons",
+        "bytes": 0
+      },
+      {
+        "file": "jq-macos-arm64.gh-offline.attempt1-wrapper-format.err",
+        "bytes": 95
+      },
+      {
+        "file": "jq-macos-arm64.gh-offline.attempt1-wrapper-format.exit",
+        "bytes": 1
+      },
+      {
+        "file": "jq-macos-arm64.gh-offline.attempt1-wrapper-format.json",
+        "bytes": 0
+      },
+      {
+        "file": "jq-windows-amd64.exe.gh-offline.attempt1-wrapper-format.err",
+        "bytes": 95
+      },
+      {
+        "file": "jq-windows-amd64.exe.gh-offline.attempt1-wrapper-format.exit",
+        "bytes": 1
+      },
+      {
+        "file": "jq-windows-amd64.exe.gh-offline.attempt1-wrapper-format.json",
+        "bytes": 0
+      }
+    ],
+    "overall": "CRYPTO_CONSISTENT_BUT_NETWORK_POLICY_NOT_COMPLIANT"
+  },
+  "failed": [],
+  "checks": [
+    {
+      "check": "pinned file jq-windows-amd64.exe.asc has the pinned SHA-256",
+      "ok": true,
+      "detail": "",
+      "group": "bytes"
+    },
+    {
+      "check": "pinned file jq-macos-arm64.asc has the pinned SHA-256",
+      "ok": true,
+      "detail": "",
+      "group": "bytes"
+    },
+    {
+      "check": "pinned file jq-release-new.key has the pinned SHA-256",
+      "ok": true,
+      "detail": "",
+      "group": "bytes"
+    },
+    {
+      "check": "pinned file sha256sum.txt has the pinned SHA-256",
+      "ok": true,
+      "detail": "",
+      "group": "bytes"
+    },
+    {
+      "check": "the isolated keyring contains exactly one primary key and it is the pinned fingerprint",
+      "ok": true,
+      "detail": "['93079A9511EFC0B7D6CDBFB5B0DA60FB454BAF18']",
+      "group": "gpg"
+    },
+    {
+      "check": "the keyring has no second certificate",
+      "ok": true,
+      "detail": "",
+      "group": "gpg"
+    },
+    {
+      "check": "every download hop used https and an allowed host",
+      "ok": true,
+      "detail": "['github.com', 'raw.githubusercontent.com', 'release-assets.githubusercontent.com']",
+      "group": "network"
+    },
+    {
+      "check": "jq-windows-amd64.exe: the downloaded file exists",
+      "ok": true,
+      "detail": "",
+      "group": "bytes"
+    },
+    {
+      "check": "jq-windows-amd64.exe: size is the pinned size",
+      "ok": true,
+      "detail": "1035264",
+      "group": "bytes"
+    },
+    {
+      "check": "jq-windows-amd64.exe: SHA-256 equals the pinned value",
+      "ok": true,
+      "detail": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627",
+      "group": "bytes"
+    },
+    {
+      "check": "jq-windows-amd64.exe: SHA-256 appears in the pinned publisher checksum list",
+      "ok": true,
+      "detail": "",
+      "group": "bytes"
+    },
+    {
+      "check": "jq-windows-amd64.exe: the file has no execute permission",
+      "ok": true,
+      "detail": "",
+      "group": "bytes"
+    },
+    {
+      "check": "jq-windows-amd64.exe: the GitHub CLI verification (online) exited 0",
+      "ok": true,
+      "detail": "0",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: the CLI (online) returned a non-empty structured result",
+      "ok": true,
+      "detail": "",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 0: subject name and SHA-256 are the pinned ones",
+      "ok": true,
+      "detail": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 0: predicate type is SLSA provenance v1",
+      "ok": true,
+      "detail": "https://slsa.dev/provenance/v1",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 0: a transparency-log timestamp was verified",
+      "ok": true,
+      "detail": "",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 0: certificate issuer equals the pinned value",
+      "ok": true,
+      "detail": "https://token.actions.githubusercontent.com",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 0: certificate subjectAlternativeName equals the pinned value",
+      "ok": true,
+      "detail": "https://github.com/jqlang/jq/.github/workflows/ci.yml@refs/tags/jq-1.8.2",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 0: certificate githubWorkflowRepository equals the pinned value",
+      "ok": true,
+      "detail": "jqlang/jq",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 0: certificate githubWorkflowRef equals the pinned value",
+      "ok": true,
+      "detail": "refs/tags/jq-1.8.2",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 0: certificate githubWorkflowSHA equals the pinned value",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 0: certificate sourceRepositoryURI equals the pinned value",
+      "ok": true,
+      "detail": "https://github.com/jqlang/jq",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 0: certificate sourceRepositoryDigest equals the pinned value",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 0: certificate sourceRepositoryRef equals the pinned value",
+      "ok": true,
+      "detail": "refs/tags/jq-1.8.2",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 0: certificate sourceRepositoryIdentifier equals the pinned value",
+      "ok": true,
+      "detail": "5101141",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 0: certificate sourceRepositoryOwnerIdentifier equals the pinned value",
+      "ok": true,
+      "detail": "104800540",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 0: certificate buildSignerDigest equals the pinned value",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 0: certificate runnerEnvironment equals the pinned value",
+      "ok": true,
+      "detail": "github-hosted",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 0: certificate fields not present in the CLI output (informational)",
+      "ok": true,
+      "detail": "none",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 0: the certificate section is present at all",
+      "ok": true,
+      "detail": "",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 1: subject name and SHA-256 are the pinned ones",
+      "ok": true,
+      "detail": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 1: predicate type is SLSA provenance v1",
+      "ok": true,
+      "detail": "https://slsa.dev/provenance/v1",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 1: a transparency-log timestamp was verified",
+      "ok": true,
+      "detail": "",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 1: certificate issuer equals the pinned value",
+      "ok": true,
+      "detail": "https://token.actions.githubusercontent.com",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 1: certificate subjectAlternativeName equals the pinned value",
+      "ok": true,
+      "detail": "https://github.com/jqlang/jq/.github/workflows/ci.yml@refs/tags/jq-1.8.2",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 1: certificate githubWorkflowRepository equals the pinned value",
+      "ok": true,
+      "detail": "jqlang/jq",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 1: certificate githubWorkflowRef equals the pinned value",
+      "ok": true,
+      "detail": "refs/tags/jq-1.8.2",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 1: certificate githubWorkflowSHA equals the pinned value",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 1: certificate sourceRepositoryURI equals the pinned value",
+      "ok": true,
+      "detail": "https://github.com/jqlang/jq",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 1: certificate sourceRepositoryDigest equals the pinned value",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 1: certificate sourceRepositoryRef equals the pinned value",
+      "ok": true,
+      "detail": "refs/tags/jq-1.8.2",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 1: certificate sourceRepositoryIdentifier equals the pinned value",
+      "ok": true,
+      "detail": "5101141",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 1: certificate sourceRepositoryOwnerIdentifier equals the pinned value",
+      "ok": true,
+      "detail": "104800540",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 1: certificate buildSignerDigest equals the pinned value",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 1: certificate runnerEnvironment equals the pinned value",
+      "ok": true,
+      "detail": "github-hosted",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 1: certificate fields not present in the CLI output (informational)",
+      "ok": true,
+      "detail": "none",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: online result 1: the certificate section is present at all",
+      "ok": true,
+      "detail": "",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: the GitHub CLI verification (offline replay) exited 0",
+      "ok": true,
+      "detail": "0",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: the CLI (offline replay) returned a non-empty structured result",
+      "ok": true,
+      "detail": "",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 0: subject name and SHA-256 are the pinned ones",
+      "ok": true,
+      "detail": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 0: predicate type is SLSA provenance v1",
+      "ok": true,
+      "detail": "https://slsa.dev/provenance/v1",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 0: a transparency-log timestamp was verified",
+      "ok": true,
+      "detail": "",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 0: certificate issuer equals the pinned value",
+      "ok": true,
+      "detail": "https://token.actions.githubusercontent.com",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 0: certificate subjectAlternativeName equals the pinned value",
+      "ok": true,
+      "detail": "https://github.com/jqlang/jq/.github/workflows/ci.yml@refs/tags/jq-1.8.2",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 0: certificate githubWorkflowRepository equals the pinned value",
+      "ok": true,
+      "detail": "jqlang/jq",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 0: certificate githubWorkflowRef equals the pinned value",
+      "ok": true,
+      "detail": "refs/tags/jq-1.8.2",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 0: certificate githubWorkflowSHA equals the pinned value",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 0: certificate sourceRepositoryURI equals the pinned value",
+      "ok": true,
+      "detail": "https://github.com/jqlang/jq",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 0: certificate sourceRepositoryDigest equals the pinned value",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 0: certificate sourceRepositoryRef equals the pinned value",
+      "ok": true,
+      "detail": "refs/tags/jq-1.8.2",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 0: certificate sourceRepositoryIdentifier equals the pinned value",
+      "ok": true,
+      "detail": "5101141",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 0: certificate sourceRepositoryOwnerIdentifier equals the pinned value",
+      "ok": true,
+      "detail": "104800540",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 0: certificate buildSignerDigest equals the pinned value",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 0: certificate runnerEnvironment equals the pinned value",
+      "ok": true,
+      "detail": "github-hosted",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 0: certificate fields not present in the CLI output (informational)",
+      "ok": true,
+      "detail": "none",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 0: the certificate section is present at all",
+      "ok": true,
+      "detail": "",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 1: subject name and SHA-256 are the pinned ones",
+      "ok": true,
+      "detail": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 1: predicate type is SLSA provenance v1",
+      "ok": true,
+      "detail": "https://slsa.dev/provenance/v1",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 1: a transparency-log timestamp was verified",
+      "ok": true,
+      "detail": "",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 1: certificate issuer equals the pinned value",
+      "ok": true,
+      "detail": "https://token.actions.githubusercontent.com",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 1: certificate subjectAlternativeName equals the pinned value",
+      "ok": true,
+      "detail": "https://github.com/jqlang/jq/.github/workflows/ci.yml@refs/tags/jq-1.8.2",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 1: certificate githubWorkflowRepository equals the pinned value",
+      "ok": true,
+      "detail": "jqlang/jq",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 1: certificate githubWorkflowRef equals the pinned value",
+      "ok": true,
+      "detail": "refs/tags/jq-1.8.2",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 1: certificate githubWorkflowSHA equals the pinned value",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 1: certificate sourceRepositoryURI equals the pinned value",
+      "ok": true,
+      "detail": "https://github.com/jqlang/jq",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 1: certificate sourceRepositoryDigest equals the pinned value",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 1: certificate sourceRepositoryRef equals the pinned value",
+      "ok": true,
+      "detail": "refs/tags/jq-1.8.2",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 1: certificate sourceRepositoryIdentifier equals the pinned value",
+      "ok": true,
+      "detail": "5101141",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 1: certificate sourceRepositoryOwnerIdentifier equals the pinned value",
+      "ok": true,
+      "detail": "104800540",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 1: certificate buildSignerDigest equals the pinned value",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 1: certificate runnerEnvironment equals the pinned value",
+      "ok": true,
+      "detail": "github-hosted",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 1: certificate fields not present in the CLI output (informational)",
+      "ok": true,
+      "detail": "none",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: offline replay result 1: the certificate section is present at all",
+      "ok": true,
+      "detail": "",
+      "group": "official"
+    },
+    {
+      "check": "jq-windows-amd64.exe: the supporting verifier passed",
+      "ok": true,
+      "detail": "29",
+      "group": "supporting"
+    },
+    {
+      "check": "jq-windows-amd64.exe: the supporting verifier compared the DOWNLOADED bytes",
+      "ok": true,
+      "detail": "",
+      "group": "supporting"
+    },
+    {
+      "check": "jq-windows-amd64.exe: supporting verifier saw the pinned commit",
+      "ok": true,
+      "detail": "",
+      "group": "supporting"
+    },
+    {
+      "check": "jq-windows-amd64.exe: supporting verifier saw the pinned ref",
+      "ok": true,
+      "detail": "",
+      "group": "supporting"
+    },
+    {
+      "check": "jq-windows-amd64.exe: supporting verifier saw the pinned repository id",
+      "ok": true,
+      "detail": "",
+      "group": "supporting"
+    },
+    {
+      "check": "jq-windows-amd64.exe: supporting verifier saw the pinned owner id",
+      "ok": true,
+      "detail": "",
+      "group": "supporting"
+    },
+    {
+      "check": "jq-windows-amd64.exe: the supporting verifier matched the pinned name and digest as an attestation subject",
+      "ok": true,
+      "detail": "",
+      "group": "supporting"
+    },
+    {
+      "check": "jq-windows-amd64.exe: the maintained verifier and the supporting verifier AGREE (both passed)",
+      "ok": true,
+      "detail": "gh=True custom=True",
+      "group": "consensus"
+    },
+    {
+      "check": "jq-windows-amd64.exe: exactly one valid GPG signature",
+      "ok": true,
+      "detail": "1",
+      "group": "gpg"
+    },
+    {
+      "check": "jq-windows-amd64.exe: no bad, expired, revoked or erroneous signature",
+      "ok": true,
+      "detail": "",
+      "group": "gpg"
+    },
+    {
+      "check": "jq-windows-amd64.exe: GOODSIG was reported",
+      "ok": true,
+      "detail": "",
+      "group": "gpg"
+    },
+    {
+      "check": "jq-windows-amd64.exe: the signing key is the pinned fingerprint (signing key and primary key)",
+      "ok": true,
+      "detail": "93079A9511EFC0B7D6CDBFB5B0DA60FB454BAF18",
+      "group": "gpg"
+    },
+    {
+      "check": "jq-macos-arm64: the downloaded file exists",
+      "ok": true,
+      "detail": "",
+      "group": "bytes"
+    },
+    {
+      "check": "jq-macos-arm64: size is the pinned size",
+      "ok": true,
+      "detail": "841504",
+      "group": "bytes"
+    },
+    {
+      "check": "jq-macos-arm64: SHA-256 equals the pinned value",
+      "ok": true,
+      "detail": "2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e",
+      "group": "bytes"
+    },
+    {
+      "check": "jq-macos-arm64: SHA-256 appears in the pinned publisher checksum list",
+      "ok": true,
+      "detail": "",
+      "group": "bytes"
+    },
+    {
+      "check": "jq-macos-arm64: the file has no execute permission",
+      "ok": true,
+      "detail": "",
+      "group": "bytes"
+    },
+    {
+      "check": "jq-macos-arm64: the GitHub CLI verification (online) exited 0",
+      "ok": true,
+      "detail": "0",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: the CLI (online) returned a non-empty structured result",
+      "ok": true,
+      "detail": "",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: online result 0: subject name and SHA-256 are the pinned ones",
+      "ok": true,
+      "detail": "2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: online result 0: predicate type is SLSA provenance v1",
+      "ok": true,
+      "detail": "https://slsa.dev/provenance/v1",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: online result 0: a transparency-log timestamp was verified",
+      "ok": true,
+      "detail": "",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: online result 0: certificate issuer equals the pinned value",
+      "ok": true,
+      "detail": "https://token.actions.githubusercontent.com",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: online result 0: certificate subjectAlternativeName equals the pinned value",
+      "ok": true,
+      "detail": "https://github.com/jqlang/jq/.github/workflows/ci.yml@refs/tags/jq-1.8.2",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: online result 0: certificate githubWorkflowRepository equals the pinned value",
+      "ok": true,
+      "detail": "jqlang/jq",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: online result 0: certificate githubWorkflowRef equals the pinned value",
+      "ok": true,
+      "detail": "refs/tags/jq-1.8.2",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: online result 0: certificate githubWorkflowSHA equals the pinned value",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: online result 0: certificate sourceRepositoryURI equals the pinned value",
+      "ok": true,
+      "detail": "https://github.com/jqlang/jq",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: online result 0: certificate sourceRepositoryDigest equals the pinned value",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: online result 0: certificate sourceRepositoryRef equals the pinned value",
+      "ok": true,
+      "detail": "refs/tags/jq-1.8.2",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: online result 0: certificate sourceRepositoryIdentifier equals the pinned value",
+      "ok": true,
+      "detail": "5101141",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: online result 0: certificate sourceRepositoryOwnerIdentifier equals the pinned value",
+      "ok": true,
+      "detail": "104800540",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: online result 0: certificate buildSignerDigest equals the pinned value",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: online result 0: certificate runnerEnvironment equals the pinned value",
+      "ok": true,
+      "detail": "github-hosted",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: online result 0: certificate fields not present in the CLI output (informational)",
+      "ok": true,
+      "detail": "none",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: online result 0: the certificate section is present at all",
+      "ok": true,
+      "detail": "",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: the GitHub CLI verification (offline replay) exited 0",
+      "ok": true,
+      "detail": "0",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: the CLI (offline replay) returned a non-empty structured result",
+      "ok": true,
+      "detail": "",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: offline replay result 0: subject name and SHA-256 are the pinned ones",
+      "ok": true,
+      "detail": "2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: offline replay result 0: predicate type is SLSA provenance v1",
+      "ok": true,
+      "detail": "https://slsa.dev/provenance/v1",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: offline replay result 0: a transparency-log timestamp was verified",
+      "ok": true,
+      "detail": "",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: offline replay result 0: certificate issuer equals the pinned value",
+      "ok": true,
+      "detail": "https://token.actions.githubusercontent.com",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: offline replay result 0: certificate subjectAlternativeName equals the pinned value",
+      "ok": true,
+      "detail": "https://github.com/jqlang/jq/.github/workflows/ci.yml@refs/tags/jq-1.8.2",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: offline replay result 0: certificate githubWorkflowRepository equals the pinned value",
+      "ok": true,
+      "detail": "jqlang/jq",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: offline replay result 0: certificate githubWorkflowRef equals the pinned value",
+      "ok": true,
+      "detail": "refs/tags/jq-1.8.2",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: offline replay result 0: certificate githubWorkflowSHA equals the pinned value",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: offline replay result 0: certificate sourceRepositoryURI equals the pinned value",
+      "ok": true,
+      "detail": "https://github.com/jqlang/jq",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: offline replay result 0: certificate sourceRepositoryDigest equals the pinned value",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: offline replay result 0: certificate sourceRepositoryRef equals the pinned value",
+      "ok": true,
+      "detail": "refs/tags/jq-1.8.2",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: offline replay result 0: certificate sourceRepositoryIdentifier equals the pinned value",
+      "ok": true,
+      "detail": "5101141",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: offline replay result 0: certificate sourceRepositoryOwnerIdentifier equals the pinned value",
+      "ok": true,
+      "detail": "104800540",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: offline replay result 0: certificate buildSignerDigest equals the pinned value",
+      "ok": true,
+      "detail": "34f7186b86743a083a589741b6cea95293524108",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: offline replay result 0: certificate runnerEnvironment equals the pinned value",
+      "ok": true,
+      "detail": "github-hosted",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: offline replay result 0: certificate fields not present in the CLI output (informational)",
+      "ok": true,
+      "detail": "none",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: offline replay result 0: the certificate section is present at all",
+      "ok": true,
+      "detail": "",
+      "group": "official"
+    },
+    {
+      "check": "jq-macos-arm64: the supporting verifier passed",
+      "ok": true,
+      "detail": "29",
+      "group": "supporting"
+    },
+    {
+      "check": "jq-macos-arm64: the supporting verifier compared the DOWNLOADED bytes",
+      "ok": true,
+      "detail": "",
+      "group": "supporting"
+    },
+    {
+      "check": "jq-macos-arm64: supporting verifier saw the pinned commit",
+      "ok": true,
+      "detail": "",
+      "group": "supporting"
+    },
+    {
+      "check": "jq-macos-arm64: supporting verifier saw the pinned ref",
+      "ok": true,
+      "detail": "",
+      "group": "supporting"
+    },
+    {
+      "check": "jq-macos-arm64: supporting verifier saw the pinned repository id",
+      "ok": true,
+      "detail": "",
+      "group": "supporting"
+    },
+    {
+      "check": "jq-macos-arm64: supporting verifier saw the pinned owner id",
+      "ok": true,
+      "detail": "",
+      "group": "supporting"
+    },
+    {
+      "check": "jq-macos-arm64: the supporting verifier matched the pinned name and digest as an attestation subject",
+      "ok": true,
+      "detail": "",
+      "group": "supporting"
+    },
+    {
+      "check": "jq-macos-arm64: the maintained verifier and the supporting verifier AGREE (both passed)",
+      "ok": true,
+      "detail": "gh=True custom=True",
+      "group": "consensus"
+    },
+    {
+      "check": "jq-macos-arm64: exactly one valid GPG signature",
+      "ok": true,
+      "detail": "1",
+      "group": "gpg"
+    },
+    {
+      "check": "jq-macos-arm64: no bad, expired, revoked or erroneous signature",
+      "ok": true,
+      "detail": "",
+      "group": "gpg"
+    },
+    {
+      "check": "jq-macos-arm64: GOODSIG was reported",
+      "ok": true,
+      "detail": "",
+      "group": "gpg"
+    },
+    {
+      "check": "jq-macos-arm64: the signing key is the pinned fingerprint (signing key and primary key)",
+      "ok": true,
+      "detail": "93079A9511EFC0B7D6CDBFB5B0DA60FB454BAF18",
+      "group": "gpg"
+    }
+  ]
+}

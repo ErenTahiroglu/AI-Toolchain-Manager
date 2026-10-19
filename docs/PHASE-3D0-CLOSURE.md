@@ -32,3 +32,7 @@ The downloader used to publish with "check that the destination does not exist, 
 ## Verification
 
 Python: `tests/test_phase3d0_closure.py` (fetch tool and reviewer, 18 tests) joins the earlier contract tests; Rust, frontend, self-check and GUI smoke were re-run unchanged for the delivery report; exact-SHA Windows and macOS CI as reported. No Rust source changed in this closure.
+
+## Request A closure (Issue #19)
+
+The first authorised download-and-verify session passed every cryptographic check, but the GitHub CLI contacted `tmaproduction.blob.core.windows.net`, which was not on the approved list. The contact is recorded permanently and **not** authorised retroactively ([phase-3d0/REQUEST-A-NETWORK-INCIDENT.md](phase-3d0/REQUEST-A-NETWORK-INCIDENT.md)). Closure measures: `tools/egress_guard.py` (deny-by-default egress for child programs, decided before any connection, with its stated limits), offline replay as the default, byte-exact bundle extraction (`tools/extract_sigstore_bundles.py`), a reporting model that keeps `artifact_crypto_verified`, `exact_bytes_verified`, `official_verifier_passed`, `network_policy_compliant`, `installation_authorized` and `execution_authorized` apart, and the corrected GPG procedure. Tests: `tests/test_request_a_closure.py` (local mocks and stored evidence only).
