@@ -1,0 +1,7 @@
+Kurulum
+
+? Doğrulama tamamlanmadı
+
+Bu araç için incelenmiş bir tarif ve bağımsız doğrulanmış bir dosya özeti yok; bu yüzden kurulamaz.
+
+Bu gerçek aracın TEK SEFERLİK kurulum izni bu derlemede henüz etkinleştirilmedi; ayrı bir kullanıcı yetkisi ve ayrı bir değişiklik gerekir. pilot_not_armed

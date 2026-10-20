@@ -28,6 +28,23 @@ Baseline `1e2fe043b28a94ad113f78913f4c83ed2b725e5a` (B2, accepted by Red Team fo
 * **Recovery**: a reservation whose installation *committed* (receipt of that very approval, vouched for by its committed journal) is settled as consumed from the receipt, once. Nothing else is: an interrupted or rolled-back attempt is **not** proof that nothing was installed, so it stays *needs attention*; resolving it is a reviewed human decision, never a code path (see the [checklist](phase-3d5/PILOT-CHECKLIST.tr.md), "Beklenmeyen sonuç").
 * **Not changed**: filesystem ownership rules, conflict refusal, rollback, audit reconciliation, the preview/consent flow, the release build (no one-time rule exists in it: `Sources::production().one_time` is `None`; self-check reports `oneTimeAllowances: 0`).
 
+## B3 activation candidate
+
+See [B3-ACTIVATION-CANDIDATE](phase-3d5/B3-ACTIVATION-CANDIDATE.md): a separate, one-line commit (`B3_UNLOCK: None → Some("9c7a020d…cca1")`) after the allowance, with the allowance still **inactive** (`B3_ARMED_DATA_DIR_SHA256 = None`). It is not a permission to install, and no jq file is reachable by it; its real-window check is in [GUI-EVIDENCE](phase-3d5/GUI-EVIDENCE.md).
+
+## Test runs on the development computer (developer-generated; every run reported, none retried inside the code)
+
+| Configuration / check | Result |
+| --- | --- |
+| `cargo test` (default / `--features jq-pilot` / `--features synthetic-pilot`), final tree | **699 / 699 / 699 passed** (2 pre-existing ignored each); earlier in the phase 698 / 698 / 698 before the candidate commit's one added test |
+| `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean in all three configurations |
+| Blocked by Smart App Control | two earlier test executables (default and `jq-pilot`, before later source changes) were **BLOCKED / NOT RUN** and are not counted; see the [record](phase-3d5/SMART-APP-CONTROL-RECORD.md) |
+| Python `unittest discover` with the self-check JSON of the final default build | 278 tests OK (6 skipped for missing inputs/platform) · `tools/verify_review_package.py` 76/76 |
+| Frontend | typecheck clean · 99/99 · build OK |
+| Staging reproductions (`tools/run_staging.py`) | B3 manifest 18/18 (17 Rust + 1 Python) · B2 manifest 20/20 · B1 manifest 50/50 |
+| Headless self-check (final default debug build) | exit 0; `installSupplyProbe`: 0 recipes / references / enablement entries / evidence / notices, `oneTimeAllowances: 0`, `entriesThatCanBeInstalledOrRemoved: 0` |
+| Real window | candidate `jq-pilot` build 16/16 (unlocked, inactive: `pilot_not_armed`); synthetic regression 75/75 + 6/6 ([GUI-EVIDENCE](phase-3d5/GUI-EVIDENCE.md)) |
+
 ## What was and was not run, and by whom
 
 Developer-authored tests, on this computer and in CI, on **synthetic bytes** only. The independent reviewer's B1 limitations stand: Rust/frontend tests and the real window were **NOT independently run by ChatGPT**; this phase's tests are not independent evidence either. CI is not independent user-device testing. Smart App Control blocked some freshly built test executables on this computer; they are recorded as BLOCKED / NOT RUN and not counted ([record](phase-3d5/SMART-APP-CONTROL-RECORD.md)). Issue #14 stays open for any broader release.

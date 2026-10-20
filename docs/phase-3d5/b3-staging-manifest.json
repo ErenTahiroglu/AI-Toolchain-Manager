@@ -47,10 +47,11 @@
     },
     {
       "id": "B3-6",
-      "title": "Bound to one recipe, artifact and data directory; inactive until armed; an inactive or spent pilot never asks the provider for a byte",
+      "title": "Bound to one recipe, artifact and data directory; inactive until armed; the unlocked-but-inactive B3 activation candidate, an inactive or spent pilot never ask the provider for a byte",
       "cargo": [
         "install_flow::tests::b3_the_pilot_is_bound_to_one_recipe_one_artifact_one_data_directory_and_inactive_until_armed",
-        "install_flow::tests::b3_an_inactive_or_spent_pilot_never_asks_the_provider_for_a_single_byte"
+        "install_flow::tests::b3_an_inactive_or_spent_pilot_never_asks_the_provider_for_a_single_byte",
+        "install_flow::tests::b3_the_activation_candidate_is_unlocked_but_inactive_and_never_asks_for_a_byte_of_a_retained_file"
       ]
     },
     {

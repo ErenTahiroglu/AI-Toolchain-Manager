@@ -403,3 +403,31 @@ fn b3_the_allowance_has_no_reset_path_no_credential_framework_no_process_network
     // a release supply carries no one-time rule at all
     assert!(Sources::production().one_time.is_none());
 }
+
+#[test]
+fn b3_the_activation_candidate_is_unlocked_but_inactive_and_never_asks_for_a_byte_of_a_retained_file() {
+    let (_keep, input) = input_dir();
+    let tmp = tempfile::tempdir().unwrap();
+    let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    // exactly what the jq-pilot build starts with (the committed files, the two constants), with the provider replaced by a counter
+    let mut s = jq_pilot::sources_for_app(tmp.path().join(jq_pilot::INPUT_FOLDER));
+    s.artifacts = Box::new(CountingProvider(asked.clone()));
+    let l = lab_with(s, None);
+    l.with(|c| jq_pilot::seed_catalog(c).unwrap());
+    // even a file the person would have placed at the fixed place cannot matter: it is not asked for
+    fs::write(input.join(JQ_FILE), b"a stand-in, not jq").unwrap();
+    let st = l.state(JQ);
+    if cfg!(windows) {
+        assert_eq!((st.status, st.reasons[0].code.as_str()), (Status::VerificationIncomplete, "pilot_not_armed"), "{st:?}");
+        assert_eq!(l.state(JQ).reasons[0].text, reason_text("pilot_not_armed"));
+    } else {
+        assert_eq!(st.reasons[0].code, "no_reviewed_recipe", "off Windows the pilot supply is empty");
+    }
+    assert_eq!(l.try_preview(JQ, Action::Install).unwrap_err().code, "INSTALL_NOT_AVAILABLE");
+    assert_eq!(l.try_preview(JQ, Action::Uninstall).unwrap_err().code, "INSTALL_NOT_AVAILABLE");
+    let r = l.svc.confirm(&l.db, &ConfirmRequest { offer_id: "a".repeat(64), preview_digest: "b".repeat(64), acknowledged: true });
+    assert_eq!(r.outcome, "refused");
+    assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 0, "the inactive candidate never asks the provider for a single byte");
+    assert!(!l.data.join("atm-managed").exists() && !l.data.join(jq_pilot::INPUT_FOLDER).exists());
+    assert!(record_raw(&l).is_none(), "no allowance record was created");
+}

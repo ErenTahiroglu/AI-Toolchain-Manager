@@ -161,7 +161,9 @@ class TheReleaseStaysClosed(unittest.TestCase):
     def test_the_pilot_unlock_is_one_constant_and_it_is_off(self):
         pilot = text(SRC / "jq_pilot.rs")
         code = "\n".join(l for l in pilot.splitlines() if not l.strip().startswith("//"))
-        self.assertEqual(code.count("pub const B3_UNLOCK: Option<&str> = None;"), 1)
+        # None at B2; from the Phase 3D-5 activation candidate on: exactly the reviewed recipe digest (and the allowance stays inactive: see test_phase3d5_contract)
+        self.assertRegex(code, r'pub const B3_UNLOCK: Option<&str> = (None|Some\("9c7a020d65d233e86577464a06c32b8f08fd4fd8403110e68fd551b674f7cca1"\));')
+        self.assertEqual(code.count("pub const B3_UNLOCK:"), 1)
         self.assertEqual(sum(1 for l in code.splitlines() if "B3_UNLOCK" in l), 2, "declaration + the one use that builds the application's supply")
         for needle in ("std::env", "var_os", "std::process", "Command::new", "std::net", "TcpStream", "reqwest", "set_var", "winreg", "std::fs", "allow_real", "force_install"):
             self.assertNotIn(needle, code, needle)

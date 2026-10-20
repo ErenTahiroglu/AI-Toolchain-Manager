@@ -1,6 +1,7 @@
-// Phase 3D-4 (B2) GUI evidence driver: the REAL application window of a debug build made with `--features jq-pilot` (never a release build),
-// started with an ISOLATED data directory. It shows that the jq row exists, is listed as "Doğrulama tamamlanmadı" with the reason that the
-// installation is not enabled in this build, offers no install button, and that forged IPC calls can neither open a preview nor confirm anything.
+// Phase 3D-4 (B2) / 3D-5 GUI evidence driver: the REAL application window of a debug build made with `--features jq-pilot` (never a release build),
+// started with an ISOLATED data directory. It shows that the jq row exists, is listed as "Doğrulama tamamlanmadı" with the reason that the installation is
+// not enabled in this build (B2: locked; the Phase 3D-5 B3 activation candidate: unlocked but the one-time allowance is `pilot_not_armed`), offers no
+// install button, and that forged IPC calls can neither open a preview nor confirm anything.
 // It reads the file system of the isolated directory before and after (tools/fs_inventory.mjs) and proves nothing but the application's own database
 // files changed: no manager folder, no input folder, no file. It never provides, opens or runs jq; there is no jq file anywhere in this run.
 //
@@ -75,6 +76,7 @@ await check("the jq row has an install panel (the pilot build seeds the catalog 
 await check("only the ordinary 13 entries and jq have a panel (no synthetic tool in this build)", `document.querySelectorAll('[role=group][aria-label^="Kurulum: "]').length === 14 && ![...document.querySelectorAll('[role=group][aria-label^="Kurulum: synthetic"]')].length`);
 await check("jq: 'Doğrulama tamamlanmadı'", `${groupText("jq")}.includes('Doğrulama tamamlanmadı')`);
 await check("jq: the reason says the installation is not enabled in this build", `/etkinleştirilmedi/.test(${groupText("jq")})`);
+await check("jq: the reason code is pilot_not_armed (the one-time allowance is INACTIVE) or recipe_not_enabled (locked)", `/pilot_not_armed|recipe_not_enabled/.test(${groupText("jq")})`);
 await check("jq: no install button, no remove button", `!/Kurulum önizlemesini aç|Kaldırma önizlemesini aç/.test(${groupText("jq")})`);
 const text = await ev(groupText("jq"));
 writeFileSync(join(OUT, "jq-panel-text.txt"), String(text));

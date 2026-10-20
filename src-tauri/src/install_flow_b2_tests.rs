@@ -310,8 +310,9 @@ fn b2_wrong_tool_version_architecture_source_origin_and_network_permissions_are_
 
 #[test]
 fn b2_the_unlock_is_one_constant_naming_the_exact_recipe_digest_and_it_is_off() {
-    assert_eq!(jq_pilot::B3_UNLOCK, None, "B2 does not unlock anything; B3 changes this constant in its own reviewed commit");
     let d = real_recipe_digest();
+    assert_eq!(jq_pilot::B3_UNLOCK, Some(d.as_str()), "the B3 activation candidate names exactly the reviewed recipe digest, nothing else");
+    assert_eq!(jq_pilot::B3_ARMED_DATA_DIR_SHA256, None, "...and the one-installation allowance is still INACTIVE");
     assert!(!jq_pilot::unlocked_for(None, &d));
     assert!(!jq_pilot::unlocked_for(Some(&"0".repeat(64)), &d));
     assert!(!jq_pilot::unlocked_for(Some(""), &d));
@@ -350,20 +351,25 @@ fn b2_with_the_lock_on_a_perfect_file_is_neither_read_previewed_nor_installed() 
 }
 
 #[test]
-fn b2_the_real_committed_supply_is_windows_only_locked_and_creates_nothing() {
+fn b2_the_real_committed_supply_is_windows_only_unlocked_for_the_candidate_but_inactive_and_creates_nothing() {
     let tmp = tempfile::tempdir().unwrap();
     let folder = tmp.path().join(jq_pilot::INPUT_FOLDER);
     let s = jq_pilot::sources_for_app(folder.clone());
     if cfg!(windows) {
-        assert_eq!((s.registry.len(), s.extra_authenticated.len(), s.pilot_gate.len(), s.notices.len()), (1, 1, 0, 1), "pieces present, enablement empty");
+        // the B3 activation CANDIDATE: unlocked (the enablement entry and the retained-file provider exist) but the one-time allowance is INACTIVE
+        assert_eq!((s.registry.len(), s.extra_authenticated.len(), s.pilot_gate.len(), s.notices.len()), (1, 1, 1, 1), "pieces and the one enablement entry");
         assert_eq!(s.evidence.attestations.len() + s.evidence.local_use_licenses.len(), 2);
-        assert_eq!(s.artifacts.bytes("jq", "1.8.2", "windows-x64"), Err("real_install_locked"));
+        let ot = s.one_time.as_ref().expect("the one-time rule is part of the pilot supply");
+        assert_eq!(ot.armed_data_dir_sha256, None, "not armed for any data directory");
+        assert_eq!((ot.recipe_digest.as_str(), s.pilot_gate[0].recipe_digest.as_str()), (real_recipe_digest().as_str(), real_recipe_digest().as_str()));
+        // (the folder does not exist: nothing real can be read here, and nothing is created)
+        assert_eq!(s.artifacts.bytes("jq", "1.8.2", "windows-x64"), Err("artifact_not_available"));
     } else {
         assert!(closed(&s), "off Windows the pilot supply is the empty release supply");
         assert_eq!(s.artifacts.bytes("jq", "1.8.2", "windows-x64"), Err("artifact_not_available"));
     }
     assert!(!folder.exists() && fs::read_dir(tmp.path()).unwrap().count() == 0, "building the supply creates no folder and reads no file");
-    // the real digest names no wrong build: with the real spec and a lock that names another digest the supply stays locked
+    // a wrong digest unlocks nothing: with the real spec and a lock that names another digest the supply stays locked
     let (_k, input) = input_dir();
     let wrong = jq_pilot::sources(&Spec::committed(), input.clone(), Some(&"0".repeat(64)));
     assert!(wrong.pilot_gate.is_empty() && wrong.artifacts.bytes("jq", "1.8.2", "windows-x64") == Err("real_install_locked"));
@@ -775,7 +781,7 @@ fn b2_a_default_build_cannot_install_jq_and_the_pilot_build_only_shows_it_locked
     assert_eq!(st.status, Status::VerificationIncomplete);
     assert!(!st.can_install && !st.can_remove);
     if cfg!(feature = "jq-pilot") {
-        assert_eq!(st.reasons[0].code, "recipe_not_enabled", "the pilot build shows jq, locked");
+        assert_eq!(st.reasons[0].code, "pilot_not_armed", "the candidate build shows jq, unlocked but INACTIVE");
     } else {
         assert_eq!(st.reasons[0].code, "no_reviewed_recipe", "an ordinary build, and the synthetic pilot, have no recipe for jq at all");
         if !cfg!(feature = "synthetic-pilot") {
@@ -804,7 +810,7 @@ fn b2_the_pilot_module_has_no_environment_process_network_registry_or_unlock_sho
         assert!(!code_only.contains(needle), "jq_pilot.rs must not contain {needle}");
     }
     // the unlock constant is declared once, used once (to build the application's supply), and is None
-    assert_eq!(code_only.matches("pub const B3_UNLOCK: Option<&str> = None;").count(), 1);
+    assert_eq!(code_only.matches(&format!("pub const B3_UNLOCK: Option<&str> = Some(\"{}\");", real_recipe_digest())).count(), 1);
     assert_eq!(code_only.lines().filter(|l| l.contains("B3_UNLOCK")).count(), 2, "declaration + the one use in sources_for_app");
     // no digest of the real artifact is a literal in this Rust source (the data files carry it), as the Phase 3D-0 guard requires
     assert!(!src.contains(&real_artifact_sha()[..8]));

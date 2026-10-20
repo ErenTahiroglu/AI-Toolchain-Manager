@@ -14,11 +14,13 @@
 //! 6. the fixed, read-only retained-file provider;
 //! 7. the exact activation entry (recipe digest + artifact digest).
 //!
-//! **The real bytes stay locked.** [`B3_UNLOCK`] is `None`. While it is, the provider is [`LockedProvider`] (it never touches the file
-//! system) and the pilot gate is EMPTY, so the service reports the recipe as not enabled, the adapter refuses it, and nothing reads, copies or
-//! installs the retained file. The unlock is not a flag, a path, an environment variable or an argument: it is one constant that must name the
-//! exact reviewed recipe digest, changed in a separate, reviewed (B3) commit. Tests exercise the whole path with SYNTHETIC bytes whose digests
-//! differ from the real ones, through the very same assembly code.
+//! **Two constants, two separate decisions.** [`B3_UNLOCK`] names the exact reviewed recipe digest (the B3 activation CANDIDATE: with it the supply holds
+//! the real provider and the enablement entry). It is not a permission: [`B3_ARMED_DATA_DIR_SHA256`] is `None`, so the one-installation allowance is
+//! INACTIVE and the service answers `pilot_not_armed` BEFORE any preview, so not one byte of the retained file is requested. The allowance
+//! (`pilot_allowance`, Issue #24) is armed only by the commit that records the user's separate authorization and names the ONE isolated data
+//! directory, and it can be spent exactly once. With [`B3_UNLOCK`] `None` the provider is [`LockedProvider`] (it never touches the file system) and the
+//! pilot gate is EMPTY. Neither is a flag, a path, an environment variable or an argument. Tests exercise the whole path with SYNTHETIC bytes whose
+//! digests differ from the real ones, through the very same assembly code.
 //!
 //! The module starts no process, opens no socket, reads no environment variable and changes no PATH, registry or agent setting.
 #![allow(dead_code)]
@@ -44,9 +46,9 @@ pub const TOOL: &str = "jq";
 /// The ONE folder (inside the application's own data folder) the retained file is read from, once unlocked. Never chosen by the interface.
 pub const INPUT_FOLDER: &str = "jq-pilot-input";
 
-/// The B3 unlock for the real bytes. `None` until the user's separate, explicit one-time authorization and the final independent review: B3 changes
-/// this single constant to the exact recipe digest it authorizes, in its own reviewed commit. Anything else (including a wrong digest) stays locked.
-pub const B3_UNLOCK: Option<&str> = None;
+/// The B3 unlock for the real bytes: the exact reviewed recipe digest (the activation CANDIDATE, Phase 3D-5). Anything else (including a wrong digest)
+/// stays locked. It authorizes nothing by itself: the one-time allowance must also be armed ([`B3_ARMED_DATA_DIR_SHA256`], `None`), and that is the user's.
+pub const B3_UNLOCK: Option<&str> = Some("9c7a020d65d233e86577464a06c32b8f08fd4fd8403110e68fd551b674f7cca1");
 
 /// The ONE isolated data directory the one-installation allowance is ARMED for (Phase 3D-5): the [`pilot_allowance::data_dir_digest`] of the directory the
 /// separately authorized pilot will run in. `None` = the allowance is INACTIVE and nothing real can be previewed or installed, whatever
