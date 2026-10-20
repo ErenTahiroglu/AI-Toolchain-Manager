@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Binds the reviewer-issued B1 decision (Issue #23, comment 6299270819) to the exact candidate recipe of the jq 1.8.2 / Windows x64 pilot. It is the ONLY source of the pilot recipe's review block. It carries the reviewer's published hashes exactly as the comment states them; it carries no developer-generated staging evidence as independent, no cryptographic reviewer signature (none exists) and no claim that the Rust tests, the frontend tests or a real window were run by the reviewer.",
+  "source": {
+    "kind": "github_issue_comment",
+    "repository": "ErenTahiroglu/AI-Toolchain-Manager",
+    "issue": 23,
+    "commentId": 6299270819,
+    "url": "https://github.com/ErenTahiroglu/AI-Toolchain-Manager/issues/23#issuecomment-6299270819",
+    "postedBy": "ErenTahiroglu (the repository owner's account; the comment relays the reviewer's decision and names ChatGPT as the reviewer)",
+    "postedAt": "2026-10-20T19:20:19Z",
+    "snapshotPath": "docs/phase-3d4/evidence/issue-23-comment-6299270819.md",
+    "snapshotSha256": "6c8412746bf33fcfcd8950b9e2e632cdfd9fa6ae47fc18f125c90ee1de5b6da1",
+    "snapshotNote": "Verbatim comment body as the GitHub API returned it on 2026-10-20 (no line-ending change was needed: it has LF only). The hash is the DEVELOPER's integrity pin of that capture; it is not a value the reviewer published."
+  },
+  "reviewer": {
+    "id": "chatgpt-red-team-issue-23-c6299270819",
+    "name": "ChatGPT",
+    "role": "independent Red Team reviewer, as named in the comment itself",
+    "signature": "none: a GitHub comment carries no cryptographic reviewer signature, and none is claimed or fabricated"
+  },
+  "accepted": {
+    "finalSha": "20106944977c96195e84b4d3cdcf1a1743877e35",
+    "recipeId": "jq-1.8.2-windows-x64",
+    "revision": 2,
+    "recipeDigest": "9c7a020d65d233e86577464a06c32b8f08fd4fd8403110e68fd551b674f7cca1",
+    "toolId": "jq",
+    "version": "1.8.2",
+    "platformTarget": "windows-x64",
+    "fileName": "jq-windows-amd64.exe",
+    "sizeBytes": 1035264,
+    "artifactSha256": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627",
+    "origin": "local_retained_file"
+  },
+  "scope": [
+    "ONE Windows x64, developer-machine-local, unprivileged, installation-only pilot of the exact jq 1.8.2 artifact",
+    "no execution (not even --version), no network fetch, no PATH change, no elevation, no agent edit, no real Windows Hello enrollment",
+    "no distribution, no general-release certification, no additional tool",
+    "B2 GO: implementation and synthetic testing only",
+    "B3 real installation: NO-GO until a separate B2 exact-SHA Red Team review AND the user's explicit one-time install-only authorization"
+  ],
+  "limitations": [
+    "the reviewer did NOT run the 48 Rust tests, the 2 frontend staging checks or a real Windows GUI; the developer-authored tests ran in GitHub CI",
+    "no real jq bytes were in the reviewed ZIP; the original artifact signature/attestation evidence stays conditionally accepted and was not re-verified by the reviewer",
+    "the historical Request A unauthorized network contact remains FAIL",
+    "the local-use licence is not redistribution approval",
+    "the gate does not certify Smart App Control or Defender on a real jq binary, nor independent physical hardware",
+    "general release stays blocked by Issue #14"
+  ],
+  "notIndependentlyExecuted": [
+    "rust-tests-48",
+    "frontend-staging-checks-2",
+    "windows-gui"
+  ],
+  "reviewerPublished": {
+    "examinedZipSha256": "ab26f9ff0c058a84f63a7d43b76b92d88c8af10e5a7faf5b25cdf1965a3e49b1",
+    "examinedFinalTree": "3e0f23e90ce71f03d16ed3f57517b28fb73423e6",
+    "examinedCandidateTree": "da3b52bce4fddc28b06da3e171a0dc4de6111988",
+    "decisionFileSha256": "90538f21f3e3278801bcc715cdc9a206dab1c58023340176ee979cdac254609c",
+    "sourceReportSha256": "98ad1f02a7be3f170d9ba6e0d4fdf6865fa6c5051b91a9a989bd26910916bddb",
+    "checkResultsSha256": "b553523ec91b75170f3b4f0c07fdab3e1fe125cf6a91338370c61e8b2440cf14",
+    "checks": {
+      "sourceJsonEvidence": "70/70",
+      "pythonTests": "39/39",
+      "packageVerifier": "64/64 applicable (12 original-history checks SKIPPED: git archive excludes .git)"
+    },
+    "fixtureBytes": { "windows-x64": 233, "macos-arm64": 113 },
+    "note": "These files (the ZIP, the decision file, the source report, the 70-check results) were NOT available to the developer. Their hashes are recorded exactly as the comment states them; the developer did not and could not re-verify them. No separate hash was published for the 39 Python tests."
+  },
+  "supportingCi": {
+    "independent": false,
+    "runId": 39344235717,
+    "url": "https://github.com/ErenTahiroglu/AI-Toolchain-Manager/actions/runs/39344235717",
+    "headSha": "20106944977c96195e84b4d3cdcf1a1743877e35",
+    "conclusion": "success",
+    "jobs": [
+      { "name": "windows-x64", "conclusion": "success", "successfulSteps": 23 },
+      { "name": "macos-arm64", "conclusion": "success", "successfulSteps": 23 }
+    ],
+    "note": "Developer-authored tests executed by GitHub Actions. Supporting evidence of that commit only; it is recorded here and deliberately NOT placed among the review block's independent staging evidence."
+  },
+  "developerChecks": [
+    { "id": "comment-retrieved", "observed": "GET repos/ErenTahiroglu/AI-Toolchain-Manager/issues/comments/6299270819 returned the body of the snapshot (3,404 bytes), created 2026-10-20T19:20:19Z, author_association OWNER" },
+    { "id": "final-tree", "observed": "git rev-parse 20106944977c96195e84b4d3cdcf1a1743877e35^{tree} = 3e0f23e90ce71f03d16ed3f57517b28fb73423e6 (equals the tree the comment names)" },
+    { "id": "candidate-tree", "observed": "git rev-parse d1370a10d4b9d257ee8f53dc2769eadc9df66a43^{tree} = da3b52bce4fddc28b06da3e171a0dc4de6111988 (equals the tree the comment names)" },
+    { "id": "recipe-digest", "observed": "canonical SHA-256 of the candidate file's `recipe` object, recomputed by Python = 9c7a020d65d233e86577464a06c32b8f08fd4fd8403110e68fd551b674f7cca1; the candidate file is unchanged since the accepted SHA" },
+    { "id": "ci-run", "observed": "GET actions/runs/39344235717: head_sha = the accepted SHA, status completed, conclusion success; both jobs success with 23 of 23 steps successful" },
+    { "id": "fixture", "observed": "tools/staging_fixture.py print: windows-x64 233 bytes, macos-arm64 113 bytes (the sizes the comment names)" }
+  ],
+  "review": {
+    "state": "reviewed",
+    "reviewerId": "chatgpt-red-team-issue-23-c6299270819",
+    "reviewedRecipeDigest": "9c7a020d65d233e86577464a06c32b8f08fd4fd8403110e68fd551b674f7cca1",
+    "stagingEvidence": [
+      {
+        "checkId": "b1-independent-70-check-results",
+        "state": "passed",
+        "independent": true,
+        "evidenceDigest": "b553523ec91b75170f3b4f0c07fdab3e1fe125cf6a91338370c61e8b2440cf14"
+      },
+      {
+        "checkId": "b1-independent-source-report",
+        "state": "passed",
+        "independent": true,
+        "evidenceDigest": "98ad1f02a7be3f170d9ba6e0d4fdf6865fa6c5051b91a9a989bd26910916bddb"
+      }
+    ]
+  }
+}
