@@ -429,5 +429,9 @@ fn b3_the_activation_candidate_is_unlocked_but_inactive_and_never_asks_for_a_byt
     assert_eq!(r.outcome, "refused");
     assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 0, "the inactive candidate never asks the provider for a single byte");
     assert!(!l.data.join("atm-managed").exists() && !l.data.join(jq_pilot::INPUT_FOLDER).exists());
-    assert!(record_raw(&l).is_none(), "no allowance record was created");
+    if cfg!(windows) {
+        assert!(record_raw(&l).is_none(), "no allowance record was created");
+    } else {
+        assert!(l.svc.sources.one_time.is_none(), "off Windows the supply is the empty release supply: no one-time rule exists");
+    }
 }
