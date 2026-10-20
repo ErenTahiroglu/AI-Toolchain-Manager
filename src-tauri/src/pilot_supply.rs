@@ -170,6 +170,7 @@ fn build(tools: &[&str], input_folder: Option<std::path::PathBuf>) -> Sources {
         // (the retained tool carries no notice bundle: its preview shows none)
         evidence: super::Evidence::none(),
         pilot_gate: vec![],
+        one_time: None,
     }
 }
 

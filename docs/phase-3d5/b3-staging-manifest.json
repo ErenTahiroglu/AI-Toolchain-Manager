@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "purpose": "The B3 pre-authorization (Phase 3D-5, Issue #24) checks of the one-installation allowance, with the exact test identifiers that exercise them. Every test is DEVELOPER-AUTHORED and uses synthetic bytes or no file at all; none of them is independent evidence by itself. tools/run_staging.py --manifest <this file> runs exactly these identifiers and fails if one is missing, renamed, ignored or failing. The real jq bytes are never read, copied, hashed or executed by any of them.",
+  "requirements": [
+    {
+      "id": "B3-1",
+      "title": "The one-installation allowance is a durable state machine bound to recipe, artifact, computer and data directory; damaged, edited, foreign and contradicted records are invalid; no reset path exists",
+      "cargo": [
+        "pilot_allowance::tests::an_unarmed_pilot_is_inactive_and_a_pilot_armed_for_another_directory_is_refused",
+        "pilot_allowance::tests::one_reservation_wins_and_a_consumed_allowance_never_reopens",
+        "pilot_allowance::tests::a_release_reopens_it_for_one_more_attempt_and_counts_the_attempts",
+        "pilot_allowance::tests::a_damaged_edited_or_foreign_record_is_invalid_and_nothing_resets_it",
+        "pilot_allowance::tests::the_receipts_and_the_audit_trail_are_witnesses_a_missing_or_open_record_cannot_contradict",
+        "pilot_allowance::tests::the_record_and_its_key_are_internal_and_carry_no_path"
+      ]
+    },
+    {
+      "id": "B3-2",
+      "title": "One installation survives a restart; a removal or a second preview/confirmation cannot reopen it; a stale offer cannot use a spent allowance",
+      "cargo": [
+        "install_flow::tests::b3_one_installation_survives_a_restart_and_a_second_one_cannot_even_be_previewed",
+        "install_flow::tests::b3_a_removal_never_reopens_the_installation_and_a_stale_offer_cannot_use_a_spent_allowance"
+      ]
+    },
+    {
+      "id": "B3-3",
+      "title": "Eight services with independent consent books race for the one installation: exactly one wins",
+      "cargo": [
+        "install_flow::tests::b3_eight_services_with_their_own_consent_books_race_for_the_one_installation_and_exactly_one_wins"
+      ]
+    },
+    {
+      "id": "B3-4",
+      "title": "Interrupted transactions: a crash at any point ends installed-and-consumed or unresolved, never open; roll-forward settles from the receipt; a release needs its audit row",
+      "cargo": [
+        "install_flow::tests::b3_a_crash_at_any_point_ends_either_installed_and_consumed_or_unresolved_and_never_open",
+        "install_flow::tests::b3_a_crash_after_the_commit_is_rolled_forward_and_the_allowance_is_consumed_from_the_receipt",
+        "install_flow::tests::b3_a_release_needs_its_own_audit_row_and_without_it_the_allowance_stays_reserved"
+      ]
+    },
+    {
+      "id": "B3-5",
+      "title": "Corrupted, missing, forged, foreign state and missing/altered receipts fail closed (needs_attention) and are never repaired",
+      "cargo": [
+        "install_flow::tests::b3_a_corrupted_missing_forged_or_foreign_allowance_state_fails_closed_and_is_never_repaired"
+      ]
+    },
+    {
+      "id": "B3-6",
+      "title": "Bound to one recipe, artifact and data directory; inactive until armed; an inactive or spent pilot never asks the provider for a byte",
+      "cargo": [
+        "install_flow::tests::b3_the_pilot_is_bound_to_one_recipe_one_artifact_one_data_directory_and_inactive_until_armed",
+        "install_flow::tests::b3_an_inactive_or_spent_pilot_never_asks_the_provider_for_a_single_byte"
+      ]
+    },
+    {
+      "id": "B3-7",
+      "title": "The allowance module has no reset path, credential framework, process, network or environment access",
+      "cargo": [
+        "install_flow::tests::b3_the_allowance_has_no_reset_path_no_credential_framework_no_process_network_or_environment"
+      ]
+    }
+  ],
+  "python": [
+    "tests.test_phase3d5_contract"
+  ],
+  "frontend": {
+    "files": [],
+    "titles": []
+  },
+  "notReproducibleInCi": [
+    "The real application window of the candidate build (tools/gui_jq_pilot_locked.ps1): needs WebView2 and a desktop session.",
+    "Smart App Control / Defender reaction to a real executable: never part of this phase.",
+    "Operating-system level network isolation: not available without administrator rights."
+  ]
+}

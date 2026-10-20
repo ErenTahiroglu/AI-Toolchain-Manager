@@ -119,6 +119,10 @@ jobs:
       - name: B2 staging reproduction (synthetic bytes; supporting evidence)
         run: python tools/run_staging.py --manifest docs/phase-3d4/b2-staging-manifest.json --skip-frontend --report "${{ runner.temp }}/b2-staging-report-${{ matrix.name }}.json"
 
+      # Phase 3D-5 (Issue #24): the one-installation allowance, on synthetic bytes only. CI-generated, SUPPORTING evidence of this commit.
+      - name: B3 one-installation staging reproduction (synthetic bytes; supporting evidence)
+        run: python tools/run_staging.py --manifest docs/phase-3d5/b3-staging-manifest.json --skip-frontend --report "${{ runner.temp }}/b3-staging-report-${{ matrix.name }}.json"
+
       # Phase 3D-3B: runs EXACTLY the identifiers of docs/phase-3d3b/staging-manifest.json on the synthetic fixture. CI-generated, SUPPORTING evidence of
       # this commit only (exit status 0 = every named check passed); the developer-authored assertions do not become independent by running here.
       - name: Staging reproduction of the jq review package (synthetic fixture; supporting evidence)

@@ -36,6 +36,7 @@ mod managed_fs_probe;
 mod managed_root;
 mod os_approval;
 mod os_hello;
+mod pilot_allowance;
 mod plan;
 mod projects;
 mod recipe;

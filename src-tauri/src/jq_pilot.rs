@@ -32,6 +32,7 @@ use crate::{
     error::AppResult,
     install_flow::{ArtifactProvider, NoticeBundle, Sources},
     lifecycle::PilotRecipe,
+    pilot_allowance::OneTimePilot,
     recipe::{self, Recipe, RecipeRegistry, ReviewRecord, ReviewedRecipe},
 };
 use rusqlite::Connection;
@@ -46,6 +47,11 @@ pub const INPUT_FOLDER: &str = "jq-pilot-input";
 /// The B3 unlock for the real bytes. `None` until the user's separate, explicit one-time authorization and the final independent review: B3 changes
 /// this single constant to the exact recipe digest it authorizes, in its own reviewed commit. Anything else (including a wrong digest) stays locked.
 pub const B3_UNLOCK: Option<&str> = None;
+
+/// The ONE isolated data directory the one-installation allowance is ARMED for (Phase 3D-5): the [`pilot_allowance::data_dir_digest`] of the directory the
+/// separately authorized pilot will run in. `None` = the allowance is INACTIVE and nothing real can be previewed or installed, whatever
+/// [`B3_UNLOCK`] says. It is set only by the commit that records the user's authorization, never before.
+pub const B3_ARMED_DATA_DIR_SHA256: Option<&str> = None;
 
 const CANDIDATE_JSON: &str = include_str!("../../docs/phase-3d3/jq-1.8.2-windows-x64.recipe.candidate.json");
 const BINDING_JSON: &str = include_str!("../../docs/phase-3d4/b1-review-binding.json");
@@ -422,8 +428,14 @@ pub(crate) fn unlocked_for(unlock: Option<&str>, recipe_digest: &str) -> bool {
     unlock == Some(recipe_digest)
 }
 
-/// The supply for `spec`. Locked unless `unlock` names the recipe's digest; the empty release supply if anything does not check out.
+/// The supply for `spec`, NOT armed for any data directory (the allowance is inactive). Tests arm it explicitly.
 pub(crate) fn sources(spec: &Spec, input_folder: PathBuf, unlock: Option<&str>) -> Sources {
+    sources_with(spec, input_folder, unlock, None)
+}
+
+/// The supply for `spec`. Locked unless `unlock` names the recipe's digest; the one-installation allowance (always present) is armed only for the
+/// data directory `armed` names; the empty release supply if anything does not check out.
+pub(crate) fn sources_with(spec: &Spec, input_folder: PathBuf, unlock: Option<&str>, armed: Option<&str>) -> Sources {
     let Ok(a) = assemble(spec) else { return Sources::production() };
     let unlocked = unlocked_for(unlock, &a.activation.recipe_digest);
     Sources {
@@ -432,6 +444,14 @@ pub(crate) fn sources(spec: &Spec, input_folder: PathBuf, unlock: Option<&str>) 
         artifacts: if unlocked { Box::new(RetainedFileProvider::new(input_folder, vec![a.retained])) } else { Box::new(LockedProvider) },
         notices: vec![a.notice],
         evidence: a.evidence,
+        one_time: Some(OneTimePilot {
+            tool_id: a.activation.tool_id.clone(),
+            version: a.activation.version.clone(),
+            platform_target: a.activation.platform_target.clone(),
+            recipe_digest: a.activation.recipe_digest.clone(),
+            artifact_sha256: a.activation.artifact_sha256.clone(),
+            armed_data_dir_sha256: armed.map(str::to_string),
+        }),
         pilot_gate: if unlocked { vec![a.activation] } else { vec![] },
     }
 }
@@ -441,7 +461,7 @@ pub fn sources_for_app(input_folder: PathBuf) -> Sources {
     if !cfg!(windows) {
         return Sources::production();
     }
-    sources(&Spec::committed(), input_folder, B3_UNLOCK)
+    sources_with(&Spec::committed(), input_folder, B3_UNLOCK, B3_ARMED_DATA_DIR_SHA256)
 }
 
 /// The catalog row `jq` (the recipe's tool id). It states what is true of the row: metadata only, unreviewed, licence review required for any
@@ -491,6 +511,7 @@ pub fn describe(sources: &Sources) -> Value {
         "realRecipes": sources.registry.len(),
         "authenticatedReferences": sources.extra_authenticated.len(),
         "enablementEntries": sources.pilot_gate.len(),
+        "oneTimeAllowances": usize::from(sources.one_time.is_some()),
         "notices": sources.notices.len(),
         "evidenceRecords": sources.evidence.attestations.len() + sources.evidence.local_use_licenses.len(),
     })

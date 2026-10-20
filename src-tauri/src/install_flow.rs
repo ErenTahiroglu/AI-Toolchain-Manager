@@ -33,6 +33,7 @@ use crate::{
     error::{AppError, AppResult},
     lifecycle::{check_artifact_for, Authority, PilotRecipe, Receipt, RollbackReport, TxnError},
     managed_root::{AppDataAnchor, ManagedRoot, RootError},
+    pilot_allowance::{self, OneTimePilot, Status as AllowanceStatus},
     plan::{self, HostFacts, InstallPlan, PlanRequest},
     recipe::{self, RecipeRegistry, ValidatedRecipe},
     settings,
@@ -99,6 +100,9 @@ pub struct Sources {
     pub evidence: Evidence,
     /// The REAL recipes this build may apply. EMPTY in a release build, so only synthetic recipes can ever be applied.
     pub pilot_gate: Vec<PilotRecipe>,
+    /// The ONE real recipe this build may install ONCE (Phase 3D-5, Issue #24). `None` in a release build and in the synthetic supplies: then no
+    /// one-time rule applies (only synthetic recipes can be applied there). When it is `Some`, EVERY real recipe must be the one it covers.
+    pub one_time: Option<OneTimePilot>,
 }
 
 impl Sources {
@@ -112,6 +116,7 @@ impl Sources {
             notices: Vec::new(),
             evidence: Evidence::production(),
             pilot_gate: Vec::new(),
+            one_time: None,
         }
     }
 
@@ -414,6 +419,12 @@ pub struct CancelRequest {
 pub fn reason_text(code: &str) -> String {
     match code {
         "artifact_source_undeclared" | "artifact_origin_conflict" | "artifact_origin_unknown" => "Dosyanın kaynağı tarifte açık ve tutarlı biçimde belirtilmemiş (indirme adresi ya da yerel saklanan dosya, ikisi birden değil).",
+        "pilot_not_armed" => "Bu gerçek aracın TEK SEFERLİK kurulum izni bu derlemede henüz etkinleştirilmedi; ayrı bir kullanıcı yetkisi ve ayrı bir değişiklik gerekir.",
+        "pilot_wrong_data_directory" => "Bu gerçek aracın tek seferlik kurulum izni başka bir veri klasörü için etkinleştirilmiş; bu klasörde kurulamaz.",
+        "pilot_allowance_not_for_this_recipe" => "Bu derlemenin tek seferlik kurulum izni bu tarifi kapsamıyor.",
+        "pilot_allowance_consumed" => "Tek seferlik kurulum izni KULLANILDI. Kaldırma izni geri açmaz; yeni bir kurulum için yeni, açık bir kullanıcı yetkisi gerekir.",
+        "pilot_allowance_unresolved" => "Bir kurulum başlatılmıştı ama sonuçlanmadı; tek seferlik izin belirsiz. Hiçbir şey otomatik sıfırlanmadı veya silinmedi; bir kişinin bakması gerekiyor.",
+        "pilot_allowance_state_invalid" | "pilot_allowance_state_for_another_installation" | "pilot_allowance_state_contradicts_receipts" | "pilot_allowance_record_missing" | "pilot_allowance_unreadable" | "pilot_allowance_witness_unreadable" => "Tek seferlik kurulum izninin kaydı güvenilir değil (bozuk, eksik, başka bir kuruluma ait veya makbuzlarla çelişiyor). Hiçbir şey sıfırlanmadı; bir kişinin bakması gerekiyor.",
         "recipe_not_enabled" => "Bu derlemede bu gerçek araç için kurulum etkinleştirilmedi; ayrı, gözden geçirilmiş bir etkinleştirme gerekir.",
         "notices_missing_or_changed" => "Lisans yalnızca belirli bir bildirim metni için, yerel kullanıma kabul edildi; uygulamadaki bildirim metni o metinle aynı değil.",
         "no_reviewed_recipe" => "Bu araç için incelenmiş ve onaylanmış bir kurulum tarifi yok.",
@@ -482,6 +493,9 @@ fn refusal_text(code: &str) -> String {
         "artifact_not_a_plain_file" => "Dosya düz, tek bağlantılı bir dosya değil (bağlantı, klasör veya özel girdi). Hiçbir şey yapılmadı.",
         "artifact_size_mismatch" => "Dosyanın boyutu tarifteki boyutla aynı değil. Hiçbir şey yapılmadı.",
         "production_adapter_not_enabled" => "Bu sürümde gerçek kurulum kapalıdır. Hiçbir şey yapılmadı.",
+        "pilot_allowance_consumed" => "Tek seferlik kurulum izni kullanıldı; yeni kurulum için yeni, açık bir kullanıcı yetkisi gerekir. Hiçbir şey yapılmadı.",
+        "pilot_allowance_unavailable" | "pilot_allowance_unresolved" => "Tek seferlik kurulum izni şu anda kullanılamaz (başka bir istek aldı veya durumu belirsiz). Hiçbir şey yapılmadı.",
+        c if c.starts_with("pilot_") => "Tek seferlik kurulum izni bu işlem için açık değil. Hiçbir şey yapılmadı.",
         "real_install_locked" => "Gerçek dosyanın kurulumu bu derlemede KİLİTLİDİR: ayrı, gözden geçirilmiş ve kullanıcı tarafından açıkça yetkilendirilmiş bir değişiklik gerekir. Dosya açılmadı, hiçbir şey yapılmadı.",
         "consent_binding_mismatch" | "consent_actor_mismatch" => "Onay, bu işlemin ayrıntılarına bağlı değil. Hiçbir şey yapılmadı.",
         "approval_expired" => "Onayın süresi dolmuş. Hiçbir şey yapılmadı veya yapılan geri alındı.",
@@ -549,6 +563,8 @@ struct Probe {
     root_exists: bool,
     inspection: Option<Inspection>,
     attention: Option<String>,
+    /// The one-installation allowance, when this recipe is covered by one (Phase 3D-5).
+    allowance: Option<AllowanceStatus>,
 }
 
 impl InstallService {
@@ -715,6 +731,18 @@ impl InstallService {
         if !valid.recipe().synthetic && !self.sources.pilot_gate.iter().any(|g| g.allows(&valid)) {
             return Ok(Err(Unavailable::Verification(vec![reason("recipe_not_enabled")])));
         }
+        // the one-time rule (Phase 3D-5): when the build carries one, every real recipe must be exactly the one it covers, and it must be ARMED for
+        // THIS data directory. Decided here, before the preview, so nothing of the retained file is read while the pilot is inactive.
+        if let (Some(ot), false) = (&self.sources.one_time, valid.recipe().synthetic) {
+            if !ot.covers(&valid) {
+                return Ok(Err(Unavailable::Verification(vec![reason("pilot_allowance_not_for_this_recipe")])));
+            }
+            match ot.armed_data_dir_sha256.as_deref() {
+                None => return Ok(Err(Unavailable::Verification(vec![reason("pilot_not_armed")]))),
+                Some(d) if d != self.dir_digest() => return Ok(Err(Unavailable::Verification(vec![reason("pilot_wrong_data_directory")]))),
+                Some(_) => {}
+            }
+        }
         // a local-use licence covers one exact notice text: the application must hold that very text (Phase 3D-3)
         {
             let r = valid.recipe();
@@ -744,35 +772,56 @@ impl InstallService {
         Ok(Ok(Resolved { entry, valid, refs, plan, platform: host.platform }))
     }
 
+    /// The digest of THIS data directory, the value a pilot is armed for (Phase 3D-5).
+    fn dir_digest(&self) -> String {
+        pilot_allowance::data_dir_digest(self.anchor.dir_path())
+    }
+
+    fn rfc_now(&self) -> String {
+        self.now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    }
+
+    /// The one-installation allowance of a recipe the supply covers (None: this recipe has no one-time rule).
+    fn allowance_of(&self, conn: &Connection, r: &Resolved, computer: &str, receipts: Option<&[Receipt]>) -> Option<AllowanceStatus> {
+        let pilot = self.sources.one_time.as_ref().filter(|p| p.covers(&r.valid))?;
+        Some(pilot_allowance::evaluate(conn, pilot, computer, &self.dir_digest(), receipts))
+    }
+
     fn probe(&self, conn: &Connection, r: &Resolved) -> AppResult<Probe> {
         let computer = Self::computer_id(conn)?;
+        let attention_only =
+            |attention: Option<String>, root_exists: bool| Probe { root_exists, inspection: None, attention, allowance: None };
         match Self::root_row(conn, &computer)? {
             None => {
-                return Ok(Probe { root_exists: false, inspection: Some(Inspection::NotInstalled { removed: false }), attention: None })
+                return Ok(Probe {
+                    root_exists: false,
+                    inspection: Some(Inspection::NotInstalled { removed: false }),
+                    attention: None,
+                    allowance: self.allowance_of(conn, r, &computer, Some(&[])),
+                })
             }
-            Some(state) if state != "active" => {
-                return Ok(Probe { root_exists: true, inspection: None, attention: Some("root_creation_unfinished".to_string()) })
-            }
+            Some(state) if state != "active" => return Ok(attention_only(Some("root_creation_unfinished".to_string()), true)),
             Some(_) => {}
         }
         let root = match self.open_root(conn, &computer) {
             Ok(root) => root,
-            Err(e) => return Ok(Probe { root_exists: true, inspection: None, attention: Some(e.code().to_string()) }),
+            Err(e) => return Ok(attention_only(Some(e.code().to_string()), true)),
         };
         let rec = r.valid.recipe();
         let clock = &*self.clock;
         let adapter = match self.adapter(&root, &r.refs, &r.platform, clock) {
             Ok(a) => a,
-            Err(code) => return Ok(Probe { root_exists: true, inspection: None, attention: Some(code.to_string()) }),
+            Err(code) => return Ok(attention_only(Some(code.to_string()), true)),
         };
         match adapter.inspect(&rec.tool_id, &rec.version, rec.artifact.size_bytes) {
             Ok(i) => {
+                let history = adapter.history(&rec.tool_id);
                 // a committed operation whose audit outcome is missing keeps the tool in "needs attention" until it is reconciled
                 let attention = if matches!(i, Inspection::Busy { .. }) {
                     None
                 } else {
-                    match adapter.history(&rec.tool_id) {
-                        Ok(h) => match Self::audit_gap(conn, &h) {
+                    match &history {
+                        Ok(h) => match Self::audit_gap(conn, h) {
                             Ok(gap) if gap.is_empty() => None,
                             Ok(_) => Some("audit_outcome_missing".to_string()),
                             Err(()) => Some("audit_unavailable".to_string()),
@@ -780,10 +829,25 @@ impl InstallService {
                         Err(_) => None,
                     }
                 };
-                Ok(Probe { root_exists: true, inspection: Some(i), attention })
+                let allowance = self.allowance_of(conn, r, &computer, history.as_ref().ok().map(|h| h.as_slice()));
+                Ok(Probe { root_exists: true, inspection: Some(i), attention, allowance })
             }
-            Err(TxnError::Refused(code)) => Ok(Probe { root_exists: true, inspection: None, attention: Some(code.to_string()) }),
-            Err(_) => Ok(Probe { root_exists: true, inspection: None, attention: Some("unfinished_transaction".to_string()) }),
+            Err(TxnError::Refused(code)) => Ok(attention_only(Some(code.to_string()), true)),
+            Err(_) => Ok(attention_only(Some("unfinished_transaction".to_string()), true)),
+        }
+    }
+
+    /// Why the one-time rule blocks `action` (None: it does not). `busy_here`: this very process is applying the operation right now.
+    fn allowance_block(probe: &Probe, action: Action, busy_here: bool) -> Option<&'static str> {
+        match (&probe.allowance, action) {
+            (None | Some(AllowanceStatus::Open { .. }), _) => None,
+            (Some(AllowanceStatus::Consumed), Action::Install) => Some("pilot_allowance_consumed"),
+            (Some(AllowanceStatus::Consumed), _) => None,
+            (Some(AllowanceStatus::Reserved { .. }), _) if busy_here => None,
+            (Some(AllowanceStatus::Reserved { .. }), _) => Some("pilot_allowance_unresolved"),
+            (Some(AllowanceStatus::Invalid(code)), _) => Some(code),
+            (Some(AllowanceStatus::NotArmed), _) => Some("pilot_not_armed"),
+            (Some(AllowanceStatus::WrongDirectory), _) => Some("pilot_wrong_data_directory"),
         }
     }
 
@@ -847,6 +911,15 @@ impl InstallService {
             }
             return Ok(st);
         }
+        // the one-time rule (Phase 3D-5): an unresolved or untrustworthy allowance is "needs attention", never a silent reset
+        if let Some(code) = Self::allowance_block(&probe, Action::Uninstall, self.is_busy_here(&rec.tool_id)) {
+            st.status = Status::FailedNeedsAttention;
+            st.reasons = vec![reason(code)];
+            if let Some(Inspection::Installed { version, .. }) = &probe.inspection {
+                st.installed_version = Some(version.clone());
+            }
+            return Ok(st);
+        }
         match probe.inspection {
             Some(Inspection::Busy { .. }) => {
                 if self.is_busy_here(&rec.tool_id) {
@@ -868,6 +941,14 @@ impl InstallService {
             Some(Inspection::NotInstalled { removed }) => {
                 st.status = if removed { Status::Removed } else { Status::Available };
                 st.can_install = true;
+                // the ONE installation was spent: a removal (or a vanished file) never reopens it
+                if matches!(probe.allowance, Some(AllowanceStatus::Consumed)) {
+                    st.can_install = false;
+                    st.reasons = vec![reason("pilot_allowance_consumed")];
+                    if !removed {
+                        st.status = Status::FailedNeedsAttention;
+                    }
+                }
             }
             None => {
                 st.status = Status::FailedNeedsAttention;
@@ -1170,6 +1251,14 @@ impl InstallService {
             }
             _ => return Err(AppError::new("INSTALL_NEEDS_ATTENTION", refusal_text("needs_attention"))),
         }
+        // the one-time rule (Phase 3D-5): decided BEFORE any byte of the retained file is read
+        if let Some(code) = Self::allowance_block(&probe, req.action, self.is_busy_here(&rec.tool_id)) {
+            return Err(if code == "pilot_allowance_consumed" {
+                AppError::new("INSTALL_PILOT_ALLOWANCE_CONSUMED", refusal_text(code))
+            } else {
+                AppError::new("INSTALL_NEEDS_ATTENTION", format!("{} ({code})", refusal_text("needs_attention")))
+            });
+        }
         if req.action == Action::Install {
             // the file must be the exact file the recipe names AND the authenticated reference vouches for, before anything is offered
             let bytes = self
@@ -1305,6 +1394,10 @@ impl InstallService {
         if probe.attention.is_some() || matches!(probe.inspection, Some(Inspection::Attention { .. } | Inspection::Busy { .. }) | None) {
             return fail("needs_attention");
         }
+        // the one-time rule (Phase 3D-5), judged again from scratch at the moment of confirmation, before the file is read
+        if let Some(code) = Self::allowance_block(&probe, b.action, false) {
+            return fail(code);
+        }
         let content = match self.assemble(conn, &r, b.action, &probe) {
             Ok(c) => c,
             Err(_) => return fail("preview_stale"),
@@ -1397,6 +1490,23 @@ impl InstallService {
             Ok(a) => a,
             Err(code) => return Self::refuse(code, Some(action), Some(&rec.tool_id)),
         };
+        // the one-time rule (Phase 3D-5): the ONE installation is reserved, durably and atomically, right before the transaction starts (after the
+        // mandatory approval row, after the folder is open): exactly one caller can win, and anything that does not end in a verified result keeps it
+        let one_time = if action == Action::Install { self.sources.one_time.as_ref().filter(|p| p.covers(&r.valid)) } else { None };
+        let (dir_sha, now_text) = (self.dir_digest(), self.rfc_now());
+        let mut reserved = false;
+        if let Some(pilot) = one_time {
+            let receipts = adapter.history(&rec.tool_id).ok();
+            let won = Self::with_conn(db, |conn| {
+                let sc = pilot_allowance::Scope { pilot, computer: &computer, dir_sha: &dir_sha, now: &now_text };
+                matches!(pilot_allowance::evaluate(conn, pilot, &computer, &dir_sha, receipts.as_deref()), AllowanceStatus::Open { .. })
+                    && pilot_allowance::reserve(conn, &sc, &verified.approval().approval_id).is_ok()
+            });
+            if won != Some(true) {
+                return Self::refuse("pilot_allowance_unavailable", Some(action), Some(&rec.tool_id));
+            }
+            reserved = true;
+        }
         let authority = Authority { recipe: &r.valid, approval: &verified };
         let outcome = match action {
             Action::Install => adapter.install_with_consent(&authority, grant, bytes.as_deref().unwrap_or(&[])),
@@ -1414,6 +1524,16 @@ impl InstallService {
         };
         let event_type = if action == Action::Install { "install" } else { "uninstall" };
         let approval_id = verified.approval().approval_id.clone();
+        let hint = match &outcome {
+            Ok(o) if !o.already_applied => {
+                SettleHint::Completed { txn: o.receipt.txn_id.clone(), digest: o.receipt.receipt_digest.clone() }
+            }
+            Err(TxnError::Failed { rollback, .. }) if matches!(rollback.status.as_str(), "restored" | "not_needed") => {
+                SettleHint::MaybeClean
+            }
+            Err(TxnError::Refused(_)) => SettleHint::MaybeClean,
+            _ => SettleHint::Keep,
+        };
         let mut result = match outcome {
             Ok(o) => InstallResult {
                 audit_recorded: true,
@@ -1475,8 +1595,60 @@ impl InstallService {
                 result.message = refusal_text("post_verification_failed");
             }
         }
+        // what becomes of the reservation: consumed ONLY by a completed, read-back installation; released ONLY when the attempt provably changed nothing
+        // (rolled back AND read back as "not installed"); every other result keeps it reserved = needs attention
+        let settle = if !reserved {
+            None
+        } else {
+            Some(match hint {
+                SettleHint::Completed { txn, digest } if post_verified && result.outcome == "completed" => Settle::Consume { txn, digest },
+                SettleHint::MaybeClean => match adapter.inspect(&rec.tool_id, &rec.version, rec.artifact.size_bytes) {
+                    Ok(Inspection::NotInstalled { removed: false }) => Settle::Release,
+                    _ => Settle::Keep,
+                },
+                _ => Settle::Keep,
+            })
+        };
         drop(root);
         let state = Self::with_conn(db, |conn| {
+            let mut allowance_note: Option<&'static str> = None;
+            if let (Some(settle), Some(pilot)) = (&settle, one_time) {
+                let sc = pilot_allowance::Scope { pilot, computer: &computer, dir_sha: &dir_sha, now: &now_text };
+                let ctx = EventContext {
+                    recipe_id: Some(rec.recipe_id.clone()),
+                    tool_version: Some(rec.version.clone()),
+                    approval_reference: Some(approval_id.clone()),
+                    approved_recipe_digest: None,
+                    artifact_digest: Some(rec.artifact.sha256.clone()),
+                    evidence_digest: None,
+                };
+                match settle {
+                    Settle::Consume { txn, digest } => {
+                        if pilot_allowance::consume(conn, &sc, &approval_id, txn, digest).is_ok() {
+                            // informational: the record, the receipt and the install row already say it
+                            let _ = Self::audit(
+                                conn,
+                                NewEvent::plain("verify", "passed", "pilot-allowance-consumed", None, "not-applicable", "adapter")
+                                    .for_tool(&rec.tool_id, ctx),
+                            );
+                        } else {
+                            allowance_note = Some("pilot_allowance_not_recorded");
+                        }
+                    }
+                    Settle::Release => {
+                        // the release is on record BEFORE the allowance reopens; without that row it stays reserved
+                        let audited = Self::audit(
+                            conn,
+                            NewEvent::plain("rollback", "passed", "pilot-allowance-released", None, "not-applicable", "adapter")
+                                .for_tool(&rec.tool_id, ctx),
+                        );
+                        if !(audited && pilot_allowance::release(conn, &sc, &approval_id).is_ok()) {
+                            allowance_note = Some("pilot_allowance_unresolved");
+                        }
+                    }
+                    Settle::Keep => allowance_note = Some("pilot_allowance_unresolved"),
+                }
+            }
             let (outcome_tag, code) = match (result.outcome.as_str(), post_verified) {
                 ("completed" | "already_applied", true) => ("passed", None),
                 ("needs_attention", _) | (_, false) => ("unknown", Some("POST_VERIFICATION_FAILED")),
@@ -1488,9 +1660,21 @@ impl InstallService {
                 NewEvent::plain(event_type, outcome_tag, "install-apply", code, "not-applicable", "adapter")
                     .for_tool(&rec.tool_id, ctx(&approval_id)),
             );
-            (recorded, self.state_of(conn, &rec.tool_id).ok())
+            (recorded, self.state_of(conn, &rec.tool_id).ok(), allowance_note)
         });
-        let (recorded, state) = state.unwrap_or((false, None));
+        let (recorded, state, allowance_note) = state.unwrap_or((false, None, None));
+        match allowance_note {
+            Some("pilot_allowance_not_recorded") if result.outcome == "completed" => {
+                // the installation HAPPENED and is verified; only the allowance's own bookkeeping failed: it stays reserved (nothing more can start)
+                result.outcome = "needs_attention".to_string();
+                result.code = Some("pilot_allowance_not_recorded".to_string());
+                result.message = "Kurulum YAPILDI ve doğrulandı, ancak tek seferlik iznin kullanıldığı kaydedilemedi; izin 'belirsiz' olarak kaldı ve yeni kurulum başlatılamaz. Hiçbir şey sıfırlanmadı.".to_string();
+            }
+            Some(_) if result.outcome != "completed" => {
+                result.message.push_str(" Tek seferlik izin SERBEST BIRAKILMADI (sonuç belirsiz); yeni bir kurulum başlatılamaz, bir kişinin bakması gerekiyor.");
+            }
+            _ => {}
+        }
         if !recorded {
             result.audit_recorded = false;
             if result.outcome == "completed" {
@@ -1581,6 +1765,53 @@ impl InstallService {
     /// holds) AND the journal (committed, same transaction, tool and approval). The row says what it is (`install-audit-reconciled`); it is never
     /// presented as the original, and nothing is invented: without the recipe the receipt was made under, no row is written. Only the audit table
     /// is touched -- never a file of the manager folder, a foreign file or user data.
+    /// Phase 3D-5: a reservation of the one-time allowance whose installation COMMITTED (a receipt of that very approval, vouched for by its own
+    /// committed journal) is settled as consumed. Nothing else is: a reservation without such evidence stays reserved ("needs attention"), because an
+    /// interrupted or rolled-back attempt is not proof that nothing was installed, and the allowance is never reset by guessing.
+    fn reconcile_allowance(&self, conn: &Connection, adapter: &Adapter, computer: &str, s: &mut RecoverySummary) {
+        let Some(pilot) = self.sources.one_time.as_ref() else { return };
+        let dir_sha = self.dir_digest();
+        let Ok(receipts) = adapter.committed_receipts() else { return };
+        let plain: Vec<Receipt> = receipts.iter().map(|(r, _)| r.clone()).collect();
+        let AllowanceStatus::Reserved { approval_id } = pilot_allowance::evaluate(conn, pilot, computer, &dir_sha, Some(&plain)) else {
+            return;
+        };
+        let Some((rc, _)) = receipts.iter().find(|(r, confirmed)| {
+            *confirmed
+                && r.action == Action::Install
+                && !r.synthetic
+                && r.approval_id == approval_id
+                && r.tool_id == pilot.tool_id
+                && r.recipe_digest == pilot.recipe_digest
+                && r.artifact_sha256.as_deref() == Some(pilot.artifact_sha256.as_str())
+        }) else {
+            s.notes.push(reason_text("pilot_allowance_unresolved"));
+            return;
+        };
+        let now = self.rfc_now();
+        let sc = pilot_allowance::Scope { pilot, computer, dir_sha: &dir_sha, now: &now };
+        let audited = Self::audit(
+            conn,
+            NewEvent::plain("verify", "passed", "pilot-allowance-reconciled", None, "not-applicable", "adapter").for_tool(
+                &pilot.tool_id,
+                EventContext {
+                    recipe_id: None,
+                    tool_version: Some(pilot.version.clone()),
+                    approval_reference: Some(approval_id.clone()),
+                    approved_recipe_digest: None,
+                    artifact_digest: Some(pilot.artifact_sha256.clone()),
+                    evidence_digest: None,
+                },
+            ),
+        );
+        if audited && pilot_allowance::consume(conn, &sc, &approval_id, &rc.txn_id, &rc.receipt_digest).is_ok() {
+            s.notes.push("Tek seferlik izin, tamamlanmış kurulumun makbuzundan 'kullanıldı' olarak işlendi.".to_string());
+        } else {
+            s.needs_attention += 1;
+            s.notes.push(reason_text("pilot_allowance_unresolved"));
+        }
+    }
+
     fn reconcile_audit(&self, conn: &Connection, adapter: &Adapter, s: &mut RecoverySummary) {
         let Ok(receipts) = adapter.committed_receipts() else { return };
         let plain: Vec<Receipt> = receipts.iter().map(|(r, _)| r.clone()).collect();
@@ -1683,6 +1914,7 @@ impl InstallService {
             }
         }
         self.reconcile_audit(conn, &adapter, &mut s);
+        self.reconcile_allowance(conn, &adapter, &computer, &mut s);
         // only something that actually happened is a rollback event: an examination that found nothing is not recorded
         if s.rolled_back + s.rolled_forward + s.needs_attention > 0 {
             let recorded = Self::audit(
@@ -1702,6 +1934,20 @@ impl InstallService {
         }
         Ok(s)
     }
+}
+
+/// What the transaction's own result says about the reservation (before it is checked independently).
+enum SettleHint {
+    Completed { txn: String, digest: String },
+    MaybeClean,
+    Keep,
+}
+
+/// What is done with the reservation.
+enum Settle {
+    Consume { txn: String, digest: String },
+    Release,
+    Keep,
 }
 
 struct Prepared {
@@ -1745,6 +1991,8 @@ pub fn supply_probe(conn: &Connection, data_dir: PathBuf) -> AppResult<serde_jso
         "realRecipes": svc.sources.registry.len(),
         "authenticatedReferences": svc.sources.extra_authenticated.len(),
         "enablementEntries": svc.sources.pilot_gate.len(),
+        "oneTimeAllowances": usize::from(svc.sources.one_time.is_some()),
+        "oneTimeAllowanceArmed": svc.sources.one_time.as_ref().is_some_and(|p| p.armed_data_dir_sha256.is_some()),
         "evidenceRecords": svc.sources.evidence.attestations.len() + svc.sources.evidence.local_use_licenses.len(),
         "noticeBundles": svc.sources.notices.len(),
         "catalogEntries": states.len(),

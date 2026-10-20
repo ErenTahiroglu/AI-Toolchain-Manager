@@ -87,6 +87,13 @@ fn b2(payload: &[u8]) -> B2 {
     b2_with(payload, &|_| {}, &|_| {})
 }
 
+/// Arms the one-installation allowance for the lab's data directory (the real build is armed only by the separately authorized B3 commit).
+fn lab_armed(mut l: Lab) -> Lab {
+    let dir = l.data.clone();
+    l.svc.sources.one_time.as_mut().expect("the pilot supply carries the one-time rule").armed_data_dir_sha256 = Some(crate::pilot_allowance::data_dir_digest(&dir));
+    l
+}
+
 fn b2_sources(b: &B2, input: &Path, unlocked: bool) -> Sources {
     jq_pilot::sources(&b.spec, input.to_path_buf(), if unlocked { Some(b.digest.as_str()) } else { None })
 }
@@ -96,18 +103,20 @@ fn b2_lab(payload: &[u8]) -> (Lab, B2, tempfile::TempDir, PathBuf) {
     let (keep, input) = input_dir();
     let b = b2(payload);
     fs::write(input.join(JQ_FILE), &b.bytes).unwrap();
-    let l = lab_with(b2_sources(&b, &input, true), None);
+    let l = lab_armed(lab_with(b2_sources(&b, &input, true), None));
     l.with(|c| jq_pilot::seed_catalog(c).unwrap());
     (l, b, keep, input)
 }
 
 fn b2_restart(l: &Lab, b: &B2, input: &Path) -> InstallService {
     let c2 = l.clock.clone();
-    InstallService::with_sources(l.data.clone(), b2_sources(b, input, true), Arc::new(move || *c2.lock().unwrap()))
+    let mut s = b2_sources(b, input, true);
+    s.one_time.as_mut().unwrap().armed_data_dir_sha256 = Some(crate::pilot_allowance::data_dir_digest(&l.data));
+    InstallService::with_sources(l.data.clone(), s, Arc::new(move || *c2.lock().unwrap()))
 }
 
 fn closed(s: &Sources) -> bool {
-    s.registry.len() == 0 && s.extra_authenticated.is_empty() && s.pilot_gate.is_empty() && s.notices.is_empty()
+    s.registry.len() == 0 && s.extra_authenticated.is_empty() && s.pilot_gate.is_empty() && s.notices.is_empty() && s.one_time.is_none()
         && s.evidence.attestations.is_empty() && s.evidence.local_use_licenses.is_empty()
 }
 
@@ -369,7 +378,7 @@ fn b2_an_unlocked_test_build_still_refuses_any_file_that_is_not_exactly_the_real
     let (_k, input) = input_dir();
     let unlocked = jq_pilot::sources(&Spec::committed(), input.clone(), Some(&real_recipe_digest()));
     assert_eq!(unlocked.pilot_gate.len(), 1);
-    let l = lab_with(unlocked, None);
+    let l = lab_armed(lab_with(unlocked, None));
     l.with(|c| jq_pilot::seed_catalog(c).unwrap());
     assert_eq!(l.state(JQ).status, Status::Available);
     // no file, a file of the wrong size, a file of exactly the right size but other content
@@ -482,9 +491,10 @@ fn b2_the_whole_pilot_path_runs_on_synthetic_bytes_and_the_preview_tells_the_tru
     assert_eq!(rr.outcome, "completed", "{rr:?}");
     assert!(!l.root().join("versions/jq").exists());
     assert_eq!(l.state(JQ).status, Status::Removed);
-    // and again: reinstall, remove
-    assert_eq!(jq_install(&l).outcome, "completed");
-    assert_eq!(jq_remove(&l).outcome, "completed");
+    // the ONE installation is spent: a removal did not reopen it, a restart does not, and no preview of a second installation can even be opened
+    assert_eq!(l.try_preview(JQ, Action::Install).unwrap_err().code, "INSTALL_PILOT_ALLOWANCE_CONSUMED");
+    let again = l.state(JQ);
+    assert_eq!((again.status, again.can_install, again.reasons[0].code.as_str()), (Status::Removed, false, "pilot_allowance_consumed"), "{again:?}");
 
     // ---- nothing outside the manager's folder changed; the retained file is exactly as it was; no environment, search path or directory moved
     assert_eq!((fs::read(input.join(JQ_FILE)).unwrap(), fs::metadata(input.join(JQ_FILE)).unwrap().modified().unwrap()), source_before);
@@ -498,7 +508,7 @@ fn b2_the_whole_pilot_path_runs_on_synthetic_bytes_and_the_preview_tells_the_tru
     assert_eq!(fs::read(l.base.join("canary.txt")).unwrap(), b"untouched");
     assert_eq!(std::env::vars_os().collect::<Vec<_>>(), env_before);
     assert_eq!(std::env::current_dir().unwrap(), cwd_before);
-    assert!(l.events().iter().filter(|e| e["eventType"] == "install" && e["outcome"] == "passed").count() == 2);
+    assert!(l.events().iter().filter(|e| e["eventType"] == "install" && e["outcome"] == "passed").count() == 1);
     assert!(l.with(|c| audit::verify(c).unwrap()).ok);
 }
 
@@ -589,6 +599,14 @@ fn b2_concurrent_confirmations_of_one_preview_install_exactly_once() {
 #[test]
 fn b2_audit_write_failure_after_the_installation_is_needs_attention_with_the_true_state_and_recovery_reconciles_it() {
     let (l, b, _k, _i) = b2_lab(b"b2 audit");
+    // the mandatory PRE-installation row: when it cannot be written nothing happens at all and the one-time allowance is NOT touched
+    let p0 = l.preview(JQ, Action::Install);
+    fail_audit_when(&l, "approve", "refuse_approve");
+    let r0 = l.confirm(&p0);
+    assert_eq!((r0.outcome.as_str(), code(&r0)), ("refused", "audit_unavailable"), "{r0:?}");
+    assert!(!l.data.join("atm-managed").exists());
+    assert_eq!(l.state(JQ).status, Status::Available, "the allowance was not consumed or reserved by a refused confirmation");
+    drop_trigger(&l, "refuse_approve");
     let p = l.preview(JQ, Action::Install);
     fail_audit_when(&l, "install", "refuse_install_row");
     let r = l.confirm(&p);
@@ -602,14 +620,9 @@ fn b2_audit_write_failure_after_the_installation_is_needs_attention_with_the_tru
     let rec = l.with(|c| l.svc.recover(c)).unwrap();
     assert_eq!((rec.audit_reconciled, rec.audit_unreconciled), (1, 0), "{rec:?}");
     assert_eq!(l.state(JQ).status, Status::InstalledVerified);
-    // the mandatory PRE-installation row: when it cannot be written nothing happens at all
+    // the installation was consumed even though its outcome row had to be reconstructed: removal, then no second installation
     assert_eq!(jq_remove(&l).outcome, "completed");
-    let p2 = l.preview(JQ, Action::Install);
-    fail_audit_when(&l, "approve", "refuse_approve");
-    let r2 = l.confirm(&p2);
-    assert_eq!((r2.outcome.as_str(), code(&r2)), ("refused", "audit_unavailable"), "{r2:?}");
-    assert!(!jq_artifact(&l).exists());
-    drop_trigger(&l, "refuse_approve");
+    assert_eq!(l.try_preview(JQ, Action::Install).unwrap_err().code, "INSTALL_PILOT_ALLOWANCE_CONSUMED");
 }
 
 #[test]
@@ -619,7 +632,7 @@ fn b2_a_failure_at_any_point_of_the_install_is_rolled_back_and_a_clean_retry_ins
         let b = b2(b"b2 rollback");
         fs::write(input.join(JQ_FILE), &b.bytes).unwrap();
         let hook: FaultHook = Arc::new(move |p| (p == point).then_some(Fault::Fail));
-        let l = lab_with(b2_sources(&b, &input, true), Some(hook));
+        let l = lab_armed(lab_with(b2_sources(&b, &input, true), Some(hook)));
         l.with(|c| jq_pilot::seed_catalog(c).unwrap());
         let p = l.preview(JQ, Action::Install);
         let r = l.confirm(&p);
@@ -646,6 +659,18 @@ fn b2_a_failure_at_any_point_of_the_install_is_rolled_back_and_a_clean_retry_ins
 #[test]
 fn b2_unexpected_files_links_and_changed_identity_fail_closed_are_reported_and_are_never_repaired_or_deleted() {
     let (l, b, _k, _i) = b2_lab(b"b2 filesystem");
+    // an ownership conflict FIRST: someone else's folder sits where the installation needs its own. It fails closed, touches nothing of theirs, and --
+    // because it provably changed nothing -- does not spend the one installation
+    l.with(|c| drop(l.svc.open_or_establish(c, &InstallService::computer_id(c).unwrap()).unwrap()));
+    let vdir = l.root().join("versions/jq/1.8.2");
+    fs::create_dir_all(&vdir).unwrap();
+    fs::write(vdir.join("their-notes.txt"), b"not ours").unwrap();
+    let before = tree(&l.root().join("versions"));
+    let r = jq_install(&l);
+    assert_eq!((r.outcome.as_str(), code(&r)), ("failed", "version_folder_already_exists"), "{r:?}");
+    assert_eq!(tree(&l.root().join("versions")), before, "their folder and file are byte-identical");
+    assert_eq!(l.state(JQ).status, Status::Available, "a conflict that changed nothing does not spend the allowance");
+    fs::remove_dir_all(l.root().join("versions/jq")).unwrap(); // the owner of that folder takes it away
     assert_eq!(jq_install(&l).outcome, "completed");
     let f = jq_artifact(&l);
     // an unexpected file next to the installed one
@@ -686,16 +711,9 @@ fn b2_unexpected_files_links_and_changed_identity_fail_closed_are_reported_and_a
     }
     fs::rename(&moved, &tool_dir).unwrap();
     assert_eq!(l.state(JQ).status, Status::InstalledVerified, "once the owner puts things back the tool verifies again");
-    // an ownership conflict: someone else's folder in the place the next installation needs
+    // the removal is a separate, affirmative operation, and it does not reopen the installation
     assert_eq!(jq_remove(&l).outcome, "completed");
-    let vdir = l.root().join("versions/jq/1.8.2");
-    fs::create_dir_all(&vdir).unwrap();
-    fs::write(vdir.join("their-notes.txt"), b"not ours").unwrap();
-    let before = tree(&l.root().join("versions"));
-    let r = jq_install(&l);
-    assert_eq!((r.outcome.as_str(), code(&r)), ("failed", "version_folder_already_exists"), "{r:?}");
-    assert_eq!(tree(&l.root().join("versions")), before, "their folder and file are byte-identical");
-    assert_ne!(l.state(JQ).status, Status::InstalledVerified);
+    assert_eq!(l.try_preview(JQ, Action::Install).unwrap_err().code, "INSTALL_PILOT_ALLOWANCE_CONSUMED");
 }
 
 #[test]
@@ -828,3 +846,6 @@ fn b2_the_interface_cannot_name_a_path_a_digest_or_a_flag_for_the_pilot() {
 fn jq_pilot_notice_sha(b: &B2) -> String {
     audit::sha256_hex(&b.spec.notice_text)
 }
+
+// Phase 3D-5 (Issue #24): the one-installation allowance through the whole workflow
+include!("install_flow_b3_tests.rs");
