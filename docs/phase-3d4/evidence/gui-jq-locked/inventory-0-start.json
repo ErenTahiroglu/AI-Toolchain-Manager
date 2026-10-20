@@ -1,0 +1,20 @@
+{
+ "atm.sqlite": {
+  "kind": "file",
+  "size": 4096,
+  "links": 1,
+  "sha256": "da63a52bdf62b3fc863995d79f497584be3ba97c1de4c55d1d301afbafab6cfc"
+ },
+ "atm.sqlite-shm": {
+  "kind": "file",
+  "size": 32768,
+  "links": 1,
+  "sha256": "6e33046c6b774d630c1334e12391563a3593497081f0cf1dc8753928c95c08c3"
+ },
+ "atm.sqlite-wal": {
+  "kind": "file",
+  "size": 609792,
+  "links": 1,
+  "sha256": "71c867db75af410ba0f11057f90c4b9519439dbbbe24ef020391e1602950b09f"
+ }
+}

@@ -107,7 +107,13 @@ def main(argv):
     check("enablement list empty in the release supply", "evidence: Evidence::production(),\n            pilot_gate: Vec::new()," in flow.replace("\r\n", "\n"))
 
     if have:
-        changed = [l for l in git("diff", "--name-only", f"{cand}..HEAD").splitlines() if l]
+        # The package was frozen at the commit the independent reviewer examined and accepted (recorded by the Phase 3D-4 binding, when it exists);
+        # later commits belong to later phases and are checked by their own rules. Without that record the range still ends at HEAD, as before.
+        head = "HEAD"
+        binding = ROOT / "docs/phase-3d4/b1-review-binding.json"
+        if binding.is_file():
+            head = json.loads(binding.read_text(encoding="utf-8"))["accepted"]["finalSha"]
+        changed = [l for l in git("diff", "--name-only", f"{cand}..{head}").splitlines() if l]
         outside = [c for c in changed if not c.startswith("docs/phase-3d3b/")]
         check("commits after the candidate commit touch only docs/phase-3d3b/", not outside, ", ".join(outside[:5]))
     else:

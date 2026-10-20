@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "purpose": "The B2 (Phase 3D-4) checks of the jq 1.8.2 / Windows x64 pilot wiring, mapped to the requirements of the B2 task, with the exact test identifiers that exercise them. Every test is DEVELOPER-AUTHORED and runs on synthetic bytes (a consistent copy of the committed pilot pieces re-pinned to made-up bytes); none of them is independent evidence by itself. tools/run_staging.py --manifest <this file> runs exactly these identifiers and fails if one is missing, renamed, ignored or failing. The real jq bytes are never read, copied, hashed or executed by any of them.",
+  "requirements": [
+    {
+      "id": "B2-1",
+      "title": "The default build cannot install jq; the pilot configuration is Windows-only, narrow and has no shortcut",
+      "cargo": [
+        "install_flow::tests::b2_the_real_committed_supply_is_windows_only_locked_and_creates_nothing",
+        "install_flow::tests::b2_a_default_build_cannot_install_jq_and_the_pilot_build_only_shows_it_locked",
+        "install_flow::tests::b2_the_pilot_module_has_no_environment_process_network_registry_or_unlock_shortcut_and_is_wired_in_exactly_one_place",
+        "install_flow::tests::b2_the_interface_cannot_name_a_path_a_digest_or_a_flag_for_the_pilot"
+      ]
+    },
+    {
+      "id": "B2-2",
+      "title": "The real jq bytes stay LOCKED even in the pilot configuration (one constant, off; the provider and the enablement list are empty)",
+      "cargo": [
+        "install_flow::tests::b2_the_unlock_is_one_constant_naming_the_exact_recipe_digest_and_it_is_off",
+        "install_flow::tests::b2_with_the_lock_on_a_perfect_file_is_neither_read_previewed_nor_installed",
+        "install_flow::tests::b2_an_unlocked_test_build_still_refuses_any_file_that_is_not_exactly_the_real_one"
+      ]
+    },
+    {
+      "id": "B2-3",
+      "title": "The independent B1 decision is bound to the exact recipe; missing or modified review evidence and every tampered piece close the supply",
+      "cargo": [
+        "install_flow::tests::b2_the_committed_files_assemble_into_the_exact_reviewed_pilot_and_the_candidate_recipe_is_unchanged",
+        "install_flow::tests::b2_the_synthetic_copy_is_consistent_and_differs_from_the_real_pieces_only_in_what_the_bytes_decide",
+        "install_flow::tests::b2_missing_or_modified_b1_review_evidence_and_tampered_pieces_close_the_supply_with_the_right_reason",
+        "install_flow::tests::b2_wrong_tool_version_architecture_source_origin_and_network_permissions_are_refused_by_the_validator_even_when_consistently_bound"
+      ]
+    },
+    {
+      "id": "B2-4",
+      "title": "Catalog identity: the recipe's tool id is the catalog row's id and nothing else is seeded",
+      "cargo": [
+        "install_flow::tests::b2_the_catalog_identity_is_the_recipes_tool_id_and_nothing_else_is_seeded"
+      ]
+    },
+    {
+      "id": "B2-5",
+      "title": "The whole path on synthetic bytes: catalog, details, preview (every disclosure), consent, result, installed details, restart, removal; no external change",
+      "cargo": [
+        "install_flow::tests::b2_the_whole_pilot_path_runs_on_synthetic_bytes_and_the_preview_tells_the_truth"
+      ]
+    },
+    {
+      "id": "B2-6",
+      "title": "Consent bound to the preview, single-use, replay and stale offers refused; concurrent confirmations install once",
+      "cargo": [
+        "install_flow::tests::b2_consent_is_single_use_bound_to_the_preview_and_replay_or_a_stale_offer_is_refused",
+        "install_flow::tests::b2_concurrent_confirmations_of_one_preview_install_exactly_once"
+      ]
+    },
+    {
+      "id": "B2-7",
+      "title": "Audit write failure: needs_attention with the true state, reconciled by recovery; mandatory pre-installation row",
+      "cargo": [
+        "install_flow::tests::b2_audit_write_failure_after_the_installation_is_needs_attention_with_the_true_state_and_recovery_reconciles_it"
+      ]
+    },
+    {
+      "id": "B2-8",
+      "title": "Rollback at every injected failure point and a clean retry",
+      "cargo": [
+        "install_flow::tests::b2_a_failure_at_any_point_of_the_install_is_rolled_back_and_a_clean_retry_installs"
+      ]
+    },
+    {
+      "id": "B2-9",
+      "title": "Filesystem and provider safety: unexpected files, links, junctions, changed identity, ownership conflicts, replaced files",
+      "cargo": [
+        "install_flow::tests::b2_unexpected_files_links_and_changed_identity_fail_closed_are_reported_and_are_never_repaired_or_deleted",
+        "install_flow::tests::b2_the_retained_file_provider_refuses_links_replaced_files_and_other_names_through_the_whole_service"
+      ]
+    }
+  ],
+  "python": [
+    "tests.test_phase3d4_contract"
+  ],
+  "frontend": {
+    "files": [
+      "src/Install.test.tsx"
+    ],
+    "titles": [
+      "the jq pilot preview discloses the licence scope, the stored file name and that the file is never run or put on PATH"
+    ]
+  },
+  "notReproducibleInCi": [
+    "The real application window with the jq-pilot build: needs WebView2 and a desktop session (tools/gui_install_flow.ps1 drives the synthetic-pilot build; the jq-pilot build is checked by its own headless/GUI notes in docs/phase-3d4).",
+    "Smart App Control / Defender reaction to a real executable: needs the real file; never part of B2.",
+    "Operating-system level network isolation: not available without administrator rights."
+  ]
+}

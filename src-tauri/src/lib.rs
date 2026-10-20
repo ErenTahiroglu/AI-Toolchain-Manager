@@ -1,3 +1,9 @@
+// Phase 3D-4: the jq pilot configuration is Windows-only and separate from the synthetic one. Both are refused at compile time otherwise.
+#[cfg(all(feature = "jq-pilot", not(windows)))]
+compile_error!("the `jq-pilot` feature is Windows-only: it supplies the jq 1.8.2 windows-x64 pilot and nothing else");
+#[cfg(all(feature = "jq-pilot", feature = "synthetic-pilot"))]
+compile_error!("`jq-pilot` and `synthetic-pilot` are separate pilot configurations and must not be combined");
+
 mod adapter;
 mod approval;
 mod approval_store;

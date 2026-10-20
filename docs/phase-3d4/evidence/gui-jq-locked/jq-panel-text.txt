@@ -1,0 +1,7 @@
+Kurulum
+
+? Doğrulama tamamlanmadı
+
+Bu araç için incelenmiş bir tarif ve bağımsız doğrulanmış bir dosya özeti yok; bu yüzden kurulamaz.
+
+Bu derlemede bu gerçek araç için kurulum etkinleştirilmedi; ayrı, gözden geçirilmiş bir etkinleştirme gerekir. recipe_not_enabled

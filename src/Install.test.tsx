@@ -324,4 +324,19 @@ describe("audit honesty (Issue #22) and the local-use licence in the real compon
     expect(scope.getByText(/Yalnızca bu bilgisayardaki yerel kullanım için kabul edildi \(yeniden dağıtım veya paketleme için DEĞİL\)/)).toBeInTheDocument();
     expect(scope.getByText(/Kaynak, bağımsız bir kanıt kaydıyla depo, iş akışı ve commit.e bağlandı/)).toBeInTheDocument();
   });
+
+  it("the jq pilot preview discloses the licence scope, the stored file name and that the file is never run or put on PATH", async () => {
+    backend.install.licenseState = "accepted_local_use";
+    const panel = await openCatalog("available");
+    await userEvent.click(panel.getByRole("button", { name: "Kurulum önizlemesini aç" }));
+    const heading = await screen.findByRole("heading", { name: /Kurulum önizlemesi/ });
+    const scope = within(heading.closest("section")!);
+    expect(scope.getByText("Lisansın kapsamı")).toBeInTheDocument();
+    expect(scope.getByText(/YALNIZCA bu bilgisayardaki tek, yerel, yeniden dağıtımsız kullanım/)).toBeInTheDocument();
+    expect(scope.getByText("Kurulan dosya nasıl saklanır?")).toBeInTheDocument();
+    expect(scope.getByText(/sabit adıyla \(artifact\.bin\) SAKLANIR/)).toBeInTheDocument();
+    expect(scope.getByText(/PATH'te yer almaz/)).toBeInTheDocument();
+    expect(scope.getByText(/hiçbir zaman çalıştırılmaz/)).toBeInTheDocument();
+    expect(calls("confirm_install")).toHaveLength(0);
+  });
 });

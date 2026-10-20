@@ -198,9 +198,9 @@ impl<'a> Adapter<'a> {
     }
 
     /// The acting adapter of the Phase 3D-2 workflow: synthetic artifacts only (the recipe gate is unchanged), authorised by an in-app
-    /// confirmation grant instead of a device approval. It exists in tests and in a build made with the `synthetic-pilot` feature, never
+    /// confirmation grant instead of a device approval. It exists in tests and in a build made with the `synthetic-pilot` or the `jq-pilot` feature, never
     /// in a release build; [`Adapter::production`] stays closed.
-    #[cfg(any(test, feature = "synthetic-pilot"))]
+    #[cfg(any(test, feature = "synthetic-pilot", feature = "jq-pilot"))]
     pub fn mvp_synthetic(
         root: &'a ManagedRoot,
         refs: &'a ReferenceSet,
@@ -212,7 +212,7 @@ impl<'a> Adapter<'a> {
     }
 
     /// Enables exactly the listed real recipes (Phase 3D-3). Tests and the explicit pilot build only; a release build never calls this.
-    #[cfg(any(test, feature = "synthetic-pilot"))]
+    #[cfg(any(test, feature = "synthetic-pilot", feature = "jq-pilot"))]
     pub fn with_pilot_gate(mut self, gate: &'a [PilotRecipe]) -> Adapter<'a> {
         self.gate = gate;
         self

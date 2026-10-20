@@ -44,6 +44,10 @@ export const makePreview = (m: InstallMock, entryId: string, action: InstallActi
       artifactOrigin: "local_retained_file",
       originText: "Dosya, bu bilgisayarda daha önce edinilip doğrulanmış YEREL bir dosyadan okunur (uygulamanın sabit giriş klasöründeki tek dosya; yalnızca okunur, değiştirilmez). Hiçbir şey indirilmez; ağ kullanılmaz.",
       authentication: "authenticated_reference", licenseState: m.licenseState, licenseSpdx: "MIT",
+      licenseScopeText: m.licenseState === "accepted_local_use"
+        ? "Lisans YALNIZCA bu bilgisayardaki tek, yerel, yeniden dağıtımsız kullanım için kabul edildi (LICENSE_PASS_LOCAL_USE). Yeniden dağıtım, paketleme veya barındırma izni DEĞİLDİR; çözülmemiş noktalar aşağıdaki bildirimlerde listelenir."
+        : "Lisans, yazılı bir incelemeyle kabul edildi.",
+      installedAsText: "Dosya yöneticinin kendi klasöründe sabit adıyla (artifact.bin) SAKLANIR; \"jq-windows-amd64.exe\" adıyla bir komut olmaz, PATH'te yer almaz, çalıştırılabilir bir kısayol oluşturulmaz ve hiçbir zaman çalıştırılmaz. Bu pilot yalnızca kopyalama (kurulum) ve kaldırma yapar.",
       notices: { title: "SENTETİK bildirim paketi (deneme)", sha256: "cd".repeat(32), components: ["synthetic-hello - MIT (sentetik)", "synthetic-runtime - GPL WITH exception (sentetik)"], unresolved: ["Bu bir deneme paketidir."] },
       effects: removal
         ? [

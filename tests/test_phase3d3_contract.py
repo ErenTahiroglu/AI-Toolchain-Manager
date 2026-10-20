@@ -142,8 +142,8 @@ class NothingIsActivated(unittest.TestCase):
 
     def test_the_acting_adapter_and_the_enablement_gate_exist_only_where_expected(self):
         adapter = production("adapter.rs")
-        self.assertIn('#[cfg(any(test, feature = "synthetic-pilot"))]\n    pub fn with_pilot_gate', adapter)
-        self.assertIn('#[cfg(any(test, feature = "synthetic-pilot"))]\n    pub fn mvp_synthetic', adapter)
+        self.assertIn('#[cfg(any(test, feature = "synthetic-pilot", feature = "jq-pilot"))]\n    pub fn with_pilot_gate', adapter)
+        self.assertIn('#[cfg(any(test, feature = "synthetic-pilot", feature = "jq-pilot"))]\n    pub fn mvp_synthetic', adapter)
         life = production("lifecycle.rs")
         self.assertIn("let synthetic_ok = r.synthetic && r.tool_id.starts_with(\"synthetic-\");", life)
         self.assertIn("!synthetic_ok && !gate.iter().any(|g| g.allows(a.recipe))", life)
@@ -151,7 +151,7 @@ class NothingIsActivated(unittest.TestCase):
         # the path-based synthetic engine can never apply a real recipe
         self.assertIn("check_authority_gated(a, action, computer_id, host_platform, now, &[])", life)
         flow = production("install_flow.rs")
-        self.assertIn('#[cfg(not(any(test, feature = "synthetic-pilot")))]\n    fn adapter<', flow)
+        self.assertIn('#[cfg(not(any(test, feature = "synthetic-pilot", feature = "jq-pilot")))]\n    fn adapter<', flow)
         self.assertIn('Err("production_adapter_not_enabled")', flow)
 
     def test_ci_never_builds_the_release_with_a_pilot_feature(self):

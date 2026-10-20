@@ -1,0 +1,8 @@
+{
+ "added": [],
+ "removed": [],
+ "changed": [
+  "atm.sqlite-shm",
+  "atm.sqlite-wal"
+ ]
+}

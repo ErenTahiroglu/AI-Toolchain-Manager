@@ -1,0 +1,31 @@
+{
+  "phase": "after-restart",
+  "passed": 6,
+  "total": 6,
+  "results": [
+    {
+      "label": "after the restart the tool is still 'Kurulu ve doğrulandı'",
+      "value": true
+    },
+    {
+      "label": "the artifact is intact and verifies",
+      "value": true
+    },
+    {
+      "label": "an old offer id from the earlier process does not exist any more",
+      "value": true
+    },
+    {
+      "label": "recovery has nothing to do and changes nothing",
+      "value": true
+    },
+    {
+      "label": "no lock, staging or snapshot leftovers after the kill and the restart",
+      "value": true
+    },
+    {
+      "label": "audit chain verifies after the restart",
+      "value": true
+    }
+  ]
+}

@@ -581,3 +581,6 @@ fn the_staging_fixture_identity_is_pinned_and_the_candidate_runs_end_to_end_on_e
     assert_eq!(jq_remove(&l).outcome, "completed");
     assert_eq!(crate::synthetic::sha256_of(&fs::read(input.join(JQ_FILE)).unwrap()), fx["platforms"][&host]["sha256"].as_str().unwrap());
 }
+
+// Phase 3D-4 (B2): the real pilot wiring on synthetic bytes
+include!("install_flow_b2_tests.rs");

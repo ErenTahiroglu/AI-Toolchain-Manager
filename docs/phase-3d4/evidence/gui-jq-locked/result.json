@@ -1,0 +1,68 @@
+{
+ "kind": "gui-jq-pilot-locked",
+ "total": 15,
+ "passed": 15,
+ "failed": [],
+ "results": [
+  {
+   "label": "the jq row has an install panel (the pilot build seeds the catalog row)",
+   "value": true
+  },
+  {
+   "label": "only the ordinary 13 entries and jq have a panel (no synthetic tool in this build)",
+   "value": true
+  },
+  {
+   "label": "jq: 'Doğrulama tamamlanmadı'",
+   "value": true
+  },
+  {
+   "label": "jq: the reason says the installation is not enabled in this build",
+   "value": true
+  },
+  {
+   "label": "jq: no install button, no remove button",
+   "value": true
+  },
+  {
+   "label": "forged IPC: prepare_install(jq, install) is refused",
+   "value": true
+  },
+  {
+   "label": "forged IPC: prepare_install(jq, uninstall) is refused",
+   "value": true
+  },
+  {
+   "label": "forged IPC: a request carrying a path / digest / unlock flag is rejected by the IPC layer",
+   "value": true
+  },
+  {
+   "label": "forged IPC: confirm_install of an unknown offer is refused and nothing happens",
+   "value": true
+  },
+  {
+   "label": "the installed-details of jq show nothing installed",
+   "value": true
+  },
+  {
+   "label": "no manager folder (atm-managed) was created",
+   "value": true
+  },
+  {
+   "label": "no input folder (jq-pilot-input) was created: the application reads no retained file while locked",
+   "value": true
+  },
+  {
+   "label": "the only changed files are the application's own SQLite files",
+   "value": true
+  },
+  {
+   "label": "the catalog row jq exists once, unreviewed, manual-only, install_state not_managed",
+   "value": true
+  },
+  {
+   "label": "the audit trail holds no install or approve row (nothing was confirmed)",
+   "value": true
+  }
+ ]
+}

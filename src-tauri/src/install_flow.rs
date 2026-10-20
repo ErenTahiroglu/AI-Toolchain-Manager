@@ -59,7 +59,7 @@ pub trait ArtifactProvider: Send + Sync {
     fn bytes(&self, tool_id: &str, version: &str, platform: &str) -> Result<Vec<u8>, &'static str>;
 }
 
-#[cfg_attr(feature = "synthetic-pilot", allow(dead_code))]
+#[cfg_attr(any(feature = "synthetic-pilot", feature = "jq-pilot"), allow(dead_code))]
 struct NoArtifacts;
 
 impl ArtifactProvider for NoArtifacts {
@@ -103,7 +103,7 @@ pub struct Sources {
 
 impl Sources {
     /// The release supply: nothing.
-    #[cfg_attr(feature = "synthetic-pilot", allow(dead_code))]
+    #[cfg_attr(any(feature = "synthetic-pilot", feature = "jq-pilot"), allow(dead_code))]
     pub fn production() -> Sources {
         Sources {
             registry: RecipeRegistry::production(),
@@ -245,6 +245,10 @@ pub struct PreviewContent {
     pub authentication: String,
     pub license_state: String,
     pub license_spdx: String,
+    /// What the licence decision covers and what it does not, in words (part of what the confirmation is bound to).
+    pub license_scope_text: String,
+    /// How the installed file is stored and what it is NOT (a stored copy; not a command, not on PATH, never run). Part of the confirmation.
+    pub installed_as_text: String,
     pub notices: Option<NoticeView>,
     pub effects: Vec<Effect>,
     /// What the manager will NOT do, stated explicitly.
@@ -478,6 +482,7 @@ fn refusal_text(code: &str) -> String {
         "artifact_not_a_plain_file" => "Dosya düz, tek bağlantılı bir dosya değil (bağlantı, klasör veya özel girdi). Hiçbir şey yapılmadı.",
         "artifact_size_mismatch" => "Dosyanın boyutu tarifteki boyutla aynı değil. Hiçbir şey yapılmadı.",
         "production_adapter_not_enabled" => "Bu sürümde gerçek kurulum kapalıdır. Hiçbir şey yapılmadı.",
+        "real_install_locked" => "Gerçek dosyanın kurulumu bu derlemede KİLİTLİDİR: ayrı, gözden geçirilmiş ve kullanıcı tarafından açıkça yetkilendirilmiş bir değişiklik gerekir. Dosya açılmadı, hiçbir şey yapılmadı.",
         "consent_binding_mismatch" | "consent_actor_mismatch" => "Onay, bu işlemin ayrıntılarına bağlı değil. Hiçbir şey yapılmadı.",
         "approval_expired" => "Onayın süresi dolmuş. Hiçbir şey yapılmadı veya yapılan geri alındı.",
         "injected_failure" => "İşlem sırasında bir hata oluştu ve geri alındı.",
@@ -548,7 +553,7 @@ struct Probe {
 
 impl InstallService {
     /// The release service: the empty supply.
-    #[cfg_attr(feature = "synthetic-pilot", allow(dead_code))]
+    #[cfg_attr(any(feature = "synthetic-pilot", feature = "jq-pilot"), allow(dead_code))]
     pub fn new(data_dir: PathBuf) -> InstallService {
         InstallService::with_sources(data_dir, Sources::production(), Arc::new(Utc::now))
     }
@@ -561,7 +566,13 @@ impl InstallService {
             let input = data_dir.join(supply::RETAINED_FOLDER);
             InstallService::with_sources(data_dir, supply::sources_for_app(input), Arc::new(Utc::now))
         }
-        #[cfg(not(feature = "synthetic-pilot"))]
+        // Phase 3D-4: the ONE reviewed jq pilot, still LOCKED for the real bytes (see `jq_pilot::B3_UNLOCK`)
+        #[cfg(feature = "jq-pilot")]
+        {
+            let input = data_dir.join(jq_pilot::INPUT_FOLDER);
+            InstallService::with_sources(data_dir, jq_pilot::sources_for_app(input), Arc::new(Utc::now))
+        }
+        #[cfg(not(any(feature = "synthetic-pilot", feature = "jq-pilot")))]
         {
             InstallService::new(data_dir)
         }
@@ -574,6 +585,11 @@ impl InstallService {
         {
             let _ = supply::seed_catalog(conn);
             supply::place_retained_fixture(self.anchor.dir_path());
+        }
+        // the jq row only: no folder is created and no file is placed (the person puts the retained file there, in B3, by hand)
+        #[cfg(feature = "jq-pilot")]
+        {
+            let _ = jq_pilot::seed_catalog(conn);
         }
         let _ = self.recover(conn);
     }
@@ -632,7 +648,7 @@ impl InstallService {
         }
     }
 
-    #[cfg(any(test, feature = "synthetic-pilot"))]
+    #[cfg(any(test, feature = "synthetic-pilot", feature = "jq-pilot"))]
     fn adapter<'a>(
         &'a self,
         root: &'a ManagedRoot,
@@ -648,7 +664,7 @@ impl InstallService {
     }
 
     /// A release build contains no acting adapter at all: there is nothing to construct.
-    #[cfg(not(any(test, feature = "synthetic-pilot")))]
+    #[cfg(not(any(test, feature = "synthetic-pilot", feature = "jq-pilot")))]
     fn adapter<'a>(
         &'a self,
         _: &'a ManagedRoot,
@@ -974,6 +990,25 @@ impl InstallService {
         .collect()
     }
 
+    fn license_scope_text(state: &str) -> String {
+        match state {
+            "accepted_local_use" => concat!(
+                "Lisans YALNIZCA bu bilgisayardaki tek, yerel, yeniden dağıtımsız kullanım için kabul edildi (LICENSE_PASS_LOCAL_USE). ",
+                "Yeniden dağıtım, paketleme veya barındırma izni DEĞİLDİR; çözülmemiş noktalar aşağıdaki bildirimlerde listelenir."
+            )
+            .to_string(),
+            "accepted" => "Lisans, yazılı bir incelemeyle kabul edildi.".to_string(),
+            _ => "Lisans kabul edilmedi.".to_string(),
+        }
+    }
+
+    fn installed_as_text(file_name: &str) -> String {
+        format!(
+            "Dosya yöneticinin kendi klasöründe sabit adıyla (artifact.bin) SAKLANIR; \"{file_name}\" adıyla bir komut olmaz, PATH'te yer almaz, \
+             çalıştırılabilir bir kısayol oluşturulmaz ve hiçbir zaman çalıştırılmaz. Bu pilot yalnızca kopyalama (kurulum) ve kaldırma yapar."
+        )
+    }
+
     fn consent_statement(action: Action) -> String {
         let what = match action {
             Action::Install => "kurulumu",
@@ -1045,6 +1080,8 @@ impl InstallService {
             authentication: "authenticated_reference".to_string(),
             license_state: rec.license.state.clone(),
             license_spdx: rec.license.spdx_id.clone(),
+            license_scope_text: Self::license_scope_text(&rec.license.state),
+            installed_as_text: Self::installed_as_text(&rec.artifact.file_name),
             notices: notice.map(|n| NoticeView {
                 title: n.title.clone(),
                 sha256: n.digest(),
@@ -1697,9 +1734,33 @@ fn leak(s: String) -> &'static str {
     leaked
 }
 
+/// What the application as BUILT can install, read from the very service it starts with (nothing is created, read from disk or executed): the
+/// headless self-check reports it so CI can show that a release build holds no recipe, no reference, no enablement entry and can install or remove
+/// nothing, whatever the catalog holds.
+pub fn supply_probe(conn: &Connection, data_dir: PathBuf) -> AppResult<serde_json::Value> {
+    let svc = InstallService::for_app(data_dir);
+    let states = svc.list_states(conn)?;
+    Ok(serde_json::json!({
+        "pilotFeatures": { "jqPilot": cfg!(feature = "jq-pilot"), "syntheticPilot": cfg!(feature = "synthetic-pilot") },
+        "realRecipes": svc.sources.registry.len(),
+        "authenticatedReferences": svc.sources.extra_authenticated.len(),
+        "enablementEntries": svc.sources.pilot_gate.len(),
+        "evidenceRecords": svc.sources.evidence.attestations.len() + svc.sources.evidence.local_use_licenses.len(),
+        "noticeBundles": svc.sources.notices.len(),
+        "catalogEntries": states.len(),
+        "entriesThatCanBeInstalledOrRemoved": states.iter().filter(|s| s.can_install || s.can_remove).count(),
+        "everyEntryVerificationIncomplete": states.iter().all(|s| s.status == Status::VerificationIncomplete),
+    }))
+}
+
 #[cfg(any(test, feature = "synthetic-pilot"))]
 #[path = "pilot_supply.rs"]
 pub mod supply;
+
+/// Phase 3D-4 (B2): the supply of the one reviewed jq 1.8.2 / Windows x64 pilot. Compiled for tests and for the `jq-pilot` build only.
+#[cfg(any(test, feature = "jq-pilot"))]
+#[path = "jq_pilot.rs"]
+pub mod jq_pilot;
 
 #[cfg(test)]
 #[path = "install_flow_tests.rs"]

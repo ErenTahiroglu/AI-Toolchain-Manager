@@ -1129,14 +1129,14 @@ fn a_release_build_contains_no_acting_adapter_and_the_gated_pieces_are_only_comp
     let production = src.split("#[cfg(test)]\n#[path").next().unwrap();
     // the only call that builds an acting adapter sits behind the cfg gate; the other arm returns the closed code
     assert_eq!(production.matches("Adapter::mvp_synthetic").count(), 1);
-    let gate = "#[cfg(any(test, feature = \"synthetic-pilot\"))]\n    fn adapter<'a>(";
+    let gate = "#[cfg(any(test, feature = \"synthetic-pilot\", feature = \"jq-pilot\"))]\n    fn adapter<'a>(";
     let at = production.find(gate).expect("gated acting constructor");
     assert!(production[at..].find("Adapter::mvp_synthetic").unwrap() < 1200);
-    assert!(production.contains("#[cfg(not(any(test, feature = \"synthetic-pilot\")))]\n    fn adapter<'a>("));
+    assert!(production.contains("#[cfg(not(any(test, feature = \"synthetic-pilot\", feature = \"jq-pilot\")))]\n    fn adapter<'a>("));
     assert!(production.contains("Err(\"production_adapter_not_enabled\")"));
     assert!(production.contains("#[cfg(any(test, feature = \"synthetic-pilot\"))]\n#[path = \"pilot_supply.rs\"]"));
     let adapter = include_str!("adapter.rs");
-    assert!(adapter.contains("#[cfg(any(test, feature = \"synthetic-pilot\"))]\n    pub fn mvp_synthetic"));
+    assert!(adapter.contains("#[cfg(any(test, feature = \"synthetic-pilot\", feature = \"jq-pilot\"))]\n    pub fn mvp_synthetic"));
     // the release supply is empty
     assert!(
         Sources::production().registry.len() == 0

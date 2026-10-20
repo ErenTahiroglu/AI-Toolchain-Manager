@@ -1,0 +1,44 @@
+# Phase 3D-4 (B2) — the exact jq Windows pilot, prepared and still locked
+
+Baseline `20106944977c96195e84b4d3cdcf1a1743877e35` (the SHA the independent B1 decision accepted). Frozen `main` `68eda3f0407490fabccb517dcf822ab4818fc0bf` is untouched. **jq was not downloaded, copied, opened, hashed, installed or executed; the real jq bytes were never in this working tree.** B2 is implementation and synthetic testing only; **B3 (the real installation) is NO-GO** until a separate exact-SHA Red Team review of this change *and* the user's explicit one-time, install-only authorization.
+
+| Topic | Result | Where |
+| --- | --- | --- |
+| **B1 decision, bound** | The reviewer-issued decision (Issue #23, comment **6299270819**) is captured verbatim, its hash pinned, and bound to the exact recipe digest `9c7a020d65d233e86577464a06c32b8f08fd4fd8403110e68fd551b674f7cca1`. The candidate recipe file is **unchanged**; the *reviewed* state exists only in the binding record, from which the pilot supply derives the review block. No signature is fabricated; no developer test is marked independent; CI is recorded as supporting evidence only. | [`phase-3d4/b1-review-binding.json`](phase-3d4/b1-review-binding.json), [capture](phase-3d4/evidence/issue-23-comment-6299270819.md) |
+| **Pilot supply** (one exact set) | reference, source attestation, `LICENSE_PASS_LOCAL_USE` record, reviewed recipe, notice bundle, catalog row `jq`, fixed read-only provider, one activation entry — assembled by `jq_pilot.rs` from committed files, cross-checked by the validator the workflow itself uses | [B2-PILOT-SUPPLY](phase-3d4/B2-PILOT-SUPPLY.md) |
+| **Closed by default** | `BUILT_IN_RECIPES_JSON = "[]"`, `BUILT_IN_AUTHENTICATED = &[]`, empty evidence, `Adapter::production` refuses (`production_adapter_not_enabled`); the pilot exists only for tests and the non-default, **Windows-only** `jq-pilot` feature (a compile error on any other OS and together with `synthetic-pilot`); CI's release build never enables it | tests `b2_a_default_build_cannot_install_jq…`, `b2_the_pilot_module_has_no_environment…` |
+| **Real bytes locked even in the pilot** | `B3_UNLOCK: Option<&str> = None`. While it is `None` the provider is a `LockedProvider` (touches no file), the enablement list is **empty**, the service reports the recipe as not enabled and the adapter refuses it. The unlock is not a flag, path, environment variable or argument: it is one constant that must name the exact recipe digest, changed by B3 in a separate reviewed commit. | `b2_the_unlock_is_one_constant…`, `b2_with_the_lock_on_a_perfect_file…`, GUI check |
+| **Synthetic end to end** | catalog → details → preview → consent → result → installed details → restart → removal, with the exact candidate structure re-pinned to made-up bytes through the same assembly code | `b2_the_whole_pilot_path_runs_on_synthetic_bytes…` |
+| **Preview discloses** | exact source, version, platform, SHA-256; *local retained file, nothing downloaded*; licence scope (*this computer only, not redistribution*); notices with the open Q1–Q3; every filesystem effect; the excluded operations; rollback/recovery expectations; that the in-app confirmation is **not Windows identity authentication**; and — new — *the file is stored as `artifact.bin`, is not a command named jq, is not on PATH and is never run* | `InstallService::installed_as_text` / `license_scope_text`, UI test |
+| **Phase 3D-0 digest-literal guard** | not weakened: the jq digest is still a literal in **no** Rust source and no catalog seed (the pilot `include_str!`s the committed data files); the default catalog seed has no jq row (the pilot build seeds one itself, idempotently, and respects a removal) | `tests/test_phase3d4_contract.py` |
+| **Issue #14** | stays **open**. Failures are closed, state is read back, unresolved ownership is `needs_attention`, nothing unrelated is touched; before/after inventories are planned for B3 ([B2-PILOT-SUPPLY §6](phase-3d4/B2-PILOT-SUPPLY.md)) | |
+
+## What the independent reviewer did and did not do (never merged with developer evidence)
+
+The comment says, and this phase repeats: the reviewer's independent evidence is the **source/JSON/evidence review (70/70)**, the **39 independent Python tests** and the **recreated fixture hashes**; supporting exact-SHA CI ran the developer-authored Rust (48) and frontend (2) staging checks; the Rust tests, the frontend checks and the real Windows GUI were **NOT independently run by ChatGPT**; no real jq bytes were reviewed; the original signature/attestation evidence stays *conditionally accepted* and was not re-verified by the reviewer; Request A's unauthorized network contact remains FAIL; the local-use licence is not redistribution approval; this gate does not certify Smart App Control or Defender on a real jq binary. The reviewer's ZIP, decision file, source report and 70-check results were **not available to the developer**, so their hashes are recorded exactly as the comment states them (not re-verified); no separate hash was published for the 39 Python tests, and none is invented. What the developer *could* verify was verified and is listed in the binding (comment retrieved, both Git trees equal the ones the comment names, recipe digest recomputed, exact-SHA CI run, fixture sizes).
+
+## Test runs on the development computer (developer-generated; every run reported, none retried inside the code)
+
+| Configuration | Result |
+| --- | --- |
+| default (`cargo test`), library tests | first run after a fresh build: **681 passed, 1 failed** — `lifecycle::tests::a_clean_rollback_removes_the_artifact_and_the_folder_and_nothing_else`, the path-based synthetic engine's Windows delete-pending pattern already described in [INTERMITTENT-TEST-NOTE](phase-3d3/INTERMITTENT-TEST-NOTE.md) (staging file "1 unexpected entry … left untouched"); it passed 3 of 3 alone and the next full run was **682 passed**; later final-tree runs: **682 passed** twice. Not explained, not hidden, not weakened. |
+| `--features jq-pilot` | **682 passed** (twice, final tree) |
+| `--features synthetic-pilot` | first test executable **BLOCKED / NOT RUN** by Smart App Control ([record](phase-3d4/SMART-APP-CONTROL-RECORD.md)); after a substantive source change the new binary ran: **681 passed, 1 failed** — a defect in this phase's own new test (`b2_a_default_build_cannot_install_jq…` asserted the *default* supply is empty, which is false under the synthetic configuration); the test was corrected (not weakened for the default build) and the configuration then passed **682**. |
+| `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean for default, `jq-pilot` and `synthetic-pilot` |
+| Python (`unittest discover`) | 269 tests OK with `ATM_SELFCHECK_JSON` pointing at the self-check of the final default debug build (6 skipped: tests that need inputs or a platform this run does not have) · `tools/verify_review_package.py` 76/76 |
+| Frontend | typecheck clean · **99/99** tests (1 new) · build OK |
+| B2 staging reproduction (`tools/run_staging.py --manifest docs/phase-3d4/b2-staging-manifest.json`) | 21/21 (19 Rust identifiers, 1 Python module, 1 frontend title) |
+| Headless self-check of the final default debug build | exit 0; `installSupplyProbe`: 0 recipes, 0 references, 0 enablement entries, 0 evidence records, 0 notices, `entriesThatCanBeInstalledOrRemoved: 0`, `jqPilot: false` |
+| Real window | `jq-pilot` build: locked, 15/15; synthetic regression: 75/75 + 6/6 ([GUI-EVIDENCE](phase-3d4/GUI-EVIDENCE.md)) |
+
+## Tests
+
+* Rust `install_flow::tests::b2_*` (19 tests; manifest [`b2-staging-manifest.json`](phase-3d4/b2-staging-manifest.json), run by `tools/run_staging.py --manifest …`), plus every earlier test unchanged apart from the documented widening of four gate pins ([GUARD-TEST-CHANGES](phase-3d4/GUARD-TEST-CHANGES.md)).
+* Python `tests/test_phase3d4_contract.py` (binding vs. capture, unchanged candidate, closed release, one unlock constant, CI wiring, manifest completeness).
+* Frontend: one new preview test (licence scope, stored name, never run / not on PATH).
+* Real window: `tools/gui_jq_pilot_locked.ps1` on a debug `jq-pilot` build — see [GUI-EVIDENCE](phase-3d4/GUI-EVIDENCE.md).
+* CI: Windows runs clippy and tests with `--features jq-pilot`; macOS proves the feature is refused at compile time; both run the default suite, the B2 staging reproduction and the headless self-check of the default release build.
+
+## Limits stated up front
+
+Developer-authored tests are not independent evidence; CI is not an independent user device; the reviewer's input files were not available here; Smart App Control's reaction to a real executable is untested and never part of B2; a macOS runner is not a Mac; Issue #14 stays open; B3 is not authorized and nothing in this phase begins it. See [B3-AUTHORIZATION-REQUEST.tr.md](phase-3d4/B3-AUTHORIZATION-REQUEST.tr.md) for the *proposed* (not given) one-time request.

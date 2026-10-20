@@ -83,6 +83,8 @@ function PreviewView({
         <dt>Doğrulama</dt><dd>Dosyanın özeti, bağımsız olarak doğrulanmış bir referans özetiyle ve tarifle eşleşti.</dd>
         <dt>Lisans</dt><dd>{c.licenseState === "accepted" ? "Bir incelemeyle kabul edildi" : c.licenseState === "accepted_local_use" ? "Yalnızca bu bilgisayardaki yerel kullanım için kabul edildi (yeniden dağıtım veya paketleme için DEĞİL)" : licenseLabel(c.licenseState)} · {c.licenseSpdx}</dd>
         <dt>Kaynak doğrulaması</dt><dd>{c.source.sourceAttested ? "Kaynak, bağımsız bir kanıt kaydıyla depo, iş akışı ve commit'e bağlandı" : "Yalnızca beyan; kanıtlanmadı"}</dd>
+        <dt>Lisansın kapsamı</dt><dd>{c.licenseScopeText}</dd>
+        <dt>Kurulan dosya nasıl saklanır?</dt><dd>{c.installedAsText}</dd>
         <dt>Ağ</dt><dd>{c.networkUsed ? "Ağ kullanılacak" : "Ağ kullanılmayacak; hiçbir şey indirilmeyecek"}</dd>
       </dl>
 

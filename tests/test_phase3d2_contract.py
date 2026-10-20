@@ -72,14 +72,14 @@ class NoticesPackage(unittest.TestCase):
 class TheGatesThatMustNotMove(unittest.TestCase):
     def test_the_acting_adapter_exists_only_for_tests_and_the_pilot_feature(self):
         adapter = production("adapter.rs")
-        self.assertIn('#[cfg(any(test, feature = "synthetic-pilot"))]\n    pub fn mvp_synthetic', adapter)
+        self.assertIn('#[cfg(any(test, feature = "synthetic-pilot", feature = "jq-pilot"))]\n    pub fn mvp_synthetic', adapter)
         self.assertEqual(adapter.count("mode: Mode::MvpSynthetic"), 1)
         self.assertEqual(adapter.count("mode: Mode::TestSynthetic"), 1)
         self.assertIn("#[cfg(test)]\n    pub fn test_mode", adapter)
         self.assertIn("production_adapter_not_enabled", adapter)
         flow = production("install_flow.rs")
         self.assertEqual(flow.count("Adapter::mvp_synthetic"), 1)
-        self.assertIn('#[cfg(not(any(test, feature = "synthetic-pilot")))]\n    fn adapter<', flow)
+        self.assertIn('#[cfg(not(any(test, feature = "synthetic-pilot", feature = "jq-pilot")))]\n    fn adapter<', flow)
         self.assertIn('Err("production_adapter_not_enabled")', flow)
         self.assertIn('#[cfg(any(test, feature = "synthetic-pilot"))]\n#[path = "pilot_supply.rs"]', flow)
 

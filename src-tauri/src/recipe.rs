@@ -458,6 +458,13 @@ impl RecipeRegistry {
         RecipeRegistry { entries }
     }
 
+    /// The registry of the jq pilot configuration (and its tests): it may hold a REAL recipe, but only what `jq_pilot` has assembled and checked
+    /// against its binding, evidence and enablement. No release build constructs one.
+    #[cfg(any(test, feature = "jq-pilot"))]
+    pub fn pilot(entries: Vec<ReviewedRecipe>) -> RecipeRegistry {
+        RecipeRegistry { entries }
+    }
+
     pub fn len(&self) -> usize {
         self.entries.len()
     }

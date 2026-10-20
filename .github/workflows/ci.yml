@@ -97,6 +97,28 @@ jobs:
           cargo clippy --target ${{ matrix.target }} --all-targets --features synthetic-pilot -- -D warnings
           cargo test --target ${{ matrix.target }} --features synthetic-pilot
 
+      # Phase 3D-4 (B2): the jq pilot configuration. The feature is Windows-only (a compile error elsewhere), off by default and never part of the
+      # release build below. Even where it compiles, the real jq bytes stay locked; the tests use synthetic bytes only. CI-generated, SUPPORTING evidence.
+      - name: jq-pilot feature configuration (Windows only; lint and tests; never part of the release build)
+        if: matrix.name == 'windows-x64'
+        working-directory: src-tauri
+        run: |
+          cargo clippy --target ${{ matrix.target }} --all-targets --features jq-pilot -- -D warnings
+          cargo test --target ${{ matrix.target }} --features jq-pilot
+
+      - name: jq-pilot feature is refused on macOS at compile time (the default build there stays unable to install jq)
+        if: matrix.name == 'macos-arm64'
+        working-directory: src-tauri
+        run: |
+          if cargo check --target ${{ matrix.target }} --features jq-pilot > "${{ runner.temp }}/jq-pilot-macos.txt" 2>&1; then
+            echo "the jq-pilot feature compiled on macOS: it must not"; exit 1
+          fi
+          grep -q "Windows-only" "${{ runner.temp }}/jq-pilot-macos.txt"
+          echo "refused as intended:"; grep -m1 "Windows-only" "${{ runner.temp }}/jq-pilot-macos.txt"
+
+      - name: B2 staging reproduction (synthetic bytes; supporting evidence)
+        run: python tools/run_staging.py --manifest docs/phase-3d4/b2-staging-manifest.json --skip-frontend --report "${{ runner.temp }}/b2-staging-report-${{ matrix.name }}.json"
+
       # Phase 3D-3B: runs EXACTLY the identifiers of docs/phase-3d3b/staging-manifest.json on the synthetic fixture. CI-generated, SUPPORTING evidence of
       # this commit only (exit status 0 = every named check passed); the developer-authored assertions do not become independent by running here.
       - name: Staging reproduction of the jq review package (synthetic fixture; supporting evidence)

@@ -89,14 +89,16 @@ def frontend_group(spec):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--report")
+    ap.add_argument("--manifest", default=str(MANIFEST), help="a staging manifest (default: the Phase 3D-3B jq review package's)")
     ap.add_argument("--skip-python", action="store_true")
     ap.add_argument("--skip-frontend", action="store_true")
     ap.add_argument("--skip-cargo", action="store_true")
     a = ap.parse_args()
-    m = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    manifest_path = Path(a.manifest).resolve()
+    m = json.loads(manifest_path.read_text(encoding="utf-8"))
     report = {
         "kind": "staging-run",
-        "manifest": "docs/phase-3d3b/staging-manifest.json",
+        "manifest": manifest_path.relative_to(ROOT).as_posix() if manifest_path.is_relative_to(ROOT) else manifest_path.name,
         "commit": git("rev-parse", "HEAD"),
         "workingTreeClean": git("status", "--porcelain") == "",
         "tools": {"cargo": version(["cargo", "--version"]), "rustc": version(["rustc", "--version"]), "python": sys.version.split()[0], "node": version(["node", "--version"])},

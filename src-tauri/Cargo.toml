@@ -42,6 +42,11 @@ windows-link = "0.2"
 # NON-release build, so the real application workflow can be exercised end to end in an isolated data directory. It is off by default,
 # CI's release build does not enable it, and no installation of a real tool can pass the adapter's synthetic-only gate in either case.
 synthetic-pilot = []
+# Phase 3D-4 (B2): compiles the supply of the ONE reviewed jq 1.8.2 / Windows x64 pilot (module `jq_pilot`): its reviewed recipe, authenticated reference,
+# source attestation, local-use licence record, notices, catalog row and the fixed read-only retained-file provider. Off by default, Windows-only
+# (a compile error elsewhere), never combined with `synthetic-pilot`, and never enabled by CI's release build. Even where it is compiled, the real
+# jq bytes stay LOCKED (`jq_pilot::B3_UNLOCK` is `None`) until a separate, reviewed B3 change; synthetic bytes exercise the whole path in tests.
+jq-pilot = []
 
 [dev-dependencies]
 tempfile = "3"

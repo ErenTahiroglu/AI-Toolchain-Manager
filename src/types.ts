@@ -529,6 +529,8 @@ export interface PreviewContent {
   authentication: string;
   licenseState: string;
   licenseSpdx: string;
+  licenseScopeText: string;
+  installedAsText: string;
   notices: { title: string; sha256: string; components: string[]; unresolved: string[] } | null;
   effects: InstallEffect[];
   notDone: string[];
