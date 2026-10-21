@@ -1,5 +1,7 @@
 # Phase 3D-5 — B3 pre-authorization: a ONE-installation gate for the jq pilot (Issue #24)
 
+> **Update (Phase 3D-6):** this document describes the state at the end of Phase 3D-5, when the allowance was **inactive** (`B3_ARMED_DATA_DIR_SHA256 = None`). Phase 3D-6 [arms it for the ONE data directory the user authorized](PHASE-3D6.md) (a scope digest, never a path); nothing else about the mechanism changed, and nothing was installed or executed.
+
 Baseline `1e2fe043b28a94ad113f78913f4c83ed2b725e5a` (B2, accepted by Red Team for its narrow pilot preparation; B1 evidence accepted with its documented limitations). Frozen `main` `68eda3f0407490fabccb517dcf822ab4818fc0bf` is untouched. **jq was not downloaded, copied, opened, hashed, installed or executed, and no jq file exists where any build of this phase can reach it. No real installation has been authorized.**
 
 ## The finding and the correction

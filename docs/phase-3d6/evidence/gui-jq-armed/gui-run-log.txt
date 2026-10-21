@@ -1,0 +1,21 @@
+﻿started pid=14928 alive=True
+the jq row has an install panel (the pilot build seeds the catalog row)                              -> true
+only the ordinary 13 entries and jq have a panel (no synthetic tool in this build)                   -> true
+jq: 'Doğrulama tamamlanmadı'                                                                         -> true
+jq: the reason says the installation is not enabled in this build (not armed) or enabled only for another data directory -> true
+jq: the reason code is pilot_wrong_data_directory (armed for another directory), pilot_not_armed (INACTIVE) or recipe_not_enabled (locked) -> true
+jq: no install button, no remove button                                                              -> true
+forged IPC: prepare_install(jq, install) is refused                                                  -> true
+forged IPC: prepare_install(jq, uninstall) is refused                                                -> true
+forged IPC: a request carrying a path / digest / unlock flag is rejected by the IPC layer            -> true
+forged IPC: confirm_install of an unknown offer is refused and nothing happens                       -> true
+the installed-details of jq show nothing installed                                                   -> true
+no manager folder (atm-managed) was created                                                          -> true
+no input folder (jq-pilot-input) was created: the application reads no retained file while locked    -> true
+the only changed files are the application's own SQLite files                                        -> true
+the catalog row jq exists once, unreviewed, manual-only, install_state not_managed                   -> true
+the audit trail holds no install or approve row (nothing was confirmed)                              -> true
+
+16/16 checks true
+EVIDENCE=<repo>\docs\phase-3d6\evidence\gui-jq-armed\gui
+DATA=C:\Users\erent\AppData\Local\Temp\atm-gui-3d4-1058379325

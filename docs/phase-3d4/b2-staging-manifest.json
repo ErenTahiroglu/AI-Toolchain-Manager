@@ -6,7 +6,7 @@
       "id": "B2-1",
       "title": "The default build cannot install jq; the pilot configuration is Windows-only, narrow and has no shortcut",
       "cargo": [
-        "install_flow::tests::b2_the_real_committed_supply_is_windows_only_unlocked_for_the_candidate_but_inactive_and_creates_nothing",
+        "install_flow::tests::b2_the_real_committed_supply_is_windows_only_unlocked_and_armed_for_one_directory_and_creates_nothing",
         "install_flow::tests::b2_a_default_build_cannot_install_jq_and_the_pilot_build_only_shows_it_locked",
         "install_flow::tests::b2_the_pilot_module_has_no_environment_process_network_registry_or_unlock_shortcut_and_is_wired_in_exactly_one_place",
         "install_flow::tests::b2_the_interface_cannot_name_a_path_a_digest_or_a_flag_for_the_pilot"

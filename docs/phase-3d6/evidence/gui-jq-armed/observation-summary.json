@@ -1,0 +1,30 @@
+﻿{
+    "guiExit":  0,
+    "environmentIdenticalBeforeAndAfter":  true,
+    "networkSamples":  27,
+    "remoteTcpEndpointsObservedByRole":  {
+                                             "appProcess":  [
+
+                                                            ],
+                                             "webview2Renderer":  [
+
+                                                                  ],
+                                             "webview2NetworkService":  [
+                                                                            "tcp webview2-network-service Established local=10.32.3.133:50662 remote=8.8.4.4:443",
+                                                                            "tcp webview2-network-service Established local=10.32.3.133:53448 remote=8.8.8.8:443",
+                                                                            "tcp webview2-network-service Established local=10.32.3.133:54340 remote=8.8.4.4:443",
+                                                                            "tcp webview2-network-service Established local=10.32.3.133:55611 remote=8.8.8.8:443",
+                                                                            "tcp webview2-network-service Established local=10.32.3.133:56454 remote=8.8.4.4:443",
+                                                                            "tcp webview2-network-service Established local=10.32.3.133:61394 remote=8.8.4.4:443",
+                                                                            "tcp webview2-network-service Established local=10.32.3.133:63097 remote=8.8.8.8:443",
+                                                                            "tcp webview2-network-service Established local=10.32.3.133:63396 remote=8.8.8.8:443",
+                                                                            "tcp webview2-network-service Established local=10.32.3.133:63453 remote=8.8.8.8:443",
+                                                                            "tcp webview2-network-service Established local=10.32.3.133:63750 remote=8.8.4.4:443"
+                                                                        ],
+                                             "webview2BrowserAndOtherRuntimeProcesses":  [
+                                                                                             "tcp webview2-browser Established local=10.32.3.133:60860 remote=52.97.141.82:443",
+                                                                                             "tcp webview2-browser Established local=10.32.3.133:60861 remote=52.97.141.82:443"
+                                                                                         ]
+                                         },
+    "note":  "The application\u0027s own process and the renderer that hosts its page must show none. Connections of the Microsoft WebView2 runtime processes (browser, network service) are the runtime\u0027s own, not initiated by the application\u0027s code (the CSP allows only ipc; the sources contain no network API); they are recorded, not hidden."
+}

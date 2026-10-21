@@ -5,7 +5,7 @@
 #   powershell -File tools\gui_jq_pilot_locked.ps1 -Exe <path to a debug build made with --features jq-pilot> [-Evidence <dir>]
 #
 # Safety: ATM_DATA_DIR points at a fresh temporary directory; the only program started is the application itself (and node, for the driver); the only
-# port opened is the WebView2 debugging port on 127.0.0.1 of this machine; no network is used. The application is stopped at the end.
+# port opened by the application is the WebView2 debugging port on 127.0.0.1 of this machine; the application's own code uses no network (its page may only reach its IPC), but the Microsoft WebView2 runtime hosted in the window makes its own outbound connections (docs/phase-3d6/NETWORK-OBSERVATION.md). The application is stopped at the end.
 param(
     [Parameter(Mandatory = $true)][string]$Exe,
     [string]$Evidence = (Join-Path $env:TEMP ("atm-gui-jq-pilot-" + (Get-Random)))

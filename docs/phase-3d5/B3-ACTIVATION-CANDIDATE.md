@@ -1,5 +1,7 @@
 # B3 activation CANDIDATE — the one-line diff, and why it authorizes nothing
 
+> **Update (Phase 3D-6):** the candidate below was reviewed while the allowance was inactive. It is now armed for the one authorized directory by a separate one-line commit ([PHASE-3D6](../PHASE-3D6.md)); the description of the *candidate* itself is kept as it was.
+
 **This is a candidate for independent review. It is not an installation, not a permission and not the user's authorization.** It exists so the reviewer can read the exact change that B3 would make to the unlock, separately from the allowance mechanism that precedes it.
 
 ## The diff (commit after the allowance, `src-tauri/src/jq_pilot.rs`)

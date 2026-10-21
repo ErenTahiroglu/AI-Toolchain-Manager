@@ -1,0 +1,22 @@
+﻿app pid=21900 tree=21900,18820,30492,12708,3280,2164,8908,21836
+OURS pid=21900 ppid=29684 ai-toolchain-manager.exe :: "<repo>\src-tauri\target\debug\ai-toolchain-manager.exe" 
+OURS pid=18820 ppid=21900 conhost.exe :: \??\C:\WINDOWS\system32\conhost.exe 0x4
+OURS pid=30492 ppid=21900 msedgewebview2.exe :: "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.62\msedgewebview2.exe" --embedded-browser-webview=1 --webview-exe-name=ai-toolchain-manager.exe --webview-exe-version=0.1.0 --user-data-dir="C:\Users\e...
+OURS pid=12708 ppid=30492 msedgewebview2.exe :: "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.62\msedgewebview2.exe" --type=crashpad-handler --user-data-dir=C:\Users\erent\AppData\Local\com.erentahiroglu.aitoolchainmanager\EBWebView /prefetch:4 ...
+OURS pid=3280 ppid=30492 msedgewebview2.exe :: "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.62\msedgewebview2.exe" --type=gpu-process --gpu-recent-crash-count=0 --noerrdialogs --user-data-dir="C:\Users\erent\AppData\Local\com.erentahiroglu.ait...
+OURS pid=2164 ppid=30492 msedgewebview2.exe :: "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.62\msedgewebview2.exe" --type=utility --utility-sub-type=network.mojom.NetworkService --lang=tr --service-sandbox-type=none --noerrdialogs --user-data-...
+OURS pid=8908 ppid=30492 msedgewebview2.exe :: "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.62\msedgewebview2.exe" --type=utility --utility-sub-type=storage.mojom.StorageService --lang=tr --service-sandbox-type=service --noerrdialogs --user-da...
+OURS pid=21836 ppid=30492 msedgewebview2.exe :: "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.62\msedgewebview2.exe" --type=renderer --noerrdialogs --user-data-dir="C:\Users\erent\AppData\Local\com.erentahiroglu.aitoolchainmanager\EBWebView" --w...
+ESTABLISHED non-loopback connections by processes in OUR tree: 10
+  OURS pid=2164 -> 8.8.8.8:443
+  OURS pid=30492 -> 52.97.128.2:443
+  OURS pid=30492 -> 52.97.128.2:443
+  OURS pid=2164 -> 8.8.8.8:443
+  OURS pid=2164 -> 8.8.8.8:443
+  OURS pid=2164 -> 8.8.8.8:443
+  OURS pid=2164 -> 8.8.8.8:443
+  OURS pid=2164 -> 8.8.8.8:443
+  OURS pid=2164 -> 8.8.8.8:443
+  OURS pid=2164 -> 8.8.8.8:443
+ESTABLISHED non-loopback connections by msedgewebview2 processes NOT in our tree: 1
+  FOREIGN pid=3612 ppid=13812 parent=msedgewebview2.exe -> 8.8.8.8:443

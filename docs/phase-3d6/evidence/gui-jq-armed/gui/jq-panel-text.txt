@@ -1,0 +1,7 @@
+Kurulum
+
+? Doğrulama tamamlanmadı
+
+Bu araç için incelenmiş bir tarif ve bağımsız doğrulanmış bir dosya özeti yok; bu yüzden kurulamaz.
+
+Bu gerçek aracın tek seferlik kurulum izni başka bir veri klasörü için etkinleştirilmiş; bu klasörde kurulamaz. pilot_wrong_data_directory

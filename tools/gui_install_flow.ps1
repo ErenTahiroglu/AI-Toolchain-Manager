@@ -4,7 +4,7 @@
 #
 # Safety: the application is started with an ISOLATED data directory (ATM_DATA_DIR); the only program started is the application itself;
 # nothing installed in the workflow is ever executed; the only port opened is the WebView2 debugging port on 127.0.0.1 of this machine;
-# no network is used. The application is stopped at the end of each phase (the first phase is ended by killing the process, on purpose).
+# the application's own code uses no network (its page may only reach its IPC), but the Microsoft WebView2 runtime hosted in the window makes its own outbound connections (docs/phase-3d6/NETWORK-OBSERVATION.md). The application is stopped at the end of each phase (the first phase is ended by killing the process, on purpose).
 param(
     [Parameter(Mandatory = $true)][string]$Exe,
     [string]$Evidence = (Join-Path $env:TEMP ("atm-gui-evidence-" + (Get-Random)))

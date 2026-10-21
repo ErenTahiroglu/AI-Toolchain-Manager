@@ -312,8 +312,8 @@ fn b2_wrong_tool_version_architecture_source_origin_and_network_permissions_are_
 fn b2_the_unlock_is_one_constant_naming_the_exact_recipe_digest_and_it_is_off() {
     let d = real_recipe_digest();
     assert_eq!(jq_pilot::B3_UNLOCK, Some(d.as_str()), "the B3 activation candidate names exactly the reviewed recipe digest, nothing else");
-    // ...and the one-installation allowance is a separate decision: inactive (None) or armed for the ONE directory of the user's authorization
-    assert!(jq_pilot::B3_ARMED_DATA_DIR_SHA256.is_none() || jq_pilot::B3_ARMED_DATA_DIR_SHA256 == Some(PILOT_DIR_DIGEST));
+    // ...and the one-installation allowance is a separate decision: armed for the ONE directory of the user's authorization (a scope digest, never a path)
+    assert_eq!(jq_pilot::B3_ARMED_DATA_DIR_SHA256, Some(PILOT_DIR_DIGEST));
     assert!(!jq_pilot::unlocked_for(None, &d));
     assert!(!jq_pilot::unlocked_for(Some(&"0".repeat(64)), &d));
     assert!(!jq_pilot::unlocked_for(Some(""), &d));
@@ -352,16 +352,16 @@ fn b2_with_the_lock_on_a_perfect_file_is_neither_read_previewed_nor_installed() 
 }
 
 #[test]
-fn b2_the_real_committed_supply_is_windows_only_unlocked_for_the_candidate_but_inactive_and_creates_nothing() {
+fn b2_the_real_committed_supply_is_windows_only_unlocked_and_armed_for_one_directory_and_creates_nothing() {
     let tmp = tempfile::tempdir().unwrap();
     let folder = tmp.path().join(jq_pilot::INPUT_FOLDER);
     let s = jq_pilot::sources_for_app(folder.clone());
     if cfg!(windows) {
-        // the B3 activation CANDIDATE: unlocked (the enablement entry and the retained-file provider exist) but the one-time allowance is INACTIVE
+        // the pilot supply: unlocked (the enablement entry and the retained-file provider exist) and the one-time allowance armed for the ONE authorized directory
         assert_eq!((s.registry.len(), s.extra_authenticated.len(), s.pilot_gate.len(), s.notices.len()), (1, 1, 1, 1), "pieces and the one enablement entry");
         assert_eq!(s.evidence.attestations.len() + s.evidence.local_use_licenses.len(), 2);
         let ot = s.one_time.as_ref().expect("the one-time rule is part of the pilot supply");
-        assert_eq!(ot.armed_data_dir_sha256, None, "not armed for any data directory");
+        assert_eq!(ot.armed_data_dir_sha256.as_deref(), Some(PILOT_DIR_DIGEST), "armed for the one authorized data directory, as a scope digest");
         assert_eq!((ot.recipe_digest.as_str(), s.pilot_gate[0].recipe_digest.as_str()), (real_recipe_digest().as_str(), real_recipe_digest().as_str()));
         // (the folder does not exist: nothing real can be read here, and nothing is created)
         assert_eq!(s.artifacts.bytes("jq", "1.8.2", "windows-x64"), Err("artifact_not_available"));

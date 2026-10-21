@@ -76,7 +76,7 @@ await shot("1-catalog-jq-locked", "[role=group][aria-label='Kurulum: jq']");
 await check("the jq row has an install panel (the pilot build seeds the catalog row)", `!!__h.group('jq')`);
 await check("only the ordinary 13 entries and jq have a panel (no synthetic tool in this build)", `document.querySelectorAll('[role=group][aria-label^="Kurulum: "]').length === 14 && ![...document.querySelectorAll('[role=group][aria-label^="Kurulum: synthetic"]')].length`);
 await check("jq: 'Doğrulama tamamlanmadı'", `${groupText("jq")}.includes('Doğrulama tamamlanmadı')`);
-await check("jq: the reason says the installation is not enabled in this build", `/etkinleştirilmedi/.test(${groupText("jq")})`);
+await check("jq: the reason says the installation is not enabled in this build (not armed) or enabled only for another data directory", `/etkinleştirilmedi|başka bir veri klasörü için etkinleştirilmiş/.test(${groupText("jq")})`);
 await check("jq: the reason code is pilot_wrong_data_directory (armed for another directory), pilot_not_armed (INACTIVE) or recipe_not_enabled (locked)", `/pilot_wrong_data_directory|pilot_not_armed|recipe_not_enabled/.test(${groupText("jq")})`);
 await check("jq: no install button, no remove button", `!/Kurulum önizlemesini aç|Kaldırma önizlemesini aç/.test(${groupText("jq")})`);
 const text = await ev(groupText("jq"));

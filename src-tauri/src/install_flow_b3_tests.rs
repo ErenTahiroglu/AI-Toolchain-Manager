@@ -10,13 +10,10 @@ use crate::pilot_allowance::{self, Record};
 /// never committed (the digest is a scope identifier, not a secret and not an authentication credential).
 const PILOT_DIR_DIGEST: &str = "158c279e2151088c91783a5d788cc5877cc417cb23e0bff69dbeade99a7ee8a5";
 
-/// What the real supply answers in an (isolated, temporary) data directory that is NOT the armed one.
+/// What the real supply answers in an (isolated, temporary) data directory that is NOT the armed one: the allowance is armed for another directory.
 fn expected_refusal_in_a_foreign_directory() -> &'static str {
-    if jq_pilot::B3_ARMED_DATA_DIR_SHA256.is_some() {
-        "pilot_wrong_data_directory"
-    } else {
-        "pilot_not_armed"
-    }
+    assert_eq!(jq_pilot::B3_ARMED_DATA_DIR_SHA256, Some(PILOT_DIR_DIGEST), "the allowance is armed for the ONE authorized directory");
+    "pilot_wrong_data_directory"
 }
 
 fn pilot_key(l: &Lab) -> String {
@@ -407,11 +404,8 @@ fn b3_the_allowance_has_no_reset_path_no_credential_framework_no_process_network
     // the arming constant: declared once, `None` until the commit that records the user's authorization, used once to build the application's supply
     let pilot = include_str!("jq_pilot.rs");
     let pilot_code: String = pilot.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
-    let (disarmed, armed) = (
-        "pub const B3_ARMED_DATA_DIR_SHA256: Option<&str> = None;".to_string(),
-        format!("pub const B3_ARMED_DATA_DIR_SHA256: Option<&str> = Some(\"{PILOT_DIR_DIGEST}\");"),
-    );
-    assert_eq!(pilot_code.matches(&disarmed).count() + pilot_code.matches(&armed).count(), 1, "exactly one declaration: None, or the one authorized digest");
+    let armed = format!("pub const B3_ARMED_DATA_DIR_SHA256: Option<&str> = Some(\"{PILOT_DIR_DIGEST}\");");
+    assert_eq!(pilot_code.matches(&armed).count(), 1, "exactly one declaration, armed for the one authorized directory");
     assert_eq!(pilot_code.lines().filter(|l| l.contains("B3_ARMED_DATA_DIR_SHA256")).count(), 2, "declaration + the one use in sources_for_app");
     // the allowance is reachable from the interface only through the install service (the WebView names no allowance, path or digest)
     for (name, text) in [("commands.rs", include_str!("commands.rs")), ("state.rs", include_str!("state.rs")), ("lib.rs", include_str!("lib.rs"))] {
@@ -473,7 +467,7 @@ fn b3_the_armed_digest_is_one_scope_identifier_that_no_ordinary_location_matches
     for other in [r"C:\Somebody\Pilot-Folder2", r"C:\Somebody", r"C:\Somebody\Pilot-Folder\jq-pilot-input", r"D:\Somebody\Pilot-Folder", r"\?\C:\Somebody\Pilot-Folder"] {
         assert_ne!(pilot_allowance::data_dir_digest(Path::new(other)), d, "{other}");
     }
-    let Some(armed) = jq_pilot::B3_ARMED_DATA_DIR_SHA256 else { return };
+    let armed = jq_pilot::B3_ARMED_DATA_DIR_SHA256.expect("the allowance is armed");
     assert_eq!(armed, PILOT_DIR_DIGEST, "the only digest the allowance may ever be armed for");
     assert!(is_lower_hex_64(armed));
     // no ordinary place on this computer is the armed one: not the repository's work tree or what surrounds it, not the temporary directory
@@ -494,7 +488,7 @@ fn b3_the_directory_named_in_the_environment_is_exactly_the_armed_one() {
         eprintln!("ATM_B3_DIR_CHECK is not set: nothing to compare (a local check; it is not part of CI)");
         return;
     };
-    let Some(armed) = jq_pilot::B3_ARMED_DATA_DIR_SHA256 else { return };
+    let armed = jq_pilot::B3_ARMED_DATA_DIR_SHA256.expect("the allowance is armed");
     let text = named.to_string_lossy().to_string();
     let digest = |s: &str| pilot_allowance::data_dir_digest(Path::new(s));
     assert_eq!(digest(&text), armed, "the named directory is the armed one");
