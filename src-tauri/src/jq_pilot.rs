@@ -55,7 +55,7 @@ pub const B3_UNLOCK: Option<&str> = Some("9c7a020d65d233e86577464a06c32b8f08fd4f
 /// separately authorized pilot will run in. `None` = the allowance is INACTIVE and nothing real can be previewed or installed, whatever
 /// [`B3_UNLOCK`] says. It is set only by the commit that records the user's authorization, never before. The digest is a scope identifier (which
 /// directory), not a secret and not an authentication credential.
-pub const B3_ARMED_DATA_DIR_SHA256: Option<&str> = None;
+pub const B3_ARMED_DATA_DIR_SHA256: Option<&str> = Some("158c279e2151088c91783a5d788cc5877cc417cb23e0bff69dbeade99a7ee8a5");
 
 const CANDIDATE_JSON: &str = include_str!("../../docs/phase-3d3/jq-1.8.2-windows-x64.recipe.candidate.json");
 const BINDING_JSON: &str = include_str!("../../docs/phase-3d4/b1-review-binding.json");
