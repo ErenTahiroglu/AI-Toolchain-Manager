@@ -60,6 +60,15 @@
       "cargo": [
         "install_flow::tests::b3_the_allowance_has_no_reset_path_no_credential_framework_no_process_network_or_environment"
       ]
+    },
+    {
+      "id": "B3-8",
+      "title": "Phase 3D-6 arming: the allowance is armed for ONE data directory (a scope digest, never a path); no ordinary location matches it; the real supply is bound to the reviewed pilot and refuses every other data directory before it reads a byte",
+      "cargo": [
+        "install_flow::tests::b3_the_armed_digest_is_one_scope_identifier_that_no_ordinary_location_matches",
+        "install_flow::tests::b3_the_directory_named_in_the_environment_is_exactly_the_armed_one",
+        "install_flow::tests::b3_the_real_supply_is_bound_to_the_reviewed_pilot_and_refuses_every_other_data_directory_before_reading_anything"
+      ]
     }
   ],
   "python": [

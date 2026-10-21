@@ -6,6 +6,19 @@
 
 use crate::pilot_allowance::{self, Record};
 
+/// The scope identifier of the ONE data directory the user authorized for the pilot (Phase 3D-6): the digest of the normalised path text. The path itself is
+/// never committed (the digest is a scope identifier, not a secret and not an authentication credential).
+const PILOT_DIR_DIGEST: &str = "158c279e2151088c91783a5d788cc5877cc417cb23e0bff69dbeade99a7ee8a5";
+
+/// What the real supply answers in an (isolated, temporary) data directory that is NOT the armed one.
+fn expected_refusal_in_a_foreign_directory() -> &'static str {
+    if jq_pilot::B3_ARMED_DATA_DIR_SHA256.is_some() {
+        "pilot_wrong_data_directory"
+    } else {
+        "pilot_not_armed"
+    }
+}
+
 fn pilot_key(l: &Lab) -> String {
     l.svc.sources.one_time.as_ref().unwrap().key()
 }
@@ -394,7 +407,11 @@ fn b3_the_allowance_has_no_reset_path_no_credential_framework_no_process_network
     // the arming constant: declared once, `None` until the commit that records the user's authorization, used once to build the application's supply
     let pilot = include_str!("jq_pilot.rs");
     let pilot_code: String = pilot.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
-    assert_eq!(pilot_code.matches("pub const B3_ARMED_DATA_DIR_SHA256: Option<&str> = None;").count(), 1);
+    let (disarmed, armed) = (
+        "pub const B3_ARMED_DATA_DIR_SHA256: Option<&str> = None;".to_string(),
+        format!("pub const B3_ARMED_DATA_DIR_SHA256: Option<&str> = Some(\"{PILOT_DIR_DIGEST}\");"),
+    );
+    assert_eq!(pilot_code.matches(&disarmed).count() + pilot_code.matches(&armed).count(), 1, "exactly one declaration: None, or the one authorized digest");
     assert_eq!(pilot_code.lines().filter(|l| l.contains("B3_ARMED_DATA_DIR_SHA256")).count(), 2, "declaration + the one use in sources_for_app");
     // the allowance is reachable from the interface only through the install service (the WebView names no allowance, path or digest)
     for (name, text) in [("commands.rs", include_str!("commands.rs")), ("state.rs", include_str!("state.rs")), ("lib.rs", include_str!("lib.rs"))] {
@@ -418,8 +435,9 @@ fn b3_the_activation_candidate_is_unlocked_but_inactive_and_never_asks_for_a_byt
     fs::write(input.join(JQ_FILE), b"a stand-in, not jq").unwrap();
     let st = l.state(JQ);
     if cfg!(windows) {
-        assert_eq!((st.status, st.reasons[0].code.as_str()), (Status::VerificationIncomplete, "pilot_not_armed"), "{st:?}");
-        assert_eq!(l.state(JQ).reasons[0].text, reason_text("pilot_not_armed"));
+        let code = expected_refusal_in_a_foreign_directory();
+        assert_eq!((st.status, st.reasons[0].code.as_str()), (Status::VerificationIncomplete, code), "{st:?}");
+        assert_eq!(l.state(JQ).reasons[0].text, reason_text(code));
     } else {
         assert_eq!(st.reasons[0].code, "no_reviewed_recipe", "off Windows the pilot supply is empty");
     }
@@ -434,4 +452,99 @@ fn b3_the_activation_candidate_is_unlocked_but_inactive_and_never_asks_for_a_byt
     } else {
         assert!(l.svc.sources.one_time.is_none(), "off Windows the supply is the empty release supply: no one-time rule exists");
     }
+}
+
+// =====================================================================================================================================
+// Phase 3D-6: the arming. The allowance is armed for ONE data directory (a digest); every other location is refused before anything is read.
+// =====================================================================================================================================
+
+fn is_lower_hex_64(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+#[test]
+fn b3_the_armed_digest_is_one_scope_identifier_that_no_ordinary_location_matches() {
+    // the normalisation: separators, case and a trailing separator never matter; a different folder always does
+    let sample = r"C:\Somebody\Pilot-Folder";
+    let d = pilot_allowance::data_dir_digest(Path::new(sample));
+    for same in ["c:/somebody/pilot-folder", r"C:\SOMEBODY\PILOT-FOLDER\", "c:/Somebody/Pilot-Folder/"] {
+        assert_eq!(pilot_allowance::data_dir_digest(Path::new(same)), d, "{same}");
+    }
+    for other in [r"C:\Somebody\Pilot-Folder2", r"C:\Somebody", r"C:\Somebody\Pilot-Folder\jq-pilot-input", r"D:\Somebody\Pilot-Folder", r"\?\C:\Somebody\Pilot-Folder"] {
+        assert_ne!(pilot_allowance::data_dir_digest(Path::new(other)), d, "{other}");
+    }
+    let Some(armed) = jq_pilot::B3_ARMED_DATA_DIR_SHA256 else { return };
+    assert_eq!(armed, PILOT_DIR_DIGEST, "the only digest the allowance may ever be armed for");
+    assert!(is_lower_hex_64(armed));
+    // no ordinary place on this computer is the armed one: not the repository's work tree or what surrounds it, not the temporary directory
+    let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let work_tree = crate_dir.parent().unwrap();
+    for p in [crate_dir, work_tree, work_tree.parent().unwrap(), &std::env::temp_dir(), &crate_dir.join("target"), &work_tree.join("jq-pilot-input")] {
+        assert_ne!(pilot_allowance::data_dir_digest(p), armed, "{}", p.display());
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    assert_ne!(pilot_allowance::data_dir_digest(tmp.path()), armed);
+}
+
+/// LOCAL check, not run in CI: `ATM_B3_DIR_CHECK=<the directory the user named>` makes this assert that the armed digest is exactly that directory's, whatever
+/// spelling of it is used, and that its neighbours are not. (The path is never written in the repository; the person or the reviewer supplies it.)
+#[test]
+fn b3_the_directory_named_in_the_environment_is_exactly_the_armed_one() {
+    let Some(named) = std::env::var_os("ATM_B3_DIR_CHECK") else {
+        eprintln!("ATM_B3_DIR_CHECK is not set: nothing to compare (a local check; it is not part of CI)");
+        return;
+    };
+    let Some(armed) = jq_pilot::B3_ARMED_DATA_DIR_SHA256 else { return };
+    let text = named.to_string_lossy().to_string();
+    let digest = |s: &str| pilot_allowance::data_dir_digest(Path::new(s));
+    assert_eq!(digest(&text), armed, "the named directory is the armed one");
+    for spelled in [text.replace('\\', "/"), text.to_uppercase(), format!("{text}\\"), format!("{}/", text.replace('\\', "/"))] {
+        assert_eq!(digest(&spelled), armed, "{spelled}");
+    }
+    for other in [format!("{text}2"), format!("{text}\\jq-pilot-input"), format!("{text}\\atm-managed"), format!("{text}x")] {
+        assert_ne!(digest(&other), armed, "{other}");
+    }
+    let parent = Path::new(&text).parent().expect("a directory with a parent");
+    assert_ne!(pilot_allowance::data_dir_digest(parent), armed, "the parent directory is not the armed one");
+}
+
+#[test]
+fn b3_the_real_supply_is_bound_to_the_reviewed_pilot_and_refuses_every_other_data_directory_before_reading_anything() {
+    let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    if cfg!(windows) {
+        // the application's supply: exactly the reviewed binding, and the armed digest exactly as declared
+        let s = jq_pilot::sources_for_app(PathBuf::from("not-used"));
+        let ot = s.one_time.as_ref().expect("the pilot supply carries the one-time rule");
+        assert_eq!((ot.tool_id.as_str(), ot.version.as_str(), ot.platform_target.as_str()), ("jq", "1.8.2", "windows-x64"));
+        assert_eq!((ot.recipe_digest.clone(), ot.artifact_sha256.clone()), (real_recipe_digest(), real_artifact_sha()));
+        assert_eq!(ot.armed_data_dir_sha256.as_deref(), jq_pilot::B3_ARMED_DATA_DIR_SHA256);
+        assert_eq!(s.pilot_gate.len(), 1, "unlocked for exactly one recipe");
+    }
+    // three different isolated data directories, each with the real supply and a provider that counts requests
+    for n in 0..3 {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut s = jq_pilot::sources_for_app(tmp.path().join(jq_pilot::INPUT_FOLDER));
+        s.artifacts = Box::new(CountingProvider(asked.clone()));
+        let l = lab_with(s, None);
+        l.with(|c| jq_pilot::seed_catalog(c).unwrap());
+        let st = l.state(JQ);
+        if cfg!(windows) {
+            let code = expected_refusal_in_a_foreign_directory();
+            assert_eq!((st.status, st.reasons[0].code.as_str()), (Status::VerificationIncomplete, code), "directory {n}: {st:?}");
+            assert_eq!(st.reasons[0].text, reason_text(code));
+            assert!(!st.can_install && !st.can_remove);
+        }
+        assert_eq!(l.try_preview(JQ, Action::Install).unwrap_err().code, "INSTALL_NOT_AVAILABLE");
+        assert_eq!(l.try_preview(JQ, Action::Uninstall).unwrap_err().code, "INSTALL_NOT_AVAILABLE");
+        let r = l.svc.confirm(&l.db, &ConfirmRequest { offer_id: "a".repeat(64), preview_digest: "b".repeat(64), acknowledged: true });
+        assert_eq!(r.outcome, "refused");
+        assert!(!l.data.join("atm-managed").exists() && !l.data.join(jq_pilot::INPUT_FOLDER).exists(), "directory {n}: nothing is created");
+        assert!(record_raw_in(&l).is_none(), "directory {n}: no allowance record exists");
+    }
+    assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 0, "no other data directory makes the supply ask for a single byte");
+}
+
+/// `record_raw` for a lab whose supply may be the empty one (off Windows): no rule, no record.
+fn record_raw_in(l: &Lab) -> Option<String> {
+    l.svc.sources.one_time.as_ref().and_then(|_| record_raw(l))
 }

@@ -312,7 +312,8 @@ fn b2_wrong_tool_version_architecture_source_origin_and_network_permissions_are_
 fn b2_the_unlock_is_one_constant_naming_the_exact_recipe_digest_and_it_is_off() {
     let d = real_recipe_digest();
     assert_eq!(jq_pilot::B3_UNLOCK, Some(d.as_str()), "the B3 activation candidate names exactly the reviewed recipe digest, nothing else");
-    assert_eq!(jq_pilot::B3_ARMED_DATA_DIR_SHA256, None, "...and the one-installation allowance is still INACTIVE");
+    // ...and the one-installation allowance is a separate decision: inactive (None) or armed for the ONE directory of the user's authorization
+    assert!(jq_pilot::B3_ARMED_DATA_DIR_SHA256.is_none() || jq_pilot::B3_ARMED_DATA_DIR_SHA256 == Some(PILOT_DIR_DIGEST));
     assert!(!jq_pilot::unlocked_for(None, &d));
     assert!(!jq_pilot::unlocked_for(Some(&"0".repeat(64)), &d));
     assert!(!jq_pilot::unlocked_for(Some(""), &d));
@@ -781,7 +782,7 @@ fn b2_a_default_build_cannot_install_jq_and_the_pilot_build_only_shows_it_locked
     assert_eq!(st.status, Status::VerificationIncomplete);
     assert!(!st.can_install && !st.can_remove);
     if cfg!(feature = "jq-pilot") {
-        assert_eq!(st.reasons[0].code, "pilot_not_armed", "the candidate build shows jq, unlocked but INACTIVE");
+        assert_eq!(st.reasons[0].code, expected_refusal_in_a_foreign_directory(), "the pilot build shows jq, but this (isolated, temporary) data directory is not the armed one");
     } else {
         assert_eq!(st.reasons[0].code, "no_reviewed_recipe", "an ordinary build, and the synthetic pilot, have no recipe for jq at all");
         if !cfg!(feature = "synthetic-pilot") {

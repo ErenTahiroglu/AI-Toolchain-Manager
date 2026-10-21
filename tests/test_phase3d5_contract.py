@@ -18,6 +18,8 @@ import pilot_data_dir_digest  # noqa: E402
 
 WIN_SHA = "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627"
 RECIPE_DIGEST = "9c7a020d65d233e86577464a06c32b8f08fd4fd8403110e68fd551b674f7cca1"
+# Phase 3D-6: the scope identifier (digest of the normalised path text) of the ONE isolated data directory the user authorized; the path is never committed
+ARMED_DIR_DIGEST = "158c279e2151088c91783a5d788cc5877cc417cb23e0bff69dbeade99a7ee8a5"
 
 
 def text(p):
@@ -75,7 +77,9 @@ class TheCandidateStaysInactive(unittest.TestCase):
         unlock = re.search(r"pub const B3_UNLOCK: Option<&str> = (None|Some\(\"([0-9a-f]{64})\"\));", pilot)
         self.assertIsNotNone(unlock)
         self.assertIn(unlock.group(2), (None, RECIPE_DIGEST), "the unlock may only ever name the reviewed recipe digest")
-        self.assertIn("pub const B3_ARMED_DATA_DIR_SHA256: Option<&str> = None;", pilot, "the allowance stays INACTIVE until the separately authorized real pilot")
+        armed = re.search(r"pub const B3_ARMED_DATA_DIR_SHA256: Option<&str> = (None|Some\(\"([0-9a-f]{64})\"\));", pilot)
+        self.assertIsNotNone(armed, "exactly one declaration, None (inactive) or the digest of the one authorized directory")
+        self.assertIn(armed.group(2), (None, ARMED_DIR_DIGEST), "the allowance may only ever be armed for the one authorized directory")
         self.assertEqual(sum(1 for l in pilot.splitlines() if "B3_UNLOCK" in l), 2)
         self.assertEqual(sum(1 for l in pilot.splitlines() if "B3_ARMED_DATA_DIR_SHA256" in l), 2)
 
