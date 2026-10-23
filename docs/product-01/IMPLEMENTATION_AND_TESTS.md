@@ -74,7 +74,14 @@ Two defects were found and fixed *by* these tests before commit: the hidden acce
 
 ## CI evidence for the exact SHAs
 
-PENDING_CI_BLOCK
+Code commit **`0dea679bc19711ce289f7faa2c00cd384c196cc2`** (pushed to `origin/development`; `origin/main` still `68eda3f0407490fabccb517dcf822ab4818fc0bf`).
+
+* CI run: https://github.com/ErenTahiroglu/AI-Toolchain-Manager/actions/runs/40031146182 — `completed / success` for that exact SHA.
+  * windows-x64 job: https://github.com/ErenTahiroglu/AI-Toolchain-Manager/actions/runs/40031146182/job/120679414032 — success.
+  * macos-arm64 job: https://github.com/ErenTahiroglu/AI-Toolchain-Manager/actions/runs/40031146182/job/120679414162 — success.
+  * Steps not run by design: "jq-pilot feature is refused on macOS" (macOS-only step) is skipped on Windows; "jq-pilot feature configuration" (Windows-only step) is skipped on macOS. All other steps (Python contract tests, `npm ci` + typecheck + test + build, `cargo fmt/clippy/test`, `synthetic-pilot` and Windows `jq-pilot` configurations on **synthetic bytes**, staging reproductions, Tauri build, headless self-check) concluded `success`.
+* What this proves: those steps passed on the CI runners for that SHA. It is not a local run (the Rust steps were not run on the developer machine), not a macOS GUI test, and not evidence about any real tool, jq or WebView2.
+* This documentation-only follow-up commit changes no code; its own CI result is reported separately in the phase report, because a commit cannot contain its own SHA.
 
 ## Known gaps
 
