@@ -1,0 +1,21 @@
+# PRODUCT-01 — next product milestones (proposal, prioritised)
+
+Principle: product outcomes first. The deferred offline-preflight harness is **not** a prerequisite for any item below, and no item below installs a real tool. Real installation stays behind its own acceptance gate (Issue #14 and Issue #25 open; independent Red Team review; separate explicit instruction). Each milestone lists a measurable user value and the prerequisites that are *already* satisfied or still missing.
+
+| # | Milestone | Measurable user value | Prerequisites | Out of scope (stays blocked) |
+|---|---|---|---|---|
+| 1 | **One decision entry point.** Fold the old "Karar ekle" form and the per-project decision table into the matrix (keep the old tests' intent), and give Recommendations a "see in matrix" link that selects the same project / OS / surface. | A user records or changes a wish in one place with one vocabulary; the number of different wordings for "accepted" drops from 3 to 1; the number of screens needed to answer "what do I want in project X on Windows + Claude Code?" drops from 3 to 1. | PRODUCT-01 reviewed. Frontend only. | Any state change beyond a stored wish. |
+| 2 | **Per-project plan export (read-only).** From the matrix, copy / save a Markdown or JSON "desired toolchain" file (wishes + compatibility + limitations + catalog revision), generated locally. | A user can hand the plan to a teammate or paste it into an issue; export completes offline in < 1 s for the current catalog; the file never claims "installed". | Milestone 1 optional. One new local file-save path through a typed command with a fixed folder or an explicit user-picked save dialog (needs a security review: it is the first user-driven write). | Writing into a project folder or agent config. |
+| 3 | **Observed vs wished, per row.** Show the latest *stored* discovery observation for the same project / tool / OS / surface (the Inventory page already has "request vs observation") next to the wish: "Son taramada bulundu / bulunamadı / taranmadı", with age and the existing "name match is not identity" caveat. | A user sees at a glance which wishes the last scan did not find, without leaving the page; 0 rows display "kurulu" from a name match alone. | `list_inventory` is a stored-data read (no scan is started by the view). Requires a decision on whether the Projects page may call it (it reads the scan table only). | Starting a scan from the matrix; any claim of verification. |
+| 4 | **Drift and stale-decision queue.** A compact list of (a) decisions with `materialChange`, (b) postponed wishes past their reminder date, (c) wishes for tools removed from the catalog, with one-click "review". | The user can clear their review queue; count of unreviewed material changes is visible on the Dashboard (new tile) and goes to 0 after review. | Existing fields only (`materialChange`, `remindAt`, `entryRemoved`). Frontend + a Dashboard tile. | Automatic re-prompting or notifications from a background process. |
+| 5 | **Contextual suggestions bound to the matrix (Issue #2, step 1).** Let the existing deterministic rules produce a "Bu projede önerilir" badge on matrix rows for a task typed by the user, keeping `canEnable` semantics (unknown compatibility / Strix stay informational). | A user can go from a task description to the 1–2 relevant undecided tools in two clicks; 0 suggestions for tools whose compatibility is unknown. | Milestone 1. The rule set needs its own audit (this phase did not audit it). | Live agent hooks, session reading, any model call, Prompt Intelligence (Issue #1), 2-PC sync. |
+
+## Housekeeping that should ride along (small, safe)
+
+* README status text still says "Phase 3D-0"; update it to the current phase and add the matrix to "Bugün neler yapabilirsiniz".
+* Remove the duplicated surface / platform lists (single exported constant + the existing contract test).
+* Add a response-ordering guard to `useLoad` (latest request wins) with a test.
+
+## Not proposed now
+
+Real tool installation, the jq pilot, any change to pilot gates or Smart App Control handling, the Rev 5 offline harness, release signing / auto-update, cloud sync. They stay blocked until their own gates are met and independently reviewed.

@@ -27,6 +27,7 @@ export const validationLabel = (s: string) => VALIDATION[s] ?? s;
 
 const COMPAT: Record<string, string> = {
   "vendor-declared": "Üretici belirtmiş (test edilmedi)",
+  "independently-tested": "Bağımsız olarak test edilmiş",
   unknown: "Bilinmiyor",
   unsupported: "Desteklenmiyor",
 };

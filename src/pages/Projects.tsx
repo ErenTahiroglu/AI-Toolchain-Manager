@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { api, toAppError } from "../api";
 import { ErrorNotice, SyntheticBanner, useLoad } from "../components/common";
+import { ProjectToolWorkspace } from "../components/ProjectToolWorkspace";
 import { compatLabel, decisionLabel, formatTime, installLabel, platformLabel, scopeLabel, surfaceLabel, validationLabel } from "../labels";
 import type { AppError, CatalogEntry, PreferenceView, ProjectView } from "../types";
 
@@ -220,6 +221,7 @@ export function ProjectsPage() {
       <SyntheticBanner>
         "Örnek" etiketli projeler uydurmadır; bilgisayarınızdaki gerçek klasörlerle ilgisi yoktur. Gerçek proje kayıtlarınız ayrıca etiketlenir.
       </SyntheticBanner>
+      <ProjectToolWorkspace projects={projects} catalog={catalog} />
       <AddReference onAdded={reload} />
       {projects.error && <ErrorNotice error={projects.error} onRetry={projects.reload} />}
       {projects.loading && !projects.data && <p role="status">Yükleniyor…</p>}

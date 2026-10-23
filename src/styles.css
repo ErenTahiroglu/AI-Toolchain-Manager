@@ -130,3 +130,13 @@ fieldset.panel legend { font-weight: 700; padding: 0 .4rem; }
 .install-removed { background: var(--skip-bg); color: var(--skip-fg); }
 .preview-card, .result-card, .details-card { border: 2px solid var(--accent); border-radius: 10px; padding: .75rem 1rem; margin: .5rem 0 1rem; background: var(--surface); }
 .notice-text { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: .5rem .75rem; max-height: 18rem; overflow: auto; font-size: .8rem; }
+
+/* PRODUCT-01: Project Tool Workspace. Every state is text (and a symbol), never colour alone; the layout collapses to one column on narrow windows. */
+.ws-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
+.ws-row { border: 1px solid var(--border); border-radius: 10px; padding: .75rem 1rem; background: var(--surface); min-width: 0; }
+.ws-row h3 { margin: 0 0 .35rem; font-size: 1.05rem; }
+.ws-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: .75rem 1.5rem; }
+.ws-grid .facts { grid-template-columns: minmax(7rem, max-content) 1fr; }
+.ws-summary p { margin: .15rem 0; }
+.ws-notice { min-height: 1.4em; }
+@media (max-width: 560px) { .ws-grid .facts { grid-template-columns: 1fr; } .ws-row { padding: .6rem .7rem; } }
