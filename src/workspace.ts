@@ -1,7 +1,7 @@
 // PRODUCT-01 - pure logic of the Project Tool Workspace ("Proje Arac Matrisi"). No I/O, no React, no clock.
 // A row joins ONE project's recorded wishes with the current catalog for ONE (platform, agent surface) target.
 // Nothing here installs, enables, verifies or reads anything: it only arranges data the existing typed commands already return.
-import { kindLabel } from "./labels";
+import { installLabel, kindLabel, platformLabel, surfaceLabel, validationLabel } from "./labels";
 import type { CatalogEntry, EntryKind, PreferenceView, ProjectView, TargetEvidence } from "./types";
 
 // The values the Rust side accepts (src-tauri/src/projects.rs: SURFACES, PLATFORMS, DECISIONS). A test pins these lists to that source.
@@ -141,6 +141,32 @@ export function filterRows(rows: WorkspaceRow[], f: WorkspaceFilter): WorkspaceR
   });
 }
 
+// ---- the application's OWN record of the real state -----------------------------------------------------------------------------
+// The database only allows install_state = 'not_managed' and verification_state = 'unknown' today (migrations 0001 / 0002), so the record has no
+// positive value at all. These two lists are the ONLY place a positive value could be declared; a future status must be added here on purpose,
+// with a review. Any other string - unfamiliar, corrupt, from a newer version - is "unrecognised": shown as such, counted as such, never as success.
+export const AFFIRMATIVE_INSTALL_STATES: readonly string[] = [];
+export const AFFIRMATIVE_VERIFICATION_STATES: readonly string[] = [];
+
+export type RecordedState = "affirmed" | "none" | "unrecognised";
+
+const classify = (state: string, affirmative: readonly string[], none: string): RecordedState =>
+  affirmative.includes(state) ? "affirmed" : state === none ? "none" : "unrecognised";
+export const classifyInstall = (state: string): RecordedState => classify(state, AFFIRMATIVE_INSTALL_STATES, "not_managed");
+export const classifyVerification = (state: string): RecordedState => classify(state, AFFIRMATIVE_VERIFICATION_STATES, "unknown");
+
+const shown = (state: string) => (state.length > 40 ? `${state.slice(0, 40)}…` : state);
+
+/** Wording for one recorded value. An unrecognised value is named as unrecognised and is explicitly not a success. */
+export function recordedInstallText(state: string): string {
+  const c = classifyInstall(state);
+  return c === "none" ? installLabel(state) : c === "affirmed" ? "Kurulu olarak kaydedilmiş (kayıt)" : `Tanınmayan durum (“${shown(state)}”) — başarı sayılmaz`;
+}
+export function recordedVerificationText(state: string): string {
+  const c = classifyVerification(state);
+  return c === "none" ? validationLabel(state) : c === "affirmed" ? "Doğrulanmış olarak kaydedilmiş (kayıt)" : `Tanınmayan durum (“${shown(state)}”) — başarı sayılmaz`;
+}
+
 export interface WorkspaceSummary {
   total: number;
   undecided: number;
@@ -153,11 +179,18 @@ export interface WorkspaceSummary {
   removedWithWish: number;
   /** The application's OWN record (the catalog row / the stored wish row) - not an observation of this computer. */
   recordedInstalled: number;
+  recordedNotInstalled: number;
   recordedVerified: number;
+  recordedNotVerified: number;
+  /** Rows whose recorded install OR verification value is neither the known "none" value nor a declared affirmative one. */
+  recordedUnrecognised: number;
 }
 
 export function summarize(rows: WorkspaceRow[]): WorkspaceSummary {
-  const s: WorkspaceSummary = { total: rows.length, undecided: 0, accepted: 0, postponed: 0, rejected: 0, disabled: 0, unrecognised: 0, materialChange: 0, removedWithWish: 0, recordedInstalled: 0, recordedVerified: 0 };
+  const s: WorkspaceSummary = {
+    total: rows.length, undecided: 0, accepted: 0, postponed: 0, rejected: 0, disabled: 0, unrecognised: 0, materialChange: 0, removedWithWish: 0,
+    recordedInstalled: 0, recordedNotInstalled: 0, recordedVerified: 0, recordedNotVerified: 0, recordedUnrecognised: 0,
+  };
   for (const r of rows) {
     const d = r.pref?.decision;
     if (!r.pref) s.undecided++;
@@ -165,8 +198,13 @@ export function summarize(rows: WorkspaceRow[]): WorkspaceSummary {
     else s.unrecognised++;
     if (r.pref?.materialChange) s.materialChange++;
     if (r.removed) s.removedWithWish++;
-    if ((r.pref?.actualInstallState ?? r.entry.installState) !== "not_managed") s.recordedInstalled++;
-    if ((r.pref?.actualVerificationState ?? r.entry.verificationState) !== "unknown") s.recordedVerified++;
+    const install = classifyInstall(r.pref?.actualInstallState ?? r.entry.installState);
+    const verification = classifyVerification(r.pref?.actualVerificationState ?? r.entry.verificationState);
+    if (install === "affirmed") s.recordedInstalled++;
+    else if (install === "none") s.recordedNotInstalled++;
+    if (verification === "affirmed") s.recordedVerified++;
+    else if (verification === "none") s.recordedNotVerified++;
+    if (install === "unrecognised" || verification === "unrecognised") s.recordedUnrecognised++;
   }
   return s;
 }
@@ -176,4 +214,79 @@ export const contextKey = (alias: string, platform: string, surface: string) => 
 /** The answer of a save must describe exactly the key that was asked for. */
 export function sameKey(p: PreferenceView, k: { entryId: string; agentSurface: string; platformTarget: string }): boolean {
   return p.entryId === k.entryId && p.agentSurface === k.agentSurface && p.platformTarget === k.platformTarget;
+}
+
+// ---- the target the matrix shows: one project + one operating system + one agent surface ------------------------------------------
+
+export interface TargetRequest {
+  alias: string;
+  platform: string;
+  surface: string;
+}
+export const DEFAULT_TARGET: TargetRequest = { alias: "", platform: TARGET_PLATFORMS[0], surface: TARGET_SURFACES[0] };
+
+const isPlatform = (v: string) => (TARGET_PLATFORMS as readonly string[]).includes(v);
+const isSurface = (v: string) => (TARGET_SURFACES as readonly string[]).includes(v);
+
+export interface ResolvedTarget {
+  project: ProjectView | null;
+  platform: string;
+  surface: string;
+  /** Plain-language notes when a requested value could not be honoured. Empty when everything was found. */
+  notes: string[];
+}
+
+/**
+ * Turns a REQUESTED target (from the user's selects, or handed over from another page) into one that exists. Nothing is guessed silently:
+ * a project that is gone, or an operating system / surface this build does not know, falls back to a safe value AND says so. While the
+ * project list is still loading (`projects === null`) no project is chosen and no note is produced.
+ */
+export function resolveTarget(req: TargetRequest, projects: ProjectView[] | null): ResolvedTarget {
+  const notes: string[] = [];
+  let platform = req.platform;
+  if (!isPlatform(platform)) {
+    notes.push(`İstenen işletim sistemi tanınmıyor; ${platformLabel(TARGET_PLATFORMS[0])} gösteriliyor.`);
+    platform = TARGET_PLATFORMS[0];
+  }
+  let surface = req.surface;
+  if (!isSurface(surface)) {
+    notes.push(`İstenen ajan yüzeyi tanınmıyor; ${surfaceLabel(TARGET_SURFACES[0])} gösteriliyor.`);
+    surface = TARGET_SURFACES[0];
+  }
+  if (projects === null) return { project: null, platform, surface, notes };
+  const found = projects.find((p) => p.alias === req.alias) ?? null;
+  const project = found ?? projects[0] ?? null;
+  if (!found && req.alias !== "" && project) notes.push("İstenen proje artık yok veya bulunamadı (silinmiş olabilir); listedeki ilk proje gösteriliyor.");
+  return { project, platform, surface, notes };
+}
+
+export interface TargetCount {
+  platform: string;
+  surface: string;
+  count: number;
+  /** How many of those decisions belong to a catalog entry that has since been removed. */
+  removed: number;
+}
+
+/**
+ * Read-only navigator data: where this project has recorded decisions, derived from the already loaded project (no new data call).
+ * Ordered by the canonical platform and surface order. Decisions whose platform or surface this build does not offer cannot be selected;
+ * they are counted in `unreachable` instead of being dropped silently.
+ */
+export function targetCounts(project: ProjectView): { targets: TargetCount[]; unreachable: number; total: number } {
+  const map = new Map<string, TargetCount>();
+  let unreachable = 0;
+  for (const p of project.preferences) {
+    if (!isPlatform(p.platformTarget) || !isSurface(p.agentSurface)) {
+      unreachable++;
+      continue;
+    }
+    const k = `${p.platformTarget}\u0000${p.agentSurface}`;
+    const t = map.get(k) ?? { platform: p.platformTarget, surface: p.agentSurface, count: 0, removed: 0 };
+    t.count++;
+    if (p.entryRemoved) t.removed++;
+    map.set(k, t);
+  }
+  const rank = (t: TargetCount) => (TARGET_PLATFORMS as readonly string[]).indexOf(t.platform) * 100 + (TARGET_SURFACES as readonly string[]).indexOf(t.surface);
+  return { targets: [...map.values()].sort((a, b) => rank(a) - rank(b)), unreachable, total: project.preferences.length };
 }

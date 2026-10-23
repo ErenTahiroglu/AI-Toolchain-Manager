@@ -3,9 +3,8 @@ import { api, toAppError } from "../api";
 import { ErrorNotice, SyntheticBanner, useLoad } from "../components/common";
 import { platformLabel, surfaceLabel } from "../labels";
 import type { AppError, Evaluation, Recommendation } from "../types";
+import { TARGET_PLATFORMS as PLATFORMS, TARGET_SURFACES as SURFACES, type TargetRequest } from "../workspace";
 
-const SURFACES = ["claude-code-terminal", "claude-desktop-code", "antigravity-ide", "local-cli"];
-const PLATFORMS = ["windows-x64", "macos-arm64"];
 const FRONTEND = "anthropic-frontend-design";
 
 const newTaskId = () => `gorev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -55,7 +54,7 @@ function RecommendationCard({ rec, alias, surface, platform, onDecided }: { rec:
       ) : (
         <p className="actions">
           {rec.canEnable ? (
-            <button type="button" onClick={() => decide("accepted", "Bu proje için etkinleştirmek istiyorum")}>Bu proje için etkinleştir?</button>
+            <button type="button" onClick={() => decide("accepted", "Bu projede kullanmak istiyorum")}>Bu projede kullanmak istiyorum</button>
           ) : (
             <span className="small muted">Etkinleştirilemez: {rec.entryId === "strix" ? "kapsamlı yazılı yetki olmadan çalıştırılamaz" : "uyumluluk bilinmiyor"}. </span>
           )}
@@ -68,12 +67,12 @@ function RecommendationCard({ rec, alias, surface, platform, onDecided }: { rec:
   );
 }
 
-export function RecommendationsPage() {
+export function RecommendationsPage({ onOpenInMatrix }: { onOpenInMatrix: (target: TargetRequest) => void }) {
   const projects = useLoad(api.listProjects);
   const scenarios = useLoad(api.listScenarios);
   const [alias, setAlias] = useState("");
-  const [surface, setSurface] = useState(SURFACES[0]);
-  const [platform, setPlatform] = useState(PLATFORMS[0]);
+  const [surface, setSurface] = useState<string>(SURFACES[0]);
+  const [platform, setPlatform] = useState<string>(PLATFORMS[0]);
   const [taskText, setTaskText] = useState("");
   const [files, setFiles] = useState("");
   const [late, setLate] = useState(false);
@@ -170,6 +169,10 @@ export function RecommendationsPage() {
             <select id="rec-platform" value={platform} onChange={(e) => { setPlatform(e.target.value); restartTask(); }}>{PLATFORMS.map((s) => <option key={s} value={s}>{platformLabel(s)}</option>)}</select>
           </div>
         </div>
+        <p className="small">
+          <button type="button" className="secondary" disabled={alias === ""} onClick={() => onOpenInMatrix({ alias, platform, surface })}>Bu hedefi Proje Araç Matrisi’nde aç</button>{" "}
+          <span className="muted">Yalnızca ekranı değiştirir: görev değerlendirilmez, hiçbir şey kurulmaz, etkinleştirilmez veya kaydedilmez.</span>
+        </p>
         <div className="field">
           <label htmlFor="rec-scope">Varsayımsal durum: Frontend Design eklentisi zaten…</label>
           <select id="rec-scope" value={frontendScope} onChange={(e) => setFrontendScope(e.target.value as "none" | "global" | "project")}>

@@ -162,7 +162,8 @@ describe("a wish is not a state", () => {
     expect(a.queryByText(/Kurulu ve doğrulandı|Kuruldu|Doğrulandı|Etkinleştirildi|ajanda etkin\b(?! mi)/i)).not.toBeInTheDocument();
     const r = await region();
     expect(r.getByText(/1 kullanmak istiyorum/)).toBeInTheDocument();
-    expect(r.getByText(/0 kurulu\/yönetilen · 0 doğrulanmış/)).toBeInTheDocument();
+    expect(r.getByText(/5 kurulu değil \/ yönetilmiyor · 5 doğrulanmadı/)).toBeInTheDocument();
+    expect(r.queryByText(/kurulu olarak kaydedilmiş|doğrulanmış olarak kaydedilmiş|tanınmayan durum/)).not.toBeInTheDocument();
   });
 
   it("saving 'accepted' stores a wish through the typed command and says nothing was installed, verified or activated", async () => {
@@ -579,6 +580,21 @@ describe("safety: the workspace only records or forgets a wish", () => {
     expect([...new Set(apiCalls)].sort()).toEqual(["resetProjectPreference", "setProjectPreference"]);
   });
 
+  it("the Projects page and the handoff code name no network, file, shell, window or plugin API and use only the project / catalog reads and the project-reference commands", async () => {
+    const projectsSource = (await import("./pages/Projects.tsx?raw")).default;
+    const appSource = (await import("./App.tsx?raw")).default;
+    for (const [label, text] of [["Projects.tsx", projectsSource], ["App.tsx", appSource]] as const) {
+      for (const banned of ["fetch(", "XMLHttpRequest", "WebSocket", "window.open", "navigator.sendBeacon", "EventSource", "localStorage", "sessionStorage", "indexedDB", "document.cookie", "@tauri-apps/plugin", "@tauri-apps/api/core", "invoke(", "dangerouslySetInnerHTML", "href="]) {
+        // App.tsx keeps its existing skip link (href="#main"); nothing else may carry a link
+        if (label === "App.tsx" && banned === "href=") continue;
+        expect(text.includes(banned), `${label}: ${banned}`).toBe(false);
+      }
+    }
+    const used = (text: string) => [...new Set([...text.matchAll(/\bapi\.([A-Za-z]+)/g)].map((m) => m[1]))].sort();
+    expect(used(projectsSource)).toEqual(["addProjectReference", "listCatalog", "listProjects", "removeProjectReference"]);
+    expect(used(appSource)).toEqual(["getAppInfo", "getSettings"]);
+  });
+
   it("hostile text from a catalog entry is rendered as plain text", async () => {
     backend.entries.push(makeEntry("evil", { displayName: "evil/evil", purpose: "<img src=x onerror=alert(1)> <b>kalın</b>", record: {} }));
     await open();
@@ -588,20 +604,173 @@ describe("safety: the workspace only records or forgets a wish", () => {
   });
 });
 
-describe("the existing Projects page still works around the workspace", () => {
-  it("keeps the project cards, the old decision table, the add form and the sample banner", async () => {
+describe("the Projects page has exactly one place that stores or forgets a wish", () => {
+  it("keeps the project cards, the add form and the sample banner, and no legacy decision table or form", async () => {
     render(<ProjectsPage />);
     expect(await screen.findByText("ÖRNEK VERİ")).toBeInTheDocument();
     const card = (await screen.findByRole("heading", { name: /Örnek: Web sitesi/ })).closest("section")!;
-    expect(within(card).getByText("Etkinleştirmek istiyorum")).toBeInTheDocument(); // the old table keeps its old wording
+    expect(within(card).getByText("örnek")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Proje kaydını ekle" })).toBeInTheDocument();
-    expect(within(card).getByRole("button", { name: "Kararı kaydet" })).toBeInTheDocument();
+    for (const gone of [/Karar ekle/, /Kararı kaydet/, /için kayıtlı kararlar/]) expect(screen.queryByText(gone)).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(within(card).queryByLabelText("Kayıt")).not.toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: /Kararı (sıfırla|kaydet)/ })).not.toBeInTheDocument();
   });
 
-  it("a catalog entry the old form lists is a tool the workspace lists too (same source of truth)", async () => {
+  it("every control that writes a wish sits inside the workspace region; the project cards only show a count and open the matrix", async () => {
     await open();
+    const r = await region();
+    const all = screen.getAllByRole("button", { name: /Yalnızca tercihimi kaydet|Kararı sıfırla|Eski kararı sıfırla/ });
+    expect(all.length).toBeGreaterThan(0);
+    for (const b of all) expect(r.getAllByRole("button").includes(b)).toBe(true);
     const card = screen.getByRole("heading", { name: /Örnek: Web sitesi/ }).closest("section")!;
-    const old = within(card).getAllByRole("option").map((o) => o.textContent).filter((t) => ["Alfa Araç", "Beta Eklenti", "Gama Kapalı", "Delta Kısıtlı", "Yeni Kayıt", "Eski Kayıt"].includes(t ?? ""));
-    expect(old).toEqual(["Alfa Araç", "Beta Eklenti", "Gama Kapalı", "Delta Kısıtlı", "Yeni Kayıt"]); // the old form never offered the removed one
+    expect(within(card).getByText(/Kayıtlı karar:/)).toHaveTextContent("Kayıtlı karar: 1");
+    expect(within(card).getAllByRole("button").map((b) => b.textContent)).toEqual(["Araç matrisinde aç (Örnek: Web sitesi)"]);
+  });
+
+  it("the Projects page source never calls the preference write / reset commands itself", async () => {
+    const mod = await import("./pages/Projects.tsx?raw");
+    expect(mod.default).not.toMatch(/setProjectPreference|resetProjectPreference/);
+    expect(mod.default).not.toMatch(/PreferenceForm|PreferenceRow/);
+  });
+});
+
+describe("every recorded decision stays reachable: the read-only target navigator", () => {
+  const manyTargets = () => [
+    wish("alfa", "accepted"),
+    wish("eski", "rejected", { entryRemoved: true }), // a decision on an entry that has since been removed from the catalog (the backend sets the flag from the same row)
+    wish("alfa", "rejected", { agentSurface: CLI }),
+    wish("alfa", "postponed", { platformTarget: MAC }),
+  ];
+
+  it("lists each target that holds decisions with its count (removed entries included) and marks the open one", async () => {
+    backend.projects[0].preferences = manyTargets();
+    await open();
+    const r = await region();
+    const nav = within(r.getByRole("group", { name: /Bu projedeki kayıtlı kararlar/ }));
+    expect(nav.getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "Windows x64 · Claude Code (terminal): 2 karar (1 katalogdan kaldırılmış kayıt) — şu an açık",
+      "Windows x64 · Yerel komut satırı: 1 karar",
+      "macOS Apple Silicon · Claude Code (terminal): 1 karar",
+    ]);
+    expect(nav.getAllByRole("button")[0]).toHaveAttribute("aria-current", "true");
+    expect(nav.getAllByRole("button")[1]).not.toHaveAttribute("aria-current");
+  });
+
+  it("selecting a target opens exactly it - decisions, removed entries included - and makes no backend call", async () => {
+    backend.projects[0].preferences = manyTargets();
+    await open();
+    const r = await region();
+    expect((await rowOf("Eski Kayıt")).getAllByText("katalogdan kaldırıldı").length).toBeGreaterThan(0); // reachable at the default target
+    const before = backend.calls.length;
+    await userEvent.click(r.getByRole("button", { name: /Windows x64 · Yerel komut satırı: 1 karar/ }));
+    expect(r.getByLabelText("Ajan yüzeyi")).toHaveValue(CLI);
+    expect(r.getByLabelText("İşletim sistemi")).toHaveValue(WIN);
+    expect((await rowOf("Alfa Araç")).getByText("Reddet (tekrar sorma)", { selector: "strong" })).toBeInTheDocument();
+    await userEvent.click(r.getByRole("button", { name: /macOS Apple Silicon · Claude Code \(terminal\): 1 karar/ }));
+    expect((await rowOf("Alfa Araç")).getByText("Şimdi değil (ertele)", { selector: "strong" })).toBeInTheDocument();
+    expect(backend.calls.length).toBe(before); // a navigator click reads nothing new and writes nothing
+  });
+
+  it("says plainly when the project has no recorded decision", async () => {
+    await open();
+    const r = await region();
+    await userEvent.selectOptions(r.getByLabelText("Proje"), "benim-sitem");
+    expect(await r.findByText("Bu projede henüz kayıtlı karar yok.")).toBeInTheDocument();
+    expect(r.queryByRole("group", { name: /Bu projedeki kayıtlı kararlar/ })?.querySelectorAll("button")).toHaveLength(0);
+  });
+
+  it("a decision on a target this build does not offer is counted and reported, never deleted or hidden silently", async () => {
+    backend.projects[0].preferences = [wish("alfa", "accepted"), wish("alfa", "rejected", { platformTarget: "linux-x64" })];
+    await open();
+    const r = await region();
+    expect(r.getByText(/1 karar, bu sürümün tanımadığı bir işletim sistemi veya ajan yüzeyine ait/)).toBeInTheDocument();
+    expect(calls("reset_project_preference")).toHaveLength(0);
+    expect(backend.projects[0].preferences).toHaveLength(2);
+  });
+
+  it("the project card's shortcut selects that project in the matrix and keeps the chosen operating system and surface", async () => {
+    await open();
+    const r = await region();
+    await userEvent.selectOptions(r.getByLabelText("İşletim sistemi"), MAC);
+    await userEvent.selectOptions(r.getByLabelText("Ajan yüzeyi"), CLI);
+    const card = screen.getByRole("heading", { name: /Benim sitem/ }).closest("section")!;
+    await userEvent.click(within(card).getByRole("button", { name: /^Araç matrisinde aç/ }));
+    expect(r.getByLabelText("Proje")).toHaveValue("benim-sitem");
+    expect(r.getByLabelText("İşletim sistemi")).toHaveValue(MAC);
+    expect(r.getByLabelText("Ajan yüzeyi")).toHaveValue(CLI);
+    await waitFor(() => expect(r.getByRole("heading", { level: 2, name: "Proje Araç Matrisi" })).toHaveFocus());
+  });
+
+  it("add / remove project flows are untouched, and removing the selected project falls back to another one with a note-free list", async () => {
+    await open();
+    const card = () => screen.getByRole("heading", { name: /Benim sitem/ }).closest("section")!;
+    await userEvent.selectOptions((await region()).getByLabelText("Proje"), "benim-sitem");
+    await userEvent.click(within(card()).getByRole("button", { name: "Proje kaydını kaldır" }));
+    await userEvent.click(within(card()).getByRole("button", { name: "Evet, kaldır" }));
+    expect(calls("remove_project_reference")).toEqual([{ cmd: "remove_project_reference", args: { alias: "benim-sitem" } }]);
+    await waitFor(() => expect(screen.queryByRole("heading", { name: /Benim sitem/ })).not.toBeInTheDocument());
+    expect((await region()).getByLabelText("Proje")).toHaveValue("ornek-web-sitesi");
+  });
+});
+
+describe("the application's record: an unfamiliar status is never shown or counted as success", () => {
+  it("a wish row or a catalog row with a corrupt, future or positive-looking status string reads 'unrecognised - not a success'", async () => {
+    backend.entries.find((e) => e.entryId === "beta")!.installState = "installed";
+    backend.entries.find((e) => e.entryId === "yeni")!.verificationState = "passed";
+    backend.projects[0].preferences = [wish("alfa", "accepted", { actualInstallState: "installed_verified", actualVerificationState: "verified" })];
+    await open();
+    const a = await rowOf("Alfa Araç");
+    expect(a.getAllByText(/Tanınmayan durum .* başarı sayılmaz/).length).toBe(2);
+    expect(a.getByText(/Kurulum: Tanınmayan durum \(“installed_verified”\)/)).toBeInTheDocument();
+    expect((await rowOf("Beta Eklenti")).getByText(/Kurulum: Tanınmayan durum \(“installed”\)/)).toBeInTheDocument();
+    expect((await rowOf("Yeni Kayıt")).getByText(/Doğrulama: Tanınmayan durum \(“passed”\)/)).toBeInTheDocument();
+    const r = await region();
+    expect(r.getByText(/3 tanınmayan durum \(başarı sayılmaz\)/)).toBeInTheDocument();
+    expect(r.queryByText(/kurulu olarak kaydedilmiş|doğrulanmış olarak kaydedilmiş/)).not.toBeInTheDocument();
+    for (const row of [a, await rowOf("Beta Eklenti"), await rowOf("Yeni Kayıt")]) expect(row.queryByText(/Kurulu ve doğrulandı|Doğrulandı|Kuruldu|Etkinleştirildi/)).not.toBeInTheDocument();
+  });
+});
+
+describe("hostile project text is inert", () => {
+  it("a project name with markup is rendered as text in the selector, the target line and the card", async () => {
+    backend.projects[1].displayName = "<img src=x onerror=alert(1)><b>kalın</b>";
+    backend.projects[1].localNote = "<script>alert(1)</script>";
+    await open();
+    await userEvent.selectOptions((await region()).getByLabelText("Proje"), "benim-sitem");
+    expect((await region()).getByText(/Hedef:/)).toHaveTextContent("<img src=x onerror=alert(1)><b>kalın</b>");
+    expect(document.querySelector("img")).toBeNull();
+    expect(document.querySelector("script")).toBeNull();
+    expect(document.querySelector("section b, article b")).toBeNull();
+  });
+});
+
+describe("out-of-order reads never put an old saved preference back on the screen", () => {
+  it("a slow, stale project list that arrives after a newer one is ignored", async () => {
+    await open();
+    const original = backend.handle;
+    const gates: (() => void)[] = [];
+    let holdNext = false;
+    backend.handle = async (c, a) => {
+      const snapshot = await original(c, a); // the answer is taken NOW, as a real read would be
+      if (c === "list_projects" && holdNext) {
+        holdNext = false;
+        await new Promise<void>((res) => gates.push(res)); // ... but delivered late
+      }
+      return snapshot;
+    };
+    const alfa1 = await rowOf("Alfa Araç"); // currently 'accepted'
+    holdNext = true;
+    await userEvent.click(alfa1.getByRole("button", { name: /^Kararı sıfırla/ })); // read #1 will say: no decision (and is held)
+    await waitFor(() => expect(calls("reset_project_preference")).toHaveLength(1));
+    await waitFor(() => expect(gates).toHaveLength(1));
+    await userEvent.selectOptions(alfa1.getByLabelText(/^Karar/), "rejected");
+    await userEvent.click(saveButton(alfa1)); // read #2 says: rejected, and arrives first
+    await waitFor(() => expect(alfa1.getByText("Reddet (tekrar sorma)", { selector: "strong" })).toBeInTheDocument());
+    await act(async () => gates[0]()); // the stale read #1 now arrives
+    await new Promise((res) => setTimeout(res, 30));
+    expect(alfa1.getByText("Reddet (tekrar sorma)", { selector: "strong" })).toBeInTheDocument();
+    expect(alfa1.queryByText("Henüz karar yok")).not.toBeInTheDocument();
+    expect((await region()).getByText(/0 kullanmak istiyorum · 0 ertelendi · 1 reddedildi/)).toBeInTheDocument();
   });
 });

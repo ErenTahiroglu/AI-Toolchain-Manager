@@ -1,4 +1,4 @@
-import { Component, useCallback, useEffect, useState, type ReactNode } from "react";
+import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { reportError, toAppError } from "../api";
 import { statusLabel } from "../labels";
 import type { AppError } from "../types";
@@ -45,20 +45,59 @@ export function UnavailableButton({ label, reason }: { label: string; reason: st
   );
 }
 
+/**
+ * Loads data through `loader` on mount, whenever `deps` change, and whenever `reload()` is called.
+ *
+ * Latest request wins: every load takes a generation number, and only the load that holds the CURRENT generation may change state. A slower
+ * earlier response (success or failure) and its `loading` bookkeeping are ignored, so an out-of-order read can never put old data - for
+ * example an old saved preference - back on the screen. Unmounting (or changing `deps`) invalidates whatever is still in flight, and
+ * `reload()` after unmount does nothing. The loader is read through a ref, so `reload()` always uses the newest loader and never a stale
+ * closure. There is no cache and no automatic retry.
+ */
 export function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<AppError | null>(null);
   const [loading, setLoading] = useState(true);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const loaderRef = useRef(loader);
+  const generation = useRef(0);
+  const alive = useRef(false);
+  // declared before the load effect, so a render that changes the loader also changes what the load below calls
+  useEffect(() => {
+    loaderRef.current = loader;
+  });
   const load = useCallback(() => {
+    if (!alive.current) return;
+    const mine = ++generation.current;
     setLoading(true);
-    loader()
-      .then((d) => { setData(d); setError(null); })
-      .catch((e) => setError(toAppError(e)))
-      .finally(() => setLoading(false));
+    let pending: Promise<T>;
+    try {
+      pending = Promise.resolve(loaderRef.current());
+    } catch (e) {
+      pending = Promise.reject(e);
+    }
+    pending.then(
+      (d) => {
+        if (mine !== generation.current) return;
+        setData(d);
+        setError(null);
+        setLoading(false);
+      },
+      (e) => {
+        if (mine !== generation.current) return;
+        setError(toAppError(e));
+        setLoading(false);
+      },
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
-  useEffect(load, [load]);
+  useEffect(() => {
+    alive.current = true;
+    load();
+    return () => {
+      alive.current = false;
+      generation.current += 1;
+    };
+  }, [load]);
   return { data, error, loading, reload: load, setData };
 }
 

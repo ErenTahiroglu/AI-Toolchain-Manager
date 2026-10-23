@@ -34,7 +34,7 @@ const COMPAT: Record<string, string> = {
 export const compatLabel = (s: string) => COMPAT[s] ?? s;
 
 const DECISION: Record<string, string> = {
-  accepted: "Etkinleştirmek istiyorum",
+  accepted: "Bu projede kullanmak istiyorum",
   rejected: "Reddedildi",
   postponed: "Ertelendi",
   later: "Ertelendi",

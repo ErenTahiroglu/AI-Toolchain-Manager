@@ -185,12 +185,16 @@ describe("projects and preferences", () => {
     expect(await screen.findByText("ÖRNEK VERİ")).toBeInTheDocument();
     const card = (await screen.findByRole("heading", { name: /Örnek: Web sitesi/ })).closest("section")!;
     expect(within(card).getByText("örnek")).toBeInTheDocument();
-    expect(within(card).getByText("Etkinleştirmek istiyorum")).toBeInTheDocument();
-    const actual = within(card).getByText(/Kurulu değil \/ yönetilmiyor/);
-    expect(actual).toHaveTextContent(/Doğrulanmadı/);
-    expect(actual).toHaveTextContent(/Kapsam bilinmiyor/);
-    expect(within(card).queryByText(/Doğrulandı|Kuruldu|Kurulu(?! değil)/)).not.toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: /Proje kaydını kaldır/ })).not.toBeInTheDocument();
+    // the recorded decision lives in the matrix (one place); the navigator makes the target that holds it reachable
+    const matrix = within(await screen.findByRole("region", { name: "Proje Araç Matrisi" }));
+    await userEvent.click(await matrix.findByRole("button", { name: /Windows x64 · Yerel komut satırı: 1 karar/ }));
+    const row = within((await matrix.findByRole("heading", { level: 3, name: "gitleaks" })).closest("article")!);
+    expect(row.getByText("Bu projede kullanmak istiyorum", { selector: "strong" })).toBeInTheDocument();
+    expect(row.getByText("Kurulum: Kurulu değil / yönetilmiyor")).toBeInTheDocument();
+    expect(row.getByText("Doğrulama: Doğrulanmadı")).toBeInTheDocument();
+    expect(row.getByText(/Kapsam: Kapsam bilinmiyor/)).toBeInTheDocument();
+    expect(row.queryByText(/Kurulu ve doğrulandı|Doğrulandı|Kuruldu|Etkinleştirildi/)).not.toBeInTheDocument();
   });
 
   it("registers a real project only as a reference and says the folder is never touched", async () => {
@@ -230,34 +234,38 @@ describe("projects and preferences", () => {
     expect(calls("remove_project_reference")).toEqual([{ cmd: "remove_project_reference", args: { alias: "benim-sitem" } }]);
   });
 
+  const matrixRegion = async () => within(await screen.findByRole("region", { name: "Proje Araç Matrisi" }));
+  const rowIn = (matrix: ReturnType<typeof within>, name: string) => within(matrix.getByRole("heading", { level: 3, name }).closest("article")!);
+
   it("saves a decision with the full key and shows backend refusals", async () => {
     render(<App />);
     await go("Projeler");
-    const card = (await screen.findByRole("heading", { name: /Örnek: Web sitesi/ })).closest("section")!;
-    await userEvent.selectOptions(within(card).getByLabelText("Kayıt"), "agent-browser");
-    await userEvent.selectOptions(within(card).getByLabelText("Karar"), "rejected");
-    await userEvent.click(within(card).getByRole("button", { name: "Kararı kaydet" }));
+    const matrix = await matrixRegion();
+    await userEvent.selectOptions(await matrix.findByLabelText("Ajan yüzeyi"), "local-cli");
+    await matrix.findByRole("heading", { level: 3, name: "agent-browser" });
+    await userEvent.selectOptions(rowIn(matrix, "agent-browser").getByLabelText(/^Karar/), "rejected");
+    await userEvent.click(rowIn(matrix, "agent-browser").getByRole("button", { name: /^Yalnızca tercihimi kaydet/ }));
     expect(calls("set_project_preference")).toContainEqual({
       cmd: "set_project_preference",
-      args: { alias: "ornek-web-sitesi", entryId: "agent-browser", agentSurface: "claude-code-terminal", platformTarget: "windows-x64", decision: "rejected", remindDays: null },
+      args: { alias: "ornek-web-sitesi", entryId: "agent-browser", agentSurface: "local-cli", platformTarget: "windows-x64", decision: "rejected", remindDays: null },
     });
     backend.failures.set_project_preference = { code: "PREFERENCE_NOT_ACTIVATABLE", message: "Uyumluluk bilinmiyor." };
-    await userEvent.selectOptions(within(card).getByLabelText("Karar"), "accepted");
-    await userEvent.click(within(card).getByRole("button", { name: "Kararı kaydet" }));
-    expect(await within(card).findByText(/PREFERENCE_NOT_ACTIVATABLE/)).toBeInTheDocument();
+    await userEvent.selectOptions(rowIn(matrix, "agent-browser").getByLabelText(/^Karar/), "accepted");
+    await userEvent.click(rowIn(matrix, "agent-browser").getByRole("button", { name: /^Yalnızca tercihimi kaydet/ }));
+    expect(await rowIn(matrix, "agent-browser").findByText(/PREFERENCE_NOT_ACTIVATABLE/)).toBeInTheDocument();
   });
 
   it("offers postponing with a bounded number of days and an explicit reset", async () => {
     render(<App />);
     await go("Projeler");
-    const card = () => screen.getByRole("heading", { name: /Örnek: Web sitesi/ }).closest("section")!;
-    await screen.findByRole("heading", { name: /Örnek: Web sitesi/ });
-    await userEvent.selectOptions(within(card()).getByLabelText("Kayıt"), "caveman");
-    await userEvent.selectOptions(within(card()).getByLabelText("Karar"), "postponed");
-    const days = within(card()).getByLabelText("Kaç gün sonra hatırlat");
+    const matrix = await matrixRegion();
+    await userEvent.click(await matrix.findByRole("button", { name: /Windows x64 · Yerel komut satırı: 1 karar/ }));
+    await matrix.findByRole("heading", { level: 3, name: "caveman" });
+    await userEvent.selectOptions(rowIn(matrix, "caveman").getByLabelText(/^Karar/), "postponed");
+    const days = rowIn(matrix, "caveman").getByLabelText(/^Kaç gün sonra hatırlat/);
     expect(days).toHaveAttribute("min", "1");
     expect(days).toHaveAttribute("max", "365");
-    await userEvent.click(within(card()).getByRole("button", { name: "Kararı sıfırla" }));
+    await userEvent.click(rowIn(matrix, "gitleaks").getByRole("button", { name: /^Kararı sıfırla/ }));
     expect(calls("reset_project_preference")).toEqual([
       { cmd: "reset_project_preference", args: { alias: "ornek-web-sitesi", entryId: "gitleaks", agentSurface: "local-cli", platformTarget: "windows-x64" } },
     ]);
@@ -265,13 +273,13 @@ describe("projects and preferences", () => {
 
   it("flags a material change but treats a plain version bump as informational only", async () => {
     backend.projects[0].preferences = [
-      pref({ entryId: "a", entryName: "Alfa", decision: "rejected", materialChange: true }),
-      pref({ entryId: "b", entryName: "Beta", decision: "rejected", revisionChanged: true }),
+      pref({ entryId: "caveman", entryName: "Alfa", agentSurface: "claude-code-terminal", decision: "rejected", materialChange: true }),
+      pref({ entryId: "graphify", entryName: "Beta", agentSurface: "claude-code-terminal", decision: "rejected", revisionChanged: true }),
     ];
     render(<App />);
     await go("Projeler");
-    expect(await screen.findByText(/önemli ölçüde değişti/)).toBeInTheDocument();
-    expect(screen.getByText(/bu tek başına yeniden sormaz/)).toBeInTheDocument();
+    expect(await screen.findByText(/önemli biçimde değişti/)).toBeInTheDocument();
+    expect(screen.getByText(/bu tek başına kararınızı geçersiz kılmaz/)).toBeInTheDocument();
   });
 });
 
@@ -325,10 +333,10 @@ describe("recommendation preview", () => {
     await userEvent.click(screen.getByRole("button", { name: "Değerlendir" }));
     expect(await screen.findByText("Öneri", { selector: ".badge" })).toBeInTheDocument();
     expect(screen.getByText(/Ne olur\?/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Bu proje için etkinleştir?" }));
+    await userEvent.click(screen.getByRole("button", { name: "Bu projede kullanmak istiyorum" }));
     expect(calls("set_project_preference").at(-1)!.args).toMatchObject({ entryId: "anthropic-frontend-design", decision: "accepted", agentSurface: "claude-code-terminal" });
     expect(await screen.findByText(/Hiçbir şey kurulmadı\./, { selector: "p.ok-text" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Bu proje için etkinleştir?" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Bu projede kullanmak istiyorum" })).not.toBeInTheDocument();
   });
 
   it("informational suggestions (unknown compatibility, Strix) have no enable button", async () => {
@@ -345,7 +353,7 @@ describe("recommendation preview", () => {
     await userEvent.type(screen.getByLabelText("Görev metni"), "pentest planla");
     await userEvent.click(screen.getByRole("button", { name: "Değerlendir" }));
     expect(await screen.findAllByText("Yalnızca bilgi")).toHaveLength(2);
-    expect(screen.queryByRole("button", { name: "Bu proje için etkinleştir?" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Bu projede kullanmak istiyorum" })).not.toBeInTheDocument();
     expect(screen.getByText(/kapsamlı yazılı yetki olmadan çalıştırılamaz/)).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Reddet / bir daha sorma" })).toHaveLength(2);
   });

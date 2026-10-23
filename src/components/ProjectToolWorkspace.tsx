@@ -4,11 +4,12 @@
 // existing typed commands setProjectPreference / resetProjectPreference. It installs, enables, verifies and reads nothing.
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, toAppError } from "../api";
-import { compatLabel, formatTime, installLabel, kindLabel, licenseLabel, metadataLabel, platformLabel, policyLabel, reviewLabel, scopeLabel, surfaceLabel, validationLabel } from "../labels";
+import { compatLabel, formatTime, kindLabel, licenseLabel, metadataLabel, platformLabel, policyLabel, reviewLabel, scopeLabel, surfaceLabel } from "../labels";
 import type { AppError, CatalogEntry, EntryKind, ProjectView } from "../types";
 import {
   DECISION_VALUES, NO_FILTER, TARGET_PLATFORMS, TARGET_SURFACES, WORKSPACE_DECISION_HELP, WORKSPACE_DECISION_LABEL, buildRows, contextKey, filterRows,
-  isFiltering, sameKey, summarize, workspaceDecisionLabel, type CompatFilter, type DecisionFilter, type DecisionValue, type WorkspaceFilter, type WorkspaceRow,
+  isFiltering, recordedInstallText, recordedVerificationText, resolveTarget, sameKey, summarize, targetCounts, workspaceDecisionLabel,
+  type CompatFilter, type DecisionFilter, type DecisionValue, type TargetRequest, type WorkspaceFilter, type WorkspaceRow,
 } from "../workspace";
 import { ErrorNotice } from "./common";
 
@@ -86,8 +87,8 @@ function ToolRow({ row, project, platform, surface, onChanged, onNotice }: { row
     }
   };
 
-  const installText = installLabel(pref?.actualInstallState ?? entry.installState);
-  const verifyText = validationLabel(pref?.actualVerificationState ?? entry.verificationState);
+  const installText = recordedInstallText(pref?.actualInstallState ?? entry.installState);
+  const verifyText = recordedVerificationText(pref?.actualVerificationState ?? entry.verificationState);
   const headId = `${uid}-h`;
 
   return (
@@ -192,17 +193,33 @@ function ToolRow({ row, project, platform, surface, onChanged, onNotice }: { row
   );
 }
 
-export function ProjectToolWorkspace({ projects, catalog }: { projects: LoadState<ProjectView[]>; catalog: LoadState<CatalogEntry[]> }) {
-  const [alias, setAlias] = useState("");
-  const [platform, setPlatform] = useState<string>(TARGET_PLATFORMS[0]);
-  const [surface, setSurface] = useState<string>(TARGET_SURFACES[0]);
+export function ProjectToolWorkspace({ projects, catalog, target, onTarget, focusNonce = 0 }: {
+  projects: LoadState<ProjectView[]>;
+  catalog: LoadState<CatalogEntry[]>;
+  /** The REQUESTED target (project alias, operating system, agent surface). It is resolved against what exists; see resolveTarget. */
+  target: TargetRequest;
+  onTarget: (t: TargetRequest) => void;
+  /** Increase to move focus to the panel heading (used when another part of the page sends the user here). */
+  focusNonce?: number;
+}) {
   const [filter, setFilter] = useState<WorkspaceFilter>(NO_FILTER);
   // The confirmation of the last save/reset belongs to the target it was made for and is only ever shown there (never carried to another target).
   const [notice, setNotice] = useState<{ ctx: string; text: string } | null>(null);
   const ids = useId();
 
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (focusNonce > 0) {
+      titleRef.current?.focus();
+      titleRef.current?.scrollIntoView?.({ block: "start" });
+    }
+  }, [focusNonce]);
+
   const list = projects.data ?? [];
-  const project = list.find((p) => p.alias === alias) ?? list[0] ?? null;
+  const resolved = useMemo(() => resolveTarget(target, projects.data), [target, projects.data]);
+  const { project, platform, surface } = resolved;
+  const nav = useMemo(() => (project ? targetCounts(project) : null), [project]);
+  const choose = (patch: Partial<TargetRequest>) => project && onTarget({ alias: project.alias, platform, surface, ...patch });
   const entries = catalog.data;
 
   const built = useMemo(() => (project && entries ? buildRows(entries, project, platform, surface) : null), [project, entries, platform, surface]);
@@ -218,7 +235,7 @@ export function ProjectToolWorkspace({ projects, catalog }: { projects: LoadStat
 
   return (
     <section className="panel" aria-labelledby={`${ids}-title`} aria-busy={refreshing}>
-      <h2 id={`${ids}-title`}>Proje Araç Matrisi</h2>
+      <h2 id={`${ids}-title`} tabIndex={-1} ref={titleRef}>Proje Araç Matrisi</h2>
       <p className="muted small">
         Bir proje, işletim sistemi ve ajan yüzeyi seçin; her araç için <strong>isteğinizi</strong> kaydedin. Bu bir <strong>planlama ekranıdır</strong>: hiçbir şey kurmaz,
         çalıştırmaz, doğrulamaz veya etkinleştirmez; ajan ayarlarına, dosyalarınıza ve internete dokunmaz. “Gerçek durum” bölümü, bu ekranın bilgisayarı denetlediği
@@ -246,19 +263,19 @@ export function ProjectToolWorkspace({ projects, catalog }: { projects: LoadStat
           <div className="row">
             <div className="field">
               <label htmlFor={`${ids}-p`}>Proje</label>
-              <select id={`${ids}-p`} value={project.alias} onChange={(e) => setAlias(e.target.value)}>
+              <select id={`${ids}-p`} value={project.alias} onChange={(e) => choose({ alias: e.target.value })}>
                 {list.map((p) => <option key={p.alias} value={p.alias}>{p.displayName}{p.kind === "synthetic" ? " (örnek)" : ""}</option>)}
               </select>
             </div>
             <div className="field">
               <label htmlFor={`${ids}-o`}>İşletim sistemi</label>
-              <select id={`${ids}-o`} value={platform} onChange={(e) => setPlatform(e.target.value)}>
+              <select id={`${ids}-o`} value={platform} onChange={(e) => choose({ platform: e.target.value })}>
                 {TARGET_PLATFORMS.map((p) => <option key={p} value={p}>{platformLabel(p)}</option>)}
               </select>
             </div>
             <div className="field">
               <label htmlFor={`${ids}-s`}>Ajan yüzeyi</label>
-              <select id={`${ids}-s`} value={surface} onChange={(e) => setSurface(e.target.value)}>
+              <select id={`${ids}-s`} value={surface} onChange={(e) => choose({ surface: e.target.value })}>
                 {TARGET_SURFACES.map((s) => <option key={s} value={s}>{surfaceLabel(s)}</option>)}
               </select>
             </div>
@@ -268,6 +285,35 @@ export function ProjectToolWorkspace({ projects, catalog }: { projects: LoadStat
             işletim sistemi veya ajan yüzeyi için ayrıca kaydedilir.{" "}
             <button type="button" className="secondary" onClick={refresh} disabled={refreshing}>Listeyi yenile</button>
           </p>
+          {resolved.notes.length > 0 && (
+            <div role="note" className="small bad-text">{resolved.notes.map((n) => <p key={n}>⚠ {n}</p>)}</div>
+          )}
+          {nav && (
+            <div role="group" aria-labelledby={`${ids}-nav`} className="ws-nav">
+              <p id={`${ids}-nav`} className="small">
+                <strong>Bu projedeki kayıtlı kararlar</strong> (yalnızca sayım; bir hedefi açmak için seçin — hiçbir şey kurulmaz veya değiştirilmez):
+              </p>
+              {nav.total === 0 ? (
+                <p className="small muted">Bu projede henüz kayıtlı karar yok.</p>
+              ) : (
+                <ul className="ws-nav-list">
+                  {nav.targets.map((t) => {
+                    const current = t.platform === platform && t.surface === surface;
+                    return (
+                      <li key={`${t.platform}-${t.surface}`}>
+                        <button type="button" className="secondary" aria-current={current ? "true" : undefined} onClick={() => choose({ platform: t.platform, surface: t.surface })}>
+                          {platformLabel(t.platform)} · {surfaceLabel(t.surface)}: {t.count} karar{t.removed > 0 ? ` (${t.removed} katalogdan kaldırılmış kayıt)` : ""}{current ? " — şu an açık" : ""}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {nav.unreachable > 0 && (
+                <p className="small bad-text">⚠ {nav.unreachable} karar, bu sürümün tanımadığı bir işletim sistemi veya ajan yüzeyine ait olduğu için bu ekrandan seçilemiyor; silinmedi ve değiştirilmedi.</p>
+              )}
+            </div>
+          )}
         </>
       )}
 
@@ -313,7 +359,10 @@ export function ProjectToolWorkspace({ projects, catalog }: { projects: LoadStat
               {summary.unrecognised > 0 ? ` · ${summary.unrecognised} tanınmayan karar` : ""}.
             </p>
             <p>
-              Gerçek durum (uygulamanın kaydı, ayrı): {summary.recordedInstalled} kurulu/yönetilen · {summary.recordedVerified} doğrulanmış.
+              Gerçek durum (uygulamanın kaydı, ayrı): {summary.recordedNotInstalled} kurulu değil / yönetilmiyor · {summary.recordedNotVerified} doğrulanmadı
+              {summary.recordedInstalled > 0 ? ` · ${summary.recordedInstalled} kurulu olarak kaydedilmiş` : ""}
+              {summary.recordedVerified > 0 ? ` · ${summary.recordedVerified} doğrulanmış olarak kaydedilmiş` : ""}
+              {summary.recordedUnrecognised > 0 ? ` · ${summary.recordedUnrecognised} tanınmayan durum (başarı sayılmaz)` : ""}.
               {summary.materialChange > 0 ? ` Karardan sonra önemli biçimde değişen: ${summary.materialChange}.` : ""}
             </p>
           </div>

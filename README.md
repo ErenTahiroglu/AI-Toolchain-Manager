@@ -11,7 +11,7 @@ Bu proje bir kullanıcı (programcı olmayan bir kişi) tarafından, bağımsız
 | Özellik | Ne yapar | Ne yapmaz |
 | --- | --- | --- |
 | Araç Kütüphanesi | 13 hazır kayıtlı araç/eklenti için künye bilgisi; GitHub bağlantısı ekleyerek aday kayıt oluşturma | Bağlantıdaki hiçbir şeyi indirmez veya çalıştırmaz; yayıncının README'sindeki komutlar asla uygulanmaz |
-| Projeler ve tercihler | Örnek projeler ve takma adlı proje kayıtları; proje başına "istiyorum / ertele / reddet" tercihleri | Tercih "istek"tir; kurulu olduğu anlamına gelmez |
+| Projeler ve **Proje Araç Matrisi** | Örnek projeler ve takma adlı proje kayıtları; seçtiğiniz proje + işletim sistemi + ajan yüzeyi için her katalog aracını uyumluluk, lisans ve sınırlamalarıyla yan yana gösterir ve tercihinizi ("kullanmak istiyorum / ertele / reddet / kapalı tut") kaydeder; Öneriler sayfasından aynı hedefle açılabilir | Tercih "istek"tir: kurulu, doğrulanmış veya bir ajanda etkin olduğu anlamına gelmez; hiçbir şey kurmaz, çalıştırmaz, ajan ayarına yazmaz; "Gerçek durum" bilgisayarı denetlemez, uygulamanın kendi kaydıdır |
 | Öneriler | Sabit kurallarla çalışan, yapay zekâ çağırmayan öneri önizlemesi | Hiçbir şey kurmaz veya etkinleştirmez |
 | **Bilgisayar Envanteri** | İzin verdiğiniz bölümlerde (PATH, Claude Code kullanıcı dosyaları, tek bir proje klasörü) araçların **varlığını** salt okunur olarak gözlemler; isteğe bağlı SHA-256 parmak izi | Program çalıştırmaz, sürüm sormaz, ağa bağlanmaz; "bulundu ≠ yapılandırıldı ≠ çalışıyor" ayrımını korur; hiçbir gerçek aracı "doğrulanmış" saymaz |
 | Yedek önizlemesi | Eski veritabanı yedeklerinde kişisel veri izi olup olmadığını (kapsamı ve sınırlarıyla) gösterir | Hiçbir yedeği silmez, taşımaz veya değiştirmez |

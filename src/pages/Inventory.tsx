@@ -416,7 +416,7 @@ export function InventoryPage() {
       {(data?.requests.length ?? 0) > 0 && (
         <section aria-labelledby="h-req">
           <h2 id="h-req">İsteğiniz ile gözlem</h2>
-          <p className="muted small">“Etkinleştirmek istiyorum” demeniz aracın kurulu olduğu anlamına gelmez; ikisi ayrı tutulur. Her satır tek bir tercih içindir: araç, proje, ajan yüzeyi ve platform.</p>
+          <p className="muted small">“Bu projede kullanmak istiyorum” demeniz aracın kurulu olduğu anlamına gelmez (bir ajanda etkin olduğu anlamına da gelmez); ikisi ayrı tutulur. Her satır tek bir tercih içindir: araç, proje, ajan yüzeyi ve platform.</p>
           <ul>
             {data!.requests.map((r) => (
               <li key={`${r.entryId}/${r.projectAlias}/${r.agentSurface}/${r.platformTarget}`}>

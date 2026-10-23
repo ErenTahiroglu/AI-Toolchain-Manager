@@ -3,9 +3,8 @@ import { api, toAppError } from "../api";
 import { ErrorNotice, useLoad } from "../components/common";
 import { compatLabel, platformLabel, surfaceLabel } from "../labels";
 import type { AppError, InstallPlan, PlanRequest } from "../types";
+import { TARGET_PLATFORMS as PLATFORMS, TARGET_SURFACES as SURFACES } from "../workspace";
 
-const PLATFORMS = ["windows-x64", "macos-arm64"] as const;
-const SURFACES = ["local-cli", "claude-code-terminal", "claude-desktop-code", "antigravity-ide"] as const;
 const SCOPES: Record<string, string> = { user: "Bu kullanıcı için", project: "Tek bir proje için" };
 
 const OPERATION: Record<string, string> = {

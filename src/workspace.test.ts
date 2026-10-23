@@ -4,8 +4,9 @@ import rustProjectsSource from "../src-tauri/src/projects.rs?raw";
 import { makeEntry, pref } from "./test/backend";
 import type { CatalogEntry, ProjectView } from "./types";
 import {
-  DECISION_VALUES, NO_FILTER, TARGET_PLATFORMS, TARGET_SURFACES, acceptBlockReason, buildRows, compatClass, compatStateFor, contextKey, evidenceFor, filterRows,
-  isFiltering, normalize, sameKey, summarize,
+  AFFIRMATIVE_INSTALL_STATES, AFFIRMATIVE_VERIFICATION_STATES, DECISION_VALUES, DEFAULT_TARGET, NO_FILTER, TARGET_PLATFORMS, TARGET_SURFACES, acceptBlockReason, buildRows,
+  classifyInstall, classifyVerification, compatClass, compatStateFor, contextKey, evidenceFor, filterRows, isFiltering, normalize, recordedInstallText,
+  recordedVerificationText, resolveTarget, sameKey, summarize, targetCounts,
 } from "./workspace";
 
 const ev = (platformTarget: string, agentSurface: string, compatibilityState: string) => ({ platformTarget, agentSurface, compatibilityState, limitation: `${compatibilityState} @ ${platformTarget}/${agentSurface}` });
@@ -152,11 +153,34 @@ describe("summarize keeps the wish and the application's own record apart", () =
     const s = summarize(buildRows(entries, p, "windows-x64", "local-cli").rows);
     expect(s).toMatchObject({ total: 4, accepted: 1, disabled: 1, postponed: 1, rejected: 0, undecided: 1, materialChange: 1, recordedInstalled: 0, recordedVerified: 0 });
   });
-  it("reports what the record says, truthfully, if it ever says more", () => {
-    const e = entry("a", { installState: "installed", verificationState: "passed" });
-    const s = summarize(buildRows([e], project("p"), "windows-x64", "local-cli").rows);
-    expect(s.recordedInstalled).toBe(1);
-    expect(s.recordedVerified).toBe(1);
+  it("counts the known 'none' values as not installed / not verified, and never as success", () => {
+    const s = summarize(buildRows([entry("a"), entry("b")], project("p"), "windows-x64", "local-cli").rows);
+    expect(s).toMatchObject({ recordedInstalled: 0, recordedVerified: 0, recordedNotInstalled: 2, recordedNotVerified: 2, recordedUnrecognised: 0 });
+  });
+  it("an unfamiliar, corrupt or future status string is 'unrecognised' - never installed, never verified", () => {
+    for (const odd of ["installed", "managed_installed", "installed_verified", "INSTALLED", "Not_Managed", " not_managed", "not_managed ", "ok", "true", "1", "", "passed", "verified", "active", "enabled"]) {
+      const e = entry("a", { installState: odd, verificationState: odd });
+      const s = summarize(buildRows([e], project("p"), "windows-x64", "local-cli").rows);
+      expect(s, JSON.stringify(odd)).toMatchObject({ recordedInstalled: 0, recordedVerified: 0, recordedNotInstalled: 0, recordedNotVerified: 0, recordedUnrecognised: 1 });
+      expect(recordedInstallText(odd), odd).toMatch(/Tanınmayan durum .* başarı sayılmaz/);
+      expect(recordedVerificationText(odd), odd).toMatch(/Tanınmayan durum .* başarı sayılmaz/);
+      expect(`${recordedInstallText(odd)} ${recordedVerificationText(odd)}`).not.toMatch(/Kurulu olarak|Doğrulanmış olarak|Kurulu ve doğrulandı/);
+    }
+  });
+  it("the wish row's own record wins over the catalog row's, and an unfamiliar value there is also unrecognised", () => {
+    const key = { agentSurface: "local-cli", platformTarget: "windows-x64" };
+    const p = project("p", [pref({ ...key, entryId: "a", decision: "accepted", actualInstallState: "installed", actualVerificationState: "unknown" })]);
+    const s = summarize(buildRows([entry("a")], p, "windows-x64", "local-cli").rows);
+    expect(s).toMatchObject({ recordedInstalled: 0, recordedNotVerified: 1, recordedUnrecognised: 1 });
+  });
+  it("no value is declared affirmative today (the database only allows not_managed / unknown), so none can be counted as success", () => {
+    expect(AFFIRMATIVE_INSTALL_STATES).toEqual([]);
+    expect(AFFIRMATIVE_VERIFICATION_STATES).toEqual([]);
+    expect(classifyInstall("not_managed")).toBe("none");
+    expect(classifyVerification("unknown")).toBe("none");
+  });
+  it("very long state strings are shortened in the text", () => {
+    expect(recordedInstallText("x".repeat(500)).length).toBeLessThan(120);
   });
   it("counts a decision value it does not know separately instead of folding it into another", () => {
     const p = project("p", [pref({ agentSurface: "local-cli", platformTarget: "windows-x64", entryId: "a", decision: "installed" as never })]);
@@ -177,4 +201,55 @@ describe("keys", () => {
     expect(sameKey(p, { entryId: "a", agentSurface: "claude-code-terminal", platformTarget: "windows-x64" })).toBe(false);
     expect(sameKey(p, { entryId: "a", agentSurface: "local-cli", platformTarget: "macos-arm64" })).toBe(false);
   });
+});
+
+describe("resolveTarget: a requested target is honoured when it exists and replaced - with a note - when it does not", () => {
+  const list = [project("a"), project("b")];
+  it("keeps a valid request exactly", () => {
+    const r = resolveTarget({ alias: "b", platform: "macos-arm64", surface: "antigravity-ide" }, list);
+    expect(r).toMatchObject({ platform: "macos-arm64", surface: "antigravity-ide", notes: [] });
+    expect(r.project?.alias).toBe("b");
+  });
+  it("falls back to the first project and says the requested one is gone", () => {
+    const r = resolveTarget({ alias: "silinmis", platform: "windows-x64", surface: "local-cli" }, list);
+    expect(r.project?.alias).toBe("a");
+    expect(r.notes.join(" ")).toMatch(/İstenen proje artık yok/);
+  });
+  it("an empty request alias means 'no preference' and produces no note", () => {
+    expect(resolveTarget(DEFAULT_TARGET, list)).toMatchObject({ notes: [] });
+    expect(resolveTarget(DEFAULT_TARGET, list).project?.alias).toBe("a");
+  });
+  it("replaces an unknown operating system or surface with the first known one, and says so", () => {
+    const r = resolveTarget({ alias: "a", platform: "linux-x64", surface: "vscode" }, list);
+    expect(r.platform).toBe(TARGET_PLATFORMS[0]);
+    expect(r.surface).toBe(TARGET_SURFACES[0]);
+    expect(r.notes).toHaveLength(2);
+  });
+  it("while the project list is still loading nothing is chosen and nothing is claimed", () => {
+    expect(resolveTarget({ alias: "b", platform: "windows-x64", surface: "local-cli" }, null)).toMatchObject({ project: null, notes: [] });
+  });
+  it("an empty project list gives no project and no 'gone' note", () => {
+    expect(resolveTarget({ alias: "b", platform: "windows-x64", surface: "local-cli" }, [])).toMatchObject({ project: null, notes: [] });
+  });
+});
+
+describe("targetCounts: the read-only navigator", () => {
+  const w = (over: Parameters<typeof pref>[0]) => pref({ agentSurface: "claude-code-terminal", platformTarget: "windows-x64", ...over });
+  it("counts decisions per target in canonical order, including decisions on removed entries", () => {
+    const p = project("a", [
+      w({ entryId: "1" }), w({ entryId: "2", entryRemoved: true }), w({ entryId: "3", platformTarget: "macos-arm64", agentSurface: "local-cli" }), w({ entryId: "4", agentSurface: "local-cli" }),
+    ]);
+    const n = targetCounts(p);
+    expect(n.total).toBe(4);
+    expect(n.unreachable).toBe(0);
+    expect(n.targets.map((t) => `${t.platform}/${t.surface}:${t.count}:${t.removed}`)).toEqual([
+      "windows-x64/claude-code-terminal:2:1", "windows-x64/local-cli:1:0", "macos-arm64/local-cli:1:0",
+    ]);
+  });
+  it("counts decisions on a target this build does not offer as unreachable instead of dropping them silently", () => {
+    const n = targetCounts(project("a", [w({ entryId: "1" }), w({ entryId: "2", platformTarget: "linux-x64" }), w({ entryId: "3", agentSurface: "vscode" })]));
+    expect(n).toMatchObject({ unreachable: 2, total: 3 });
+    expect(n.targets).toHaveLength(1);
+  });
+  it("no decisions: nothing to navigate", () => expect(targetCounts(project("a"))).toEqual({ targets: [], unreachable: 0, total: 0 }));
 });
