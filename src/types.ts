@@ -63,6 +63,8 @@ export interface TargetEvidence {
 
 export interface ToolRecord {
   userAdded?: boolean;
+  /** schemas/catalog-entry.schema.json category, for example "mcp-server". */
+  category?: string;
   sourceSnapshot?: { observedRef?: string; immutableCommit?: string | null; releaseVersion?: string | null; revisionState?: string };
   license?: { state: string; spdxId?: string | null };
   targetEvidence?: TargetEvidence[];

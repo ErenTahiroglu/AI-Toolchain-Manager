@@ -13,6 +13,7 @@ import {
   type CompatFilter, type DecisionFilter, type DecisionValue, type MatrixHandoff, type TargetRequest, type WorkspaceFilter, type WorkspaceRow,
 } from "../workspace";
 import { ErrorNotice } from "./common";
+import { ConfigPreview } from "./ConfigPreview";
 import { ObservationSection } from "./ObservationSection";
 
 export interface LoadState<T> {
@@ -166,6 +167,8 @@ function ToolRow({ row, project, platform, surface, observation, onChanged, onNo
           <summary>Sınırlamalar ve bilinmeyenler ({entry.limitations.length})</summary>
           <ul className="small">{entry.limitations.map((l) => <li key={l}>{l}</li>)}</ul>
         </details>
+
+        <ConfigPreview entry={entry} alias={project.alias} projectName={project.displayName} platform={platform} surface={surface} />
 
         {removed ? (
           <p className="small" role="note">Bu kayıt katalogdan kaldırıldı: yeni karar kaydedilemez. Eski kararınız yalnızca görülebilir veya sıfırlanabilir.</p>
