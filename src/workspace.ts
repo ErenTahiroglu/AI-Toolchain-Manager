@@ -234,6 +234,8 @@ export interface ResolvedTarget {
   surface: string;
   /** Plain-language notes when a requested value could not be honoured. Empty when everything was found. */
   notes: string[];
+  /** True only when the requested project exists and the operating system and agent surface were recognised as requested. */
+  exact: boolean;
 }
 
 /**
@@ -253,11 +255,11 @@ export function resolveTarget(req: TargetRequest, projects: ProjectView[] | null
     notes.push(`İstenen ajan yüzeyi tanınmıyor; ${surfaceLabel(TARGET_SURFACES[0])} gösteriliyor.`);
     surface = TARGET_SURFACES[0];
   }
-  if (projects === null) return { project: null, platform, surface, notes };
+  if (projects === null) return { project: null, platform, surface, notes, exact: false };
   const found = projects.find((p) => p.alias === req.alias) ?? null;
   const project = found ?? projects[0] ?? null;
   if (!found && req.alias !== "" && project) notes.push("İstenen proje artık yok veya bulunamadı (silinmiş olabilir); listedeki ilk proje gösteriliyor.");
-  return { project, platform, surface, notes };
+  return { project, platform, surface, notes, exact: notes.length === 0 && found !== null };
 }
 
 export interface TargetCount {
@@ -289,4 +291,43 @@ export function targetCounts(project: ProjectView): { targets: TargetCount[]; un
   }
   const rank = (t: TargetCount) => (TARGET_PLATFORMS as readonly string[]).indexOf(t.platform) * 100 + (TARGET_SURFACES as readonly string[]).indexOf(t.surface);
   return { targets: [...map.values()].sort((a, b) => rank(a) - rank(b)), unreachable, total: project.preferences.length };
+}
+
+// ---- opening the matrix from a recommendation: the target AND the suggested tool --------------------------------------------------
+
+/** A request to open the matrix. `entryId` names the suggested tool row to bring into view (null: only the target). `nonce` makes each request distinct. */
+export interface MatrixHandoff extends TargetRequest {
+  entryId: string | null;
+  nonce: number;
+}
+
+export type FocusOutcome =
+  /** The row exists for this target. `needsFilterClear`: the user's current filter hides it. `notes`: things the user should know about this tool here. */
+  | { kind: "row"; entryId: string; needsFilterClear: boolean; notes: string[] }
+  /** No row is brought into view and no other tool is chosen in its place. `notes` says why. */
+  | { kind: "unavailable"; notes: string[] };
+
+/**
+ * Where a suggested tool is in the matrix, decided only from data the page already holds. It never selects a different tool: if the id is
+ * gone, removed or not shown for this target, the result is "unavailable" with a plain reason.
+ */
+export function resolveEntryFocus(entryId: string, resolved: ResolvedTarget, entries: CatalogEntry[], rows: WorkspaceRow[], filter: WorkspaceFilter): FocusOutcome {
+  if (!resolved.exact) {
+    return { kind: "unavailable", notes: ["Önerilen araç satırı vurgulanmadı: istenen hedef (proje, işletim sistemi veya ajan yüzeyi) bulunamadı, bu yüzden gösterilen hedef önerinin hedefi değil."] };
+  }
+  const entry = entries.find((e) => e.entryId === entryId);
+  if (!entry) return { kind: "unavailable", notes: [`Önerilen araç (“${entryId}”) katalogda bulunamadı; başka bir araç seçilmedi.`] };
+  const row = rows.find((r) => r.entry.entryId === entryId);
+  if (!row) {
+    return {
+      kind: "unavailable",
+      notes: [entry.removedAt !== null
+        ? `“${entry.displayName}” katalogdan kaldırılmış ve bu projede bu hedef için kayıtlı bir kararı yok; yeni karar kaydedilemez.`
+        : `“${entry.displayName}” bu hedefte gösterilemedi; başka bir araç seçilmedi.`],
+    };
+  }
+  const notes: string[] = [];
+  if (row.removed) notes.push(`“${entry.displayName}” katalogdan kaldırılmış: yeni karar kaydedilemez, eski karar yalnızca görülebilir veya sıfırlanabilir.`);
+  else if (row.acceptBlock !== null) notes.push(`“${entry.displayName}” için bu hedefte “kullanmak istiyorum” seçilemez: ${row.acceptBlock}`);
+  return { kind: "row", entryId, needsFilterClear: filterRows([row], filter).length === 0, notes };
 }

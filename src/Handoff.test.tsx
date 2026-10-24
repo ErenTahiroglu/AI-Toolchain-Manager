@@ -146,7 +146,7 @@ describe("Recommendations -> matrix handoff", () => {
     expect(m.getAllByRole("heading", { level: 3 }).length).toBeGreaterThan(0); // the matrix still works
   });
 
-  it("the Recommendations quick-decision still records a wish with the same key, using the unified wording", async () => {
+  it("a recommendation card is not a second place to decide: it opens the matrix on that tool and records nothing", async () => {
     backend.nextEvaluation = { taskId: "t", phase: "start", recommendations: [rec()], suppressed: [], disclaimer: "Hiçbir şey kurulmadı." };
     backend.entries.push(makeEntry("anthropic-frontend-design"));
     render(<App />);
@@ -154,8 +154,9 @@ describe("Recommendations -> matrix handoff", () => {
     await pick("benim-sitem", "windows-x64", "claude-code-terminal");
     await userEvent.type(screen.getByLabelText("Görev metni"), "React bileşeni tasarla");
     await userEvent.click(screen.getByRole("button", { name: "Değerlendir" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Bu projede kullanmak istiyorum" }));
-    expect(calls("set_project_preference").at(-1)!.args).toMatchObject({ alias: "benim-sitem", entryId: "anthropic-frontend-design", agentSurface: "claude-code-terminal", platformTarget: "windows-x64", decision: "accepted" });
-    expect(await screen.findByText(/Hiçbir şey kurulmadı\./, { selector: "p.ok-text" })).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: /^Bu öneriyi matriste incele/ }));
+    await waitFor(async () => expect(await shownTarget()).toMatchObject({ project: "benim-sitem", platform: "windows-x64", surface: "claude-code-terminal" }));
+    expect(calls("set_project_preference")).toHaveLength(0);
+    expect(calls("reset_project_preference")).toHaveLength(0);
   });
 });

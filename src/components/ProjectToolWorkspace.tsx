@@ -8,8 +8,8 @@ import { compatLabel, formatTime, kindLabel, licenseLabel, metadataLabel, platfo
 import type { AppError, CatalogEntry, EntryKind, ProjectView } from "../types";
 import {
   DECISION_VALUES, NO_FILTER, TARGET_PLATFORMS, TARGET_SURFACES, WORKSPACE_DECISION_HELP, WORKSPACE_DECISION_LABEL, buildRows, contextKey, filterRows,
-  isFiltering, recordedInstallText, recordedVerificationText, resolveTarget, sameKey, summarize, targetCounts, workspaceDecisionLabel,
-  type CompatFilter, type DecisionFilter, type DecisionValue, type TargetRequest, type WorkspaceFilter, type WorkspaceRow,
+  isFiltering, recordedInstallText, recordedVerificationText, resolveEntryFocus, resolveTarget, sameKey, summarize, targetCounts, workspaceDecisionLabel,
+  type CompatFilter, type DecisionFilter, type DecisionValue, type MatrixHandoff, type TargetRequest, type WorkspaceFilter, type WorkspaceRow,
 } from "../workspace";
 import { ErrorNotice } from "./common";
 
@@ -29,8 +29,19 @@ function catalogStatus(entry: CatalogEntry): string {
   return entry.enabled ? "Katalogda etkin" : "Katalogda kapalı";
 }
 
-function ToolRow({ row, project, platform, surface, onChanged, onNotice }: { row: WorkspaceRow; project: ProjectView; platform: string; surface: string; onChanged: () => void; onNotice: (text: string) => void }) {
+function ToolRow({ row, project, platform, surface, onChanged, onNotice, spot = 0 }: {
+  row: WorkspaceRow; project: ProjectView; platform: string; surface: string; onChanged: () => void; onNotice: (text: string) => void;
+  /** > 0: this is the tool a recommendation pointed at. The row is marked in text, scrolled into view and focused once per request (the value is that request's nonce). */
+  spot?: number;
+}) {
   const uid = useId();
+  const articleRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (spot > 0) {
+      articleRef.current?.focus();
+      articleRef.current?.scrollIntoView?.({ block: "center" });
+    }
+  }, [spot]);
   const { entry, pref, removed } = row;
   const [draft, setDraft] = useState<string>(pref?.decision ?? "");
   const [days, setDays] = useState(DEFAULT_DAYS);
@@ -92,10 +103,11 @@ function ToolRow({ row, project, platform, surface, onChanged, onNotice }: { row
   const headId = `${uid}-h`;
 
   return (
-    <li className={`ws-row${removed ? " removed" : ""}`}>
-      <article aria-labelledby={headId} aria-busy={busy !== null}>
+    <li className={`ws-row${removed ? " removed" : ""}${spot > 0 ? " ws-spot" : ""}`}>
+      <article ref={articleRef} tabIndex={-1} aria-labelledby={headId} aria-busy={busy !== null}>
         <h3 id={headId}>{entry.displayName}</h3>
         <p className="small">
+          {spot > 0 && <><span className="tag">Öneriden gelen araç</span>{" "}</>}
           <span className="tag">{kindLabel(entry.kind)}</span>{" "}
           <span className="tag">{catalogStatus(entry)}</span>{" "}
           <span className="tag">{reviewLabel(entry.reviewState)}</span>{" "}
@@ -193,7 +205,7 @@ function ToolRow({ row, project, platform, surface, onChanged, onNotice }: { row
   );
 }
 
-export function ProjectToolWorkspace({ projects, catalog, target, onTarget, focusNonce = 0 }: {
+export function ProjectToolWorkspace({ projects, catalog, target, onTarget, focusNonce = 0, focus = null }: {
   projects: LoadState<ProjectView[]>;
   catalog: LoadState<CatalogEntry[]>;
   /** The REQUESTED target (project alias, operating system, agent surface). It is resolved against what exists; see resolveTarget. */
@@ -201,11 +213,21 @@ export function ProjectToolWorkspace({ projects, catalog, target, onTarget, focu
   onTarget: (t: TargetRequest) => void;
   /** Increase to move focus to the panel heading (used when another part of the page sends the user here). */
   focusNonce?: number;
+  /**
+   * A recommendation asked for this tool in this target (see MatrixHandoff). It is navigation only: the row is brought into view and nothing is
+   * decided, saved, evaluated or installed. It lapses as soon as the user picks another target, and it never selects a different tool.
+   */
+  focus?: MatrixHandoff | null;
 }) {
   const [filter, setFilter] = useState<WorkspaceFilter>(NO_FILTER);
   // The confirmation of the last save/reset belongs to the target it was made for and is only ever shown there (never carried to another target).
   const [notice, setNotice] = useState<{ ctx: string; text: string } | null>(null);
   const ids = useId();
+  // the request still waiting for data / a cleared filter; the row it settled on; and what the user should be told - the last two belong to one target
+  const [wanted, setWanted] = useState<MatrixHandoff | null>(null);
+  const [spot, setSpot] = useState<{ ctx: string; entryId: string; nonce: number } | null>(null);
+  const [focusNote, setFocusNote] = useState<{ ctx: string; lead: string; notes: string[] } | null>(null);
+  const clearedFor = useRef(0);
 
   const titleRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -233,6 +255,53 @@ export function ProjectToolWorkspace({ projects, catalog, target, onTarget, focu
   const set = (patch: Partial<WorkspaceFilter>) => setFilter((f) => ({ ...f, ...patch }));
   const ctx = project ? contextKey(project.alias, platform, surface) : "";
 
+  useEffect(() => {
+    setWanted(focus && focus.entryId !== null ? focus : null);
+    setSpot(null);
+    setFocusNote(null);
+    clearedFor.current = 0;
+  }, [focus]);
+
+  // the mark and the note describe one target; once the user is elsewhere they are gone, and they do not come back when the user returns
+  useEffect(() => {
+    if (spot && spot.ctx !== ctx) setSpot(null);
+    if (focusNote && focusNote.ctx !== ctx) setFocusNote(null);
+  }, [ctx, spot, focusNote]);
+
+  useEffect(() => {
+    if (!wanted || wanted.entryId === null) return;
+    // the user moved to another target meanwhile: the request no longer applies and must not land on a different project
+    if (target.alias !== wanted.alias || target.platform !== wanted.platform || target.surface !== wanted.surface) {
+      setWanted(null);
+      return;
+    }
+    if (waiting) return;
+    if (!project || !entries || !built) {
+      setFocusNote({ ctx, lead: "Önerilen araç satırı vurgulanamadı.", notes: ["Proje veya katalog bilgisi yüklenemedi ya da boş; başka bir araç seçilmedi."] });
+      setWanted(null);
+      return;
+    }
+    const out = resolveEntryFocus(wanted.entryId, resolved, entries, built.rows, filter);
+    if (out.kind === "unavailable") {
+      setFocusNote({ ctx, lead: "Önerilen araç satırı vurgulanamadı.", notes: out.notes });
+      setWanted(null);
+      return;
+    }
+    if (out.needsFilterClear) {
+      clearedFor.current = wanted.nonce;
+      setFilter(NO_FILTER); // this effect runs again once the row is visible
+      return;
+    }
+    const entryName = entries.find((e) => e.entryId === wanted.entryId)?.displayName ?? wanted.entryId;
+    setSpot({ ctx, entryId: wanted.entryId, nonce: wanted.nonce });
+    setFocusNote({
+      ctx,
+      lead: `Öneriden açıldı: ${entryName}. Satır işaretlendi; henüz karar vermediniz ve hiçbir şey kaydedilmedi, değerlendirilmedi veya kurulmadı.`,
+      notes: clearedFor.current === wanted.nonce ? ["Araç ve karar süzgeçleri bu aracı gizlediği için temizlendi.", ...out.notes] : out.notes,
+    });
+    setWanted(null);
+  }, [wanted, target, waiting, project, entries, built, resolved, filter, ctx]);
+
   return (
     <section className="panel" aria-labelledby={`${ids}-title`} aria-busy={refreshing}>
       <h2 id={`${ids}-title`} tabIndex={-1} ref={titleRef}>Proje Araç Matrisi</h2>
@@ -255,6 +324,14 @@ export function ProjectToolWorkspace({ projects, catalog, target, onTarget, focu
         </>
       )}
       {waiting && <p role="status">Yükleniyor…</p>}
+      <div role="status" className="small ws-focus-note">
+        {focusNote && focusNote.ctx === ctx && (
+          <>
+            <p>{focusNote.lead}</p>
+            {focusNote.notes.map((n) => <p key={n} className="bad-text">⚠ {n}</p>)}
+          </>
+        )}
+      </div>
 
       {projects.data && list.length === 0 && <p className="muted">Henüz proje kaydı yok. Aşağıdan bir proje kaydı ekleyebilirsiniz.</p>}
 
@@ -383,7 +460,10 @@ export function ProjectToolWorkspace({ projects, catalog, target, onTarget, focu
 
           <ul className="ws-list" aria-label="Araçlar">
             {visible.map((row) => (
-              <ToolRow key={`${ctx}\u0000${row.entry.entryId}`} row={row} project={project} platform={platform} surface={surface} onChanged={projects.reload} onNotice={(text) => setNotice({ ctx, text })} />
+              <ToolRow
+                key={`${ctx}\u0000${row.entry.entryId}`} row={row} project={project} platform={platform} surface={surface} onChanged={projects.reload} onNotice={(text) => setNotice({ ctx, text })}
+                spot={spot && spot.ctx === ctx && spot.entryId === row.entry.entryId ? spot.nonce : 0}
+              />
             ))}
           </ul>
         </>

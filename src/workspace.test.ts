@@ -6,7 +6,7 @@ import type { CatalogEntry, ProjectView } from "./types";
 import {
   AFFIRMATIVE_INSTALL_STATES, AFFIRMATIVE_VERIFICATION_STATES, DECISION_VALUES, DEFAULT_TARGET, NO_FILTER, TARGET_PLATFORMS, TARGET_SURFACES, acceptBlockReason, buildRows,
   classifyInstall, classifyVerification, compatClass, compatStateFor, contextKey, evidenceFor, filterRows, isFiltering, normalize, recordedInstallText,
-  recordedVerificationText, resolveTarget, sameKey, summarize, targetCounts,
+  recordedVerificationText, resolveEntryFocus, resolveTarget, sameKey, summarize, targetCounts,
 } from "./workspace";
 
 const ev = (platformTarget: string, agentSurface: string, compatibilityState: string) => ({ platformTarget, agentSurface, compatibilityState, limitation: `${compatibilityState} @ ${platformTarget}/${agentSurface}` });
@@ -252,4 +252,70 @@ describe("targetCounts: the read-only navigator", () => {
     expect(n.targets).toHaveLength(1);
   });
   it("no decisions: nothing to navigate", () => expect(targetCounts(project("a"))).toEqual({ targets: [], unreachable: 0, total: 0 }));
+});
+
+describe("resolveTarget: `exact` is true only when nothing had to be replaced", () => {
+  const list = [project("a"), project("b")];
+  it("true for a found project with known system and surface; false for a missing project, an unknown system or surface, an empty alias or no list", () => {
+    expect(resolveTarget({ alias: "b", platform: "windows-x64", surface: "local-cli" }, list).exact).toBe(true);
+    expect(resolveTarget({ alias: "zzz", platform: "windows-x64", surface: "local-cli" }, list).exact).toBe(false);
+    expect(resolveTarget({ alias: "b", platform: "linux-x64", surface: "local-cli" }, list).exact).toBe(false);
+    expect(resolveTarget({ alias: "b", platform: "windows-x64", surface: "vscode" }, list).exact).toBe(false);
+    expect(resolveTarget({ alias: "", platform: "windows-x64", surface: "local-cli" }, list).exact).toBe(false);
+    expect(resolveTarget({ alias: "b", platform: "windows-x64", surface: "local-cli" }, null).exact).toBe(false);
+  });
+});
+
+describe("resolveEntryFocus: where a suggested tool is, never a different tool", () => {
+  const WIN = "windows-x64";
+  const CC = "claude-code-terminal";
+  const good = entry("good", { record: { targetEvidence: [ev(WIN, CC, "vendor-declared")] } });
+  const unknown = entry("unknown-compat", { record: { targetEvidence: [] } });
+  const blocked = entry("blocked", { executionPolicy: "blocked-until-scoped-authorization", record: { targetEvidence: [ev(WIN, CC, "vendor-declared")] } });
+  const gone = entry("gone", { removedAt: "2026-10-18T00:00:00Z", enabled: false });
+  const entries = [good, unknown, blocked, gone];
+  const p = project("a", [pref({ entryId: "gone", entryName: "gone", entryRemoved: true, agentSurface: CC, platformTarget: WIN })]);
+  const resolved = resolveTarget({ alias: "a", platform: WIN, surface: CC }, [p]);
+  const rows = buildRows(entries, p, WIN, CC).rows;
+  const focus = (id: string, filter = NO_FILTER, r = resolved) => resolveEntryFocus(id, r, entries, rows, filter);
+
+  it("an ordinary suggested tool: the row, no filter to clear, no notes", () => {
+    expect(focus("good")).toEqual({ kind: "row", entryId: "good", needsFilterClear: false, notes: [] });
+  });
+  it("a tool whose compatibility is unknown is found, and the note says 'kullanmak istiyorum' is not selectable - it never becomes supported", () => {
+    const out = focus("unknown-compat");
+    expect(out).toMatchObject({ kind: "row", entryId: "unknown-compat" });
+    expect(out.kind === "row" && out.notes.join(" ")).toMatch(/“kullanmak istiyorum” seçilemez/);
+    expect(rows.find((r) => r.entry.entryId === "unknown-compat")!.compatClass).toBe("unknown");
+  });
+  it("a tool blocked until scoped authorization says so", () => {
+    const out = focus("blocked");
+    expect(out.kind === "row" && out.notes.join(" ")).toMatch(/Kapsamlı yazılı yetki/);
+  });
+  it("a removed tool that still holds a decision is shown with the 'removed' note; a removed tool without a decision is unavailable", () => {
+    const out = focus("gone");
+    expect(out).toMatchObject({ kind: "row", entryId: "gone" });
+    expect(out.kind === "row" && out.notes.join(" ")).toMatch(/katalogdan kaldırılmış/);
+    const p2 = project("a");
+    const rows2 = buildRows(entries, p2, WIN, CC).rows;
+    const out2 = resolveEntryFocus("gone", resolveTarget({ alias: "a", platform: WIN, surface: CC }, [p2]), entries, rows2, NO_FILTER);
+    expect(out2.kind).toBe("unavailable");
+    expect(out2.notes.join(" ")).toMatch(/katalogdan kaldırılmış/);
+  });
+  it("an id the catalog does not contain is unavailable and no other row is chosen", () => {
+    const out = focus("vanished");
+    expect(out).toEqual({ kind: "unavailable", notes: [expect.stringContaining("(“vanished”) katalogda bulunamadı")] });
+  });
+  it("a filter that hides the row is reported as needsFilterClear; a filter that shows it is not", () => {
+    expect(focus("good", { ...NO_FILTER, query: "unknown-compat" })).toMatchObject({ kind: "row", needsFilterClear: true });
+    expect(focus("good", { ...NO_FILTER, decision: "accepted" })).toMatchObject({ needsFilterClear: true });
+    expect(focus("good", { ...NO_FILTER, query: "good" })).toMatchObject({ needsFilterClear: false });
+  });
+  it("when the requested project / system / surface was replaced, nothing is highlighted: the shown target is not the suggestion's target", () => {
+    const fallback = resolveTarget({ alias: "deleted", platform: WIN, surface: CC }, [p]);
+    expect(fallback.exact).toBe(false);
+    const out = focus("good", NO_FILTER, fallback);
+    expect(out.kind).toBe("unavailable");
+    expect(out.notes.join(" ")).toMatch(/hedef .* bulunamadı/);
+  });
 });

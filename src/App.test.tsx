@@ -324,22 +324,34 @@ describe("recommendation preview", () => {
     expect(screen.getByText("no-ui-intent")).toBeInTheDocument();
   });
 
-  it("a suggestion can be enabled for the project, postponed or rejected; each records only a desired choice", async () => {
+  it("a suggestion is information plus a handoff: it holds no decision control, and each decision is then made in the matrix with the same key", async () => {
     backend.nextEvaluation = { taskId: "t", phase: "start", recommendations: [rec()], suppressed: [], disclaimer: "Hiçbir şey kurulmadı." };
     render(<App />);
     await go("Öneriler");
     await screen.findByRole("option", { name: "Örnek: Web sitesi (örnek)" });
+    await userEvent.selectOptions(screen.getByLabelText("Ajan yüzeyi"), "local-cli"); // the one target with declared compatibility in the mock
     await userEvent.type(screen.getByLabelText("Görev metni"), "React bileşeni tasarla");
     await userEvent.click(screen.getByRole("button", { name: "Değerlendir" }));
     expect(await screen.findByText("Öneri", { selector: ".badge" })).toBeInTheDocument();
     expect(screen.getByText(/Ne olur\?/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Bu projede kullanmak istiyorum" }));
-    expect(calls("set_project_preference").at(-1)!.args).toMatchObject({ entryId: "anthropic-frontend-design", decision: "accepted", agentSurface: "claude-code-terminal" });
-    expect(await screen.findByText(/Hiçbir şey kurulmadı\./, { selector: "p.ok-text" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Bu projede kullanmak istiyorum" })).not.toBeInTheDocument();
+    for (const name of [/kullanmak istiyorum/, /Şimdi değil/, /Reddet/]) expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    expect(calls("set_project_preference")).toHaveLength(0);
+
+    await userEvent.click(screen.getByRole("button", { name: /^Bu öneriyi matriste incele/ }));
+    const matrix = within(await screen.findByRole("region", { name: "Proje Araç Matrisi" }));
+    const row = within((await matrix.findByRole("heading", { level: 3, name: "anthropic-frontend-design" })).closest("article")!);
+    expect(calls("set_project_preference")).toHaveLength(0); // arriving decides nothing
+    const key = { alias: "ornek-web-sitesi", entryId: "anthropic-frontend-design", agentSurface: "local-cli", platformTarget: "windows-x64" };
+    for (const decision of ["accepted", "postponed", "rejected"]) {
+      await userEvent.selectOptions(row.getByLabelText(/^Karar/), decision);
+      await userEvent.click(row.getByRole("button", { name: /^Yalnızca tercihimi kaydet/ }));
+      await waitFor(() => expect(calls("set_project_preference").at(-1)!.args).toMatchObject({ ...key, decision }));
+    }
+    expect(calls("set_project_preference")).toHaveLength(3);
+    expect(calls("evaluate_task")).toHaveLength(1); // deciding in the matrix evaluates nothing more
   });
 
-  it("informational suggestions (unknown compatibility, Strix) have no enable button", async () => {
+  it("informational suggestions (unknown compatibility, Strix) carry no decision control; in the matrix 'kullanmak istiyorum' stays unavailable and rejecting still works", async () => {
     backend.nextEvaluation = {
       taskId: "t", phase: "start", disclaimer: "x", suppressed: [],
       recommendations: [
@@ -353,9 +365,20 @@ describe("recommendation preview", () => {
     await userEvent.type(screen.getByLabelText("Görev metni"), "pentest planla");
     await userEvent.click(screen.getByRole("button", { name: "Değerlendir" }));
     expect(await screen.findAllByText("Yalnızca bilgi")).toHaveLength(2);
-    expect(screen.queryByRole("button", { name: "Bu projede kullanmak istiyorum" })).not.toBeInTheDocument();
-    expect(screen.getByText(/kapsamlı yazılı yetki olmadan çalıştırılamaz/)).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Reddet / bir daha sorma" })).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: /kullanmak istiyorum|Şimdi değil|Reddet/ })).not.toBeInTheDocument();
+    expect(screen.getAllByText(/kapsamlı yazılı yetki olmadan çalıştırılamaz/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/uyumluluk bilinmiyor/).length).toBeGreaterThan(0);
+    const handoffs = screen.getAllByRole("button", { name: /^Bu öneriyi matriste incele/ });
+    expect(handoffs).toHaveLength(2);
+
+    await userEvent.click(handoffs[0]); // Strix
+    const matrix = within(await screen.findByRole("region", { name: "Proje Araç Matrisi" }));
+    const row = within((await matrix.findByRole("heading", { level: 3, name: "strix" })).closest("article")!);
+    expect(row.getByRole("option", { name: /Bu projede kullanmak istiyorum \(şu an seçilemez\)/ })).toBeDisabled();
+    await userEvent.selectOptions(row.getByLabelText(/^Karar/), "rejected");
+    await userEvent.click(row.getByRole("button", { name: /^Yalnızca tercihimi kaydet/ }));
+    await waitFor(() => expect(calls("set_project_preference").at(-1)!.args).toMatchObject({ entryId: "strix", decision: "rejected" }));
+    expect(calls("set_project_preference").some((c) => c.args!.decision === "accepted")).toBe(false);
   });
 
   it("shows at most the candidates it is given, with license and overlap warnings", async () => {

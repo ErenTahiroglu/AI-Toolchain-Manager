@@ -201,3 +201,62 @@ describe("useLoad: unmount and changing inputs", () => {
     expect(used).toEqual(["first", "second"]);
   });
 });
+
+describe("useLoad: setData is newer than any read still in flight (PRODUCT-03, deliverable C)", () => {
+  it("a read that was started before setData cannot overwrite the value that was set afterwards, and its 'loading' ends at once", async () => {
+    const s = sequence<string>();
+    const { result } = renderHook(() => useLoad(s.loader));
+    await act(async () => s.calls[0].resolve("A"));
+    act(() => result.current.reload()); // read #2 is now in flight
+    expect(result.current.loading).toBe(true);
+    act(() => result.current.setData("lokal"));
+    expect(result.current).toMatchObject({ data: "lokal", loading: false });
+    await act(async () => s.calls[1].resolve("eski-okuma")); // the older read arrives late
+    expect(result.current.data).toBe("lokal");
+    expect(result.current.loading).toBe(false);
+  });
+
+  it("a stale failure of that older read is ignored too", async () => {
+    const s = sequence<string>();
+    const { result } = renderHook(() => useLoad(s.loader));
+    await act(async () => s.calls[0].resolve("A"));
+    act(() => result.current.reload());
+    act(() => result.current.setData("lokal"));
+    await act(async () => s.calls[1].reject({ code: "OLD_FAIL", message: "eski" }));
+    expect(result.current).toMatchObject({ data: "lokal", error: null, loading: false });
+  });
+
+  it("setData during the very first read wins over it", async () => {
+    const s = sequence<string>();
+    const { result } = renderHook(() => useLoad(s.loader));
+    expect(result.current.loading).toBe(true);
+    act(() => result.current.setData("erken"));
+    await act(async () => s.calls[0].resolve("ilk-okuma"));
+    expect(result.current).toMatchObject({ data: "erken", loading: false });
+  });
+
+  it("a reload started AFTER setData is newer than it and wins normally", async () => {
+    const s = sequence<string>();
+    const { result } = renderHook(() => useLoad(s.loader));
+    await act(async () => s.calls[0].resolve("A"));
+    act(() => result.current.setData("lokal"));
+    act(() => result.current.reload());
+    await act(async () => s.calls[1].resolve("taze"));
+    expect(result.current).toMatchObject({ data: "taze", loading: false });
+  });
+
+  it("keeps the API: functional updates work, the setter is stable across renders, and calling it after unmount is harmless", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const s = sequence<string>();
+    const { result, rerender, unmount } = renderHook(() => useLoad(s.loader));
+    await act(async () => s.calls[0].resolve("A"));
+    const setter = result.current.setData;
+    act(() => result.current.setData((old) => `${old}+1`));
+    expect(result.current.data).toBe("A+1");
+    rerender();
+    expect(result.current.setData).toBe(setter);
+    unmount();
+    expect(() => setter("sonra")).not.toThrow();
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+});

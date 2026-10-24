@@ -215,7 +215,8 @@ export function createBackend(): Backend {
             { id: "react-component", title: "React bileşeni tasarlamak", taskText: "React bileşeni tasarla", evidenceFiles: ["PricingTable.tsx"] },
             { id: "backend-with-css-in-repo", title: "Yalnızca arka uç işi", taskText: "SQL migration düzelt", evidenceFiles: ["styles.css"] },
           ];
-        case "evaluate_task": return b.nextEvaluation;
+        // the real command echoes the task id and phase it was asked about; the canned recommendations are the test's choice
+        case "evaluate_task": { const input = args?.input as { taskId: string; phase?: string }; return { ...b.nextEvaluation, taskId: input.taskId, phase: input.phase ?? "start" }; }
         case "list_inventory": return JSON.parse(JSON.stringify(b.inventory));
         case "preview_backup_cleanup": return JSON.parse(JSON.stringify(b.backupPlan));
         case "plan_install": {

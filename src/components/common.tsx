@@ -1,4 +1,4 @@
-import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Component, useCallback, useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { reportError, toAppError } from "../api";
 import { statusLabel } from "../labels";
 import type { AppError } from "../types";
@@ -52,10 +52,11 @@ export function UnavailableButton({ label, reason }: { label: string; reason: st
  * earlier response (success or failure) and its `loading` bookkeeping are ignored, so an out-of-order read can never put old data - for
  * example an old saved preference - back on the screen. Unmounting (or changing `deps`) invalidates whatever is still in flight, and
  * `reload()` after unmount does nothing. The loader is read through a ref, so `reload()` always uses the newest loader and never a stale
- * closure. There is no cache and no automatic retry.
+ * closure. `setData(...)` is a newer local value than any read still in flight, so it invalidates that read (and ends its `loading`): the
+ * read can no longer overwrite the value that was just set. There is no cache and no automatic retry.
  */
 export function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = []) {
-  const [data, setData] = useState<T | null>(null);
+  const [data, setRawData] = useState<T | null>(null);
   const [error, setError] = useState<AppError | null>(null);
   const [loading, setLoading] = useState(true);
   const loaderRef = useRef(loader);
@@ -78,7 +79,7 @@ export function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = []) {
     pending.then(
       (d) => {
         if (mine !== generation.current) return;
-        setData(d);
+        setRawData(d);
         setError(null);
         setLoading(false);
       },
@@ -90,6 +91,11 @@ export function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = []) {
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
+  const setData: Dispatch<SetStateAction<T | null>> = useCallback((value) => {
+    generation.current += 1; // whatever read is still in flight is now older than this value
+    setLoading(false);
+    setRawData(value);
+  }, []);
   useEffect(() => {
     alive.current = true;
     load();

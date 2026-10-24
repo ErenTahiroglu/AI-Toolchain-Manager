@@ -3,7 +3,9 @@ import { api, toAppError } from "../api";
 import { ErrorNotice, SyntheticBanner, useLoad } from "../components/common";
 import { ProjectToolWorkspace } from "../components/ProjectToolWorkspace";
 import type { AppError, ProjectView } from "../types";
-import { DEFAULT_TARGET, type TargetRequest } from "../workspace";
+import { DEFAULT_TARGET, type MatrixHandoff, type TargetRequest } from "../workspace";
+
+const targetOf = (h: TargetRequest): TargetRequest => ({ alias: h.alias, platform: h.platform, surface: h.surface });
 
 const ALIAS_HINT = "2-42 karakter: küçük harf, rakam ve tire";
 
@@ -80,7 +82,7 @@ function ProjectCard({ project, onChanged, onOpenInMatrix }: { project: ProjectV
       )}
       <p className="small">
         Kayıtlı karar: <strong>{decisions}</strong>. Kararlar yalnızca Proje Araç Matrisi’nde verilir ve değiştirilir; kayıtlı bir karar kurulu olduğu anlamına gelmez.{" "}
-        <button type="button" className="secondary" onClick={onOpenInMatrix}>Araç matrisinde aç<span className="sr-only"> ({project.displayName})</span></button>
+        <button type="button" className="secondary" onClick={onOpenInMatrix}>Araç matrisinde aç{" "}<span className="sr-only">({project.displayName})</span></button>
       </p>
       {!synthetic && (
         <p>
@@ -100,16 +102,19 @@ function ProjectCard({ project, onChanged, onOpenInMatrix }: { project: ProjectV
   );
 }
 
-/** `handoff`: a target another page asks to be opened (project alias, operating system, agent surface). It only selects what the matrix shows. */
-export function ProjectsPage({ handoff = null }: { handoff?: TargetRequest | null }) {
+/**
+ * `handoff`: what another page asks to be opened - a target (project alias, operating system, agent surface) and optionally one suggested tool. It only
+ * selects and points at what the matrix shows; it never decides, saves, evaluates or installs anything.
+ */
+export function ProjectsPage({ handoff = null }: { handoff?: MatrixHandoff | null }) {
   const projects = useLoad(api.listProjects);
   const catalog = useLoad(api.listCatalog);
-  const [target, setTarget] = useState<TargetRequest>(handoff ?? DEFAULT_TARGET);
+  const [target, setTarget] = useState<TargetRequest>(handoff ? targetOf(handoff) : DEFAULT_TARGET);
   const [focusNonce, setFocusNonce] = useState(0);
   const reload = () => projects.reload();
 
   useEffect(() => {
-    if (handoff) setTarget(handoff);
+    if (handoff) setTarget(targetOf(handoff));
   }, [handoff]);
 
   return (
@@ -121,7 +126,7 @@ export function ProjectsPage({ handoff = null }: { handoff?: TargetRequest | nul
       <SyntheticBanner>
         "Örnek" etiketli projeler uydurmadır; bilgisayarınızdaki gerçek klasörlerle ilgisi yoktur. Gerçek proje kayıtlarınız ayrıca etiketlenir.
       </SyntheticBanner>
-      <ProjectToolWorkspace projects={projects} catalog={catalog} target={target} onTarget={setTarget} focusNonce={focusNonce} />
+      <ProjectToolWorkspace projects={projects} catalog={catalog} target={target} onTarget={setTarget} focusNonce={focusNonce} focus={handoff} />
       <AddReference onAdded={reload} />
       {projects.error && <ErrorNotice error={projects.error} onRetry={projects.reload} />}
       {projects.loading && !projects.data && <p role="status">Yükleniyor…</p>}
