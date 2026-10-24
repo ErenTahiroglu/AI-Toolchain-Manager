@@ -167,3 +167,13 @@ fieldset.panel legend { font-weight: 700; padding: 0 .4rem; }
 .cfg-del { background: var(--bad-bg); color: var(--bad-fg); }
 .cfg-gap { color: var(--muted); }
 @media (max-width: 700px) { .cfg-sbs { grid-template-columns: 1fr; } }
+
+/* AGENT-01: the shared manual guide and the Codex (TOML) target note */
+.agent-guide { margin: .75rem 0; }
+.agent-guide h4 { margin: .9rem 0 .25rem; font-size: .95rem; }
+.ag-list { margin: 0; display: grid; gap: .4rem; }
+.ag-list dt { font-weight: 600; }
+.ag-list dd { margin: 0 0 .1rem; min-width: 0; }
+.ag-hosts { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem; }
+.ag-hosts li { border: 1px solid var(--border); border-radius: 8px; padding: .5rem .75rem; min-width: 0; }
+.cfg-guidance { margin: .25rem 0 0; padding-left: 1.2rem; }

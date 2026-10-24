@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, toAppError } from "../api";
 import { ErrorNotice, SyntheticBanner, useLoad } from "../components/common";
+import { AgentGuide } from "../components/AgentGuide";
 import { ProjectToolWorkspace } from "../components/ProjectToolWorkspace";
 import { ReviewQueue } from "../components/ReviewQueue";
 import type { AppError, ProjectView } from "../types";
@@ -134,6 +135,7 @@ export function ProjectsPage({ handoff = null, onOpenInMatrix }: {
       </SyntheticBanner>
       {onOpenInMatrix && <ReviewQueue projects={projects} inventory={inventory} onOpen={onOpenInMatrix} />}
       <ProjectToolWorkspace projects={projects} catalog={catalog} inventory={inventory} target={target} onTarget={setTarget} focusNonce={focusNonce} focus={handoff} />
+      <AgentGuide />
       <AddReference onAdded={reload} />
       {projects.error && <ErrorNotice error={projects.error} onRetry={projects.reload} />}
       {projects.loading && !projects.data && <p role="status">Yükleniyor…</p>}

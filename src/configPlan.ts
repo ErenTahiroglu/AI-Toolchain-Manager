@@ -10,6 +10,9 @@
 //     provided text is kept (to detect that a preview has gone stale). Values that look secret-bearing are masked.
 // Sources: Claude Code project MCP servers live in `.mcp.json` at the project root under `mcpServers` (https://code.claude.com/docs/en/mcp); Antigravity's
 // workspace file is `<workspace>/.agents/mcp_config.json` under `mcpServers` (https://www.antigravity.google/docs/mcp). See docs/config-01/SOURCE_AND_TARGET_MAP.md.
+// AGENT-01: Codex CLI's project file is TOML (`.codex/config.toml`, `[mcp_servers.<name>]`, trusted projects only). It is NEVER fed to the JSON parser below and
+// no `.mcp.json` is produced for it: the surface gets the explicit status TOML_PREVIEW_NOT_IMPLEMENTED, no diff and static read-only guidance (docs/agent-01/).
+import { agentHostFor, type ConfigFormat } from "./agentHosts";
 import { REVIEWED_DECLARATIONS, type ReviewedDeclaration } from "./configDeclarations";
 import type { CatalogEntry } from "./types";
 import { TARGET_PLATFORMS, acceptBlockReason, compatClass, compatStateFor } from "./workspace";
@@ -64,6 +67,15 @@ export const HOSTS: readonly HostSpec[] = [
   },
 ];
 
+const CODEX_GUIDANCE: readonly string[] = [
+  "Codex'in bu projeyi GÜVENİLİR saydığını Codex içinde doğrulayın; güvenilmeyen projede .codex/config.toml yok sayılır. Bu uygulama güveni vermez, okumaz ve değiştirmez.",
+  "Yayıncı belgesindeki [mcp_servers.<ad>] tablosunun alanları: yerel süreç için command, args, env, env_vars, cwd; Streamable HTTP için url, bearer_token_env_var, http_headers, env_http_headers. Belgedeki örnek komutlar bir şablon değildir.",
+  "Sürümü sabitlenmemiş (@latest veya etiketsiz) bir çağrı kullanmayın; paket çalıştırıcıları (ör. npx) başlatılırken kayıt defterinden kod indirir. Kendi doğruladığınız tam sürümü kullanın.",
+  "Anahtar, belirteç veya parola değerlerini dosyaya yazmayın; ortam değişkeni adı kullanan alanları tercih edin. Dosyayı sürüm denetimine koymadan önce içinde gizli değer olmadığını kendiniz doğrulayın.",
+  "Kullanıcı genelindeki ~/.codex/config.toml dosyasını bu amaçla değiştirmeyin: model sağlayıcıları ve kimlik bilgileri orada yaşar ve proje dosyasında zaten yok sayılır.",
+  "Sonucu Codex içinde (/mcp) görürsünüz; bu uygulama bir bağlantı denemez ve çalıştığını iddia etmez.",
+];
+
 export const hostForSurface = (surface: string): HostSpec | null => HOSTS.find((h) => h.surface === surface) ?? null;
 
 export type PlanStatus =
@@ -73,7 +85,8 @@ export type PlanStatus =
   | "UNSUPPORTED_SURFACE"
   | "INVALID_INPUT"
   | "INVALID_CURRENT_CONFIG"
-  | "CONFLICT";
+  | "CONFLICT"
+  | "TOML_PREVIEW_NOT_IMPLEMENTED";
 
 export const STATUS_LABEL: Record<PlanStatus, string> = {
   PREVIEW_ONLY_NOT_APPLIED: "YALNIZCA ÖNİZLEME — UYGULANMADI",
@@ -83,10 +96,15 @@ export const STATUS_LABEL: Record<PlanStatus, string> = {
   INVALID_INPUT: "GEÇERSİZ HEDEF",
   INVALID_CURRENT_CONFIG: "MEVCUT YAPILANDIRMA GEÇERSİZ",
   CONFLICT: "ÇAKIŞMA — hiçbir şey ezilmez",
+  TOML_PREVIEW_NOT_IMPLEMENTED: "TOML ÖNİZLEMESİ UYGULANMADI — yalnızca elle yapılacak, salt okunur yönerge",
 };
 
 export const NO_FILE_TOUCHED =
   "Hiçbir dosyaya dokunulmadı ve hiçbir dosya okunmadı: yalnızca sizin verdiğiniz metin bu pencerenin belleğinde işlendi. Hiçbir şey uygulanmadı, kurulmadı, çalıştırılmadı veya bağlanılmadı.";
+
+/** Shown instead of NO_FILE_TOUCHED when no text is processed at all (the Codex TOML surface): there is nothing to hold in memory either. */
+export const NO_TEXT_PROCESSED =
+  "Hiçbir dosyaya dokunulmadı ve hiçbir dosya okunmadı; bu hedef için hiçbir metin de işlenmedi (yapıştırılan metin ayrıştırılmaz). Hiçbir şey uygulanmadı, kurulmadı, çalıştırılmadı veya bağlanılmadı.";
 
 export interface Reason {
   code: string;
@@ -116,7 +134,11 @@ export interface PreviewPlan {
   identity: { alias: string; platform: string; surface: string; entryId: string; hostId: HostId | null };
   relativePath: string | null;
   scope: string | null;
+  /** The file format of the target ("json" / "toml"); null where no project file is documented. */
+  configFormat: ConfigFormat | null;
   untouched: readonly string[];
+  /** Static, read-only manual steps (only for TOML_PREVIEW_NOT_IMPLEMENTED); they are text, never a command this application runs. */
+  guidance: string[];
   /** Deterministic key of EVERY input; a plan whose key differs from the current inputs' key is stale. */
   inputKey: string;
   /** SHA-256 of the text the user provided (never of any file on disk); null for an explicit new file. */
@@ -451,6 +473,8 @@ function equivalentSignature(d: JsonObject, urlField: string): string | null {
 
 export function planConfigPreview(req: PlanRequest, declarations: readonly ReviewedDeclaration[] = REVIEWED_DECLARATIONS): PreviewPlan {
   const host = hostForSurface(req.surface);
+  const agent = agentHostFor(req.surface);
+  const tomlTarget = host === null && agent !== null && agent.previewKind === "toml-not-implemented" ? agent : null;
   const inputKey = planInputKey(req, declarations);
   const blockers: Reason[] = [];
   const problems: Reason[] = [];
@@ -461,7 +485,8 @@ export function planConfigPreview(req: PlanRequest, declarations: readonly Revie
   let diff: DiffLine[] | null = null;
   let formattingNote: string | null = null;
   let existingServerNames: string[] = [];
-  const sourceDigest = req.source.kind === "text" ? sha256Hex(req.source.text) : null;
+  // The Codex TOML surface never processes the text (it is ignored, not parsed, not hashed): there is no digest to keep.
+  const sourceDigest = tomlTarget === null && req.source.kind === "text" ? sha256Hex(req.source.text) : null;
   let usedDeclaration: ReviewedDeclaration | null = null;
 
   const done = (status: PlanStatus, hypothetical = false): PreviewPlan => ({
@@ -469,11 +494,13 @@ export function planConfigPreview(req: PlanRequest, declarations: readonly Revie
     applied: false,
     touchedFiles: 0,
     statusLabel: STATUS_LABEL[status],
-    notice: NO_FILE_TOUCHED,
+    notice: tomlTarget ? NO_TEXT_PROCESSED : NO_FILE_TOUCHED,
     identity: { alias: req.alias, platform: req.platform, surface: req.surface, entryId: req.entry.entryId, hostId: host?.id ?? null },
-    relativePath: host?.relativePath ?? null,
-    scope: host?.scope ?? null,
-    untouched: host?.untouched ?? [],
+    relativePath: host?.relativePath ?? tomlTarget?.relativeTargetPath ?? null,
+    scope: host?.scope ?? (tomlTarget ? `Proje (yalnızca güvenilen projelerde): projenin kökündeki ${tomlTarget.relativeTargetPath}` : null),
+    configFormat: host ? "json" : tomlTarget?.configFormat ?? null,
+    untouched: host?.untouched ?? tomlTarget?.untouched ?? [],
+    guidance: status === "TOML_PREVIEW_NOT_IMPLEMENTED" ? [...CODEX_GUIDANCE] : [],
     inputKey,
     sourceDigest,
     blockers,
@@ -495,10 +522,10 @@ export function planConfigPreview(req: PlanRequest, declarations: readonly Revie
     return done("INVALID_INPUT");
   }
   // 2. the surface decides the host; another surface is never mapped onto it
-  if (!host) {
+  if (!host && !tomlTarget) {
     problems.push({
       code: "unsupported_surface",
-      text: "Bu ajan yüzeyi için bir yapılandırma dosyası önizlemesi tanımlı değil. Yalnızca “Claude Code (terminal)” (.mcp.json) ve “Antigravity IDE” (.agents/mcp_config.json) desteklenir; başka bir yüzeyin dosyası tahmin edilmez.",
+      text: "Bu ajan yüzeyi için bir yapılandırma dosyası önizlemesi tanımlı değil. JSON önizlemesi yalnızca “Claude Code (terminal)” (.mcp.json) ve “Antigravity IDE” (.agents/mcp_config.json) için vardır; “Codex CLI” (TOML) ayrı bir durumla, yalnızca elle yönerge olarak ele alınır. Başka bir yüzeyin dosyası tahmin edilmez.",
     });
     return done("UNSUPPORTED_SURFACE");
   }
@@ -514,10 +541,24 @@ export function planConfigPreview(req: PlanRequest, declarations: readonly Revie
   if (compatClass(compat) !== "declared") blockers.push({ code: "compat_not_declared", text: "Bu işletim sistemi ve ajan yüzeyi için uyumluluk bilinmiyor veya desteklenmiyor; yayıncı beyanı yok." });
   constraints.push(`Uyumluluk (bu hedef için kayıt): ${compat}. “Yayıncı beyan etti” bir işlev testi değildir.`);
   constraints.push(`Katalog durumu: ${req.entry.reviewState}. Bu önizleme, aracın desteklendiği, çalıştığı, kurulu olduğu veya güvenli olduğu anlamına gelmez; mevcut kabul/etkinleştirme engellerini kaldırmaz.`);
-  if (host.id === "claude-code-project-mcp") {
+  if (!host) {
+    constraints.push("Codex CLI proje yapılandırması bir TOML dosyasıdır (.codex/config.toml, [mcp_servers.<ad>] tabloları); Claude Code'un .mcp.json veya Antigravity'nin JSON dosyası DEĞİLDİR. Bu uygulama Codex TOML'unu ne okur, ne ayrıştırır, ne JSON olarak gösterir.");
+    constraints.push("Proje .codex/config.toml yalnızca proje Codex tarafından GÜVENİLİR sayılıyorsa yüklenir; proje kökünden çalışma dizinine kadar bulunan her .codex/config.toml yüklenir ve aynı anahtarda çalışma dizinine en yakın dosya kazanır (yayıncı belgesi).");
+    constraints.push("ChatGPT masaüstü uygulaması, Codex CLI ve IDE eklentisi aynı config.toml'u paylaşabilir (yayıncı belgesi); bu hedef yalnızca Codex CLI'dır ve diğer yüzeyler bunun yerine geçmez. Model sağlayıcı ayarları (model_provider, model_providers) kullanıcı yapılandırmasında yaşar ve proje dosyasında yok sayılır.");
+    constraints.push("`codex mcp add --oauth-client-secret` gizli anahtarı config.toml içine yazar ve http_headers statik değer taşır (yayıncı belgesi): gizli değerler proje dosyasına girmemelidir.");
+  } else if (host.id === "claude-code-project-mcp") {
     constraints.push("Claude Code, etkileşimli oturumlarda proje MCP sunucuları için onay ister; “-p” ve Agent SDK çalıştırmalarında bu istem gösterilemez ve proje sunucuları sormadan yüklenir (yayıncı belgesi).");
   } else {
     constraints.push("Antigravity belgesi, ortam değişkeni genişletmesinin desteklendiğini belirtmiyor; bu yüzden bu dosya için bildirimlerde env/headers kullanılamaz. Yalnızca Antigravity IDE hedeflenir; uygulama, CLI ve IDE arayüzleri birbirinin yerine geçmez.");
+  }
+
+  // 4b. a TOML target stops here: no text is processed, no declaration is composed, no diff exists
+  if (!host) {
+    blockers.push({
+      code: "toml_preview_not_implemented",
+      text: "Codex için TOML önizlemesi uygulanmadı (TOML_PREVIEW_NOT_IMPLEMENTED): bu uygulamada TOML için doğruluğu kanıtlanmış bir ayrıştırıcı ve fark üretici yoktur ve JSON ayrıştırıcıya TOML verilmez. Hiçbir fark üretilmedi; yalnızca aşağıdaki elle yönerge gösterilir.",
+    });
+    return done("TOML_PREVIEW_NOT_IMPLEMENTED");
   }
 
   // 5. the current configuration, ONLY as the text the user supplied

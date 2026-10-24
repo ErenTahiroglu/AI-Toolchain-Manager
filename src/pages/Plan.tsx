@@ -3,7 +3,11 @@ import { api, toAppError } from "../api";
 import { ErrorNotice, useLoad } from "../components/common";
 import { compatLabel, platformLabel, surfaceLabel } from "../labels";
 import type { AppError, InstallPlan, PlanRequest } from "../types";
-import { TARGET_PLATFORMS as PLATFORMS, TARGET_SURFACES as SURFACES } from "../workspace";
+import { planSurfaces } from "../agentHosts";
+import { TARGET_PLATFORMS as PLATFORMS, TARGET_SURFACES } from "../workspace";
+
+// The install-plan layer (src-tauri plan.rs) has no `codex-cli` surface: AGENT-01 adds a project target, not an installer target.
+const SURFACES = planSurfaces(TARGET_SURFACES);
 
 const SCOPES: Record<string, string> = { user: "Bu kullanıcı için", project: "Tek bir proje için" };
 

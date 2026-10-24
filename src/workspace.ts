@@ -5,7 +5,7 @@ import { installLabel, kindLabel, platformLabel, surfaceLabel, validationLabel }
 import type { CatalogEntry, EntryKind, PreferenceView, ProjectView, TargetEvidence } from "./types";
 
 // The values the Rust side accepts (src-tauri/src/projects.rs: SURFACES, PLATFORMS, DECISIONS). A test pins these lists to that source.
-export const TARGET_SURFACES = ["claude-code-terminal", "claude-desktop-code", "antigravity-ide", "local-cli"] as const;
+export const TARGET_SURFACES = ["claude-code-terminal", "claude-desktop-code", "antigravity-ide", "codex-cli", "local-cli"] as const;
 export const TARGET_PLATFORMS = ["windows-x64", "macos-arm64"] as const;
 export const DECISION_VALUES = ["accepted", "postponed", "rejected", "disabled"] as const;
 export type DecisionValue = (typeof DECISION_VALUES)[number];

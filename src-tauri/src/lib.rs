@@ -5,6 +5,8 @@ compile_error!("the `jq-pilot` feature is Windows-only: it supplies the jq 1.8.2
 compile_error!("`jq-pilot` and `synthetic-pilot` are separate pilot configurations and must not be combined");
 
 mod adapter;
+#[cfg(test)]
+mod agent01_tests;
 mod approval;
 mod approval_store;
 mod archive_check;

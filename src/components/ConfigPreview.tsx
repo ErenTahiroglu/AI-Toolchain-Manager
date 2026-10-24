@@ -3,6 +3,7 @@
 // nothing is defaulted. It reads no file (the user pastes text or picks "new file"), writes no file, calls no IPC command, uses no clipboard, no network and no
 // storage, and offers no "apply". The decision itself stays in the matrix; this is not a preference-writing surface. All logic is in src/configPlan.ts.
 import { useEffect, useId, useRef, useState } from "react";
+import { agentHostFor } from "../agentHosts";
 import { platformLabel, surfaceLabel } from "../labels";
 import { REVIEWED_DECLARATIONS, type ReviewedDeclaration } from "../configDeclarations";
 import { isMcpEntry, isPlanStale, planConfigPreview, type PlanRequest, type PreviewPlan } from "../configPlan";
@@ -29,6 +30,7 @@ function PlanView({ plan, projectName, entryName }: { plan: PreviewPlan; project
         <dt>Ajan yüzeyi</dt><dd>{surfaceLabel(plan.identity.surface)}</dd>
         <dt>Araç</dt><dd>{entryName} <code>{plan.identity.entryId}</code></dd>
         <dt>Dosya (projenin kökünden göreli)</dt><dd>{plan.relativePath ? <code>{plan.relativePath}</code> : "—"}</dd>
+        <dt>Biçim</dt><dd>{plan.configFormat ? plan.configFormat.toUpperCase() : "—"}</dd>
         <dt>Kapsam</dt><dd>{plan.scope ?? "—"}</dd>
         {plan.declaration && (<><dt>Onaylı bildirim</dt><dd>sunucu adı <code>{plan.declaration.serverName}</code> · gözden geçirme {plan.declaration.reviewId} · kanıt {plan.declaration.evidenceIds.join(", ")}</dd></>)}
         {plan.sourceDigest && (<><dt>Verdiğiniz metnin SHA-256 özeti</dt><dd><code>{plan.sourceDigest.slice(0, 16)}…</code> <span className="muted">(bir dosyanın değil, yapıştırdığınız metnin özeti)</span></dd></>)}
@@ -42,6 +44,12 @@ function PlanView({ plan, projectName, entryName }: { plan: PreviewPlan; project
         <div className="small">
           <strong>Neden uygulanabilir bir tarif yok:</strong>
           <ul aria-label="Engeller">{plan.blockers.map((b) => <li key={b.code + b.text}>{b.text}</li>)}</ul>
+        </div>
+      )}
+      {plan.guidance.length > 0 && (
+        <div className="small">
+          <strong>Elle yapılacaksa (salt okunur yönerge; uygulama bunların hiçbirini çalıştırmaz):</strong>
+          <ol className="cfg-guidance" aria-label="Elle yönerge">{plan.guidance.map((g) => <li key={g}>{g}</li>)}</ol>
         </div>
       )}
       {plan.existingServerNames.length > 0 && (
@@ -97,12 +105,14 @@ export function ConfigPreview({ entry, alias, projectName, platform, surface, de
   const [message, setMessage] = useState("");
   const modeRef = useRef<HTMLInputElement>(null);
   if (!isMcpEntry(entry)) return null;
+  // A TOML target (Codex) takes no pasted text at all: there is nothing to choose, nothing is parsed and no text field exists.
+  const tomlTarget = agentHostFor(surface)?.previewKind === "toml-not-implemented";
 
-  const request = (): PlanRequest => ({ alias, platform, surface, entry, source: mode === "text" ? { kind: "text", text } : { kind: "new" } });
+  const request = (): PlanRequest => ({ alias, platform, surface, entry, source: !tomlTarget && mode === "text" ? { kind: "text", text } : { kind: "new" } });
   const stale = plan !== null && isPlanStale(plan, request(), declarations);
 
   const preview = () => {
-    if (mode === "") {
+    if (mode === "" && !tomlTarget) {
       setMessage("Önce mevcut yapılandırmayı seçin: “Yeni dosya” ya da “Var olan dosyanın metnini yapıştırıyorum”. Hiçbir dosya okunmadı ve hiçbir önizleme üretilmedi.");
       setPlan(null);
       modeRef.current?.focus();
@@ -119,6 +129,13 @@ export function ConfigPreview({ entry, alias, projectName, platform, surface, de
         Bu bölüm bir dosyayı <strong>okumaz ve yazmaz</strong>, bir şey kurmaz, çalıştırmaz, ağa bağlanmaz ve tercihinizi değiştirmez. Yalnızca, onaylı bir bildirim varsa, bu projenin
         MCP yapılandırma dosyasının nasıl değişeceğini sizin verdiğiniz metin üzerinden gösterir. Karar yine yalnızca yukarıdaki alanlardan, sizin açık eyleminizle kaydedilir.
       </p>
+      {tomlTarget && (
+        <p className="small" role="note">
+          <strong>{surfaceLabel(surface)}</strong> projeleri için yapılandırma dosyası <strong>TOML</strong>’dur (<code>.codex/config.toml</code>); bu uygulamada TOML önizlemesi yoktur.
+          Metin yapıştırma alanı bu yüzden sunulmaz. “Değişiklik önizle” yalnızca durumu ve elle yönergeyi gösterir.
+        </p>
+      )}
+      {!tomlTarget && (
       <fieldset className="field">
         <legend>Mevcut yapılandırma ({surfaceLabel(surface)} · {platformLabel(platform)})</legend>
         <div>
@@ -137,6 +154,7 @@ export function ConfigPreview({ entry, alias, projectName, platform, surface, de
           </div>
         )}
       </fieldset>
+      )}
       <p className="actions">
         <button type="button" className="secondary" onClick={preview}>
           Değişiklik önizle<span className="sr-only"> ({entry.displayName}; hiçbir dosyaya yazmaz)</span>
