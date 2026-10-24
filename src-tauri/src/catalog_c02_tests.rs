@@ -8,6 +8,8 @@ use serde_json::Value;
 
 const FAMILY: [&str; 3] = ["microsoft-playwright", "microsoft-playwright-cli", "microsoft-playwright-mcp"];
 const C02: [&str; 2] = ["microsoft-playwright-cli", "microsoft-playwright-mcp"];
+/// CATALOG-03 (Issue #28): part of every full-catalog expectation below.
+const C03: [&str; 4] = ["egonex-ai-understand-anything", "thedotmack-claude-mem", "multica-ai-andrej-karpathy-skills", "ruvnet-ruflo"];
 const SIXTEEN: [&str; 16] = [
     "ponytail",
     "codebase-memory-mcp",
@@ -72,14 +74,14 @@ fn state(conn: &Connection) -> Vec<(String, String, String, String, bool, bool)>
 #[test]
 fn a_fresh_database_has_the_sixteen_earlier_entries_plus_exactly_the_two_siblings() {
     let conn = seeded();
-    assert_eq!(SEED_ENTRY_COUNT, 18, "9 Phase 0 + 4 Phase 1B + 3 CATALOG-01 + 2 CATALOG-02");
+    assert_eq!(SEED_ENTRY_COUNT, 22, "9 Phase 0 + 4 Phase 1B + 3 CATALOG-01 + 2 CATALOG-02 + 4 CATALOG-03");
     let mut ids: Vec<String> = catalog::list_catalog(&conn).unwrap().into_iter().map(|e| e.entry_id).collect();
     ids.sort();
-    let mut expected: Vec<String> = SIXTEEN.iter().chain(C02.iter()).map(|s| s.to_string()).collect();
+    let mut expected: Vec<String> = SIXTEEN.iter().chain(C02.iter()).chain(C03.iter()).map(|s| s.to_string()).collect();
     expected.sort();
     assert_eq!(ids, expected);
     let keys: std::collections::BTreeSet<String> = catalog::list_catalog(&conn).unwrap().into_iter().map(|e| e.source_key).collect();
-    assert_eq!(keys.len(), 18, "no duplicate source key");
+    assert_eq!(keys.len(), 22, "no duplicate source key");
     assert_eq!(health(&conn), "passed");
 }
 
@@ -346,8 +348,11 @@ fn records_carry_no_executable_authority_secret_or_unexpected_url() {
 #[test]
 fn upgrading_a_sixteen_entry_database_adds_exactly_the_two_and_keeps_every_choice() {
     let conn = seeded();
-    // the state of a database seeded by CATALOG-01: the two sibling rows are not there yet
-    conn.execute_batch("DELETE FROM catalog_entries WHERE entry_id IN ('microsoft-playwright-cli','microsoft-playwright-mcp')").unwrap();
+    // the state of a database seeded by CATALOG-01: the two sibling rows (and the later CATALOG-03 rows) are not there yet
+    conn.execute_batch(
+        "DELETE FROM catalog_entries WHERE entry_id IN ('microsoft-playwright-cli','microsoft-playwright-mcp','egonex-ai-understand-anything','thedotmack-claude-mem','multica-ai-andrej-karpathy-skills','ruvnet-ruflo')",
+    )
+    .unwrap();
     assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 16);
     catalog::set_enabled(&conn, "exa-mcp-server", false).unwrap();
     catalog::remove_entry(&conn, "apify-mcp-server").unwrap();
@@ -362,7 +367,7 @@ fn upgrading_a_sixteen_entry_database_adds_exactly_the_two_and_keeps_every_choic
     catalog::seed_all(&conn).unwrap();
     catalog::seed_all(&conn).unwrap();
 
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 18);
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 22);
     assert_eq!(n(&conn, "SELECT count(*) FROM project_preferences"), prefs);
     assert_eq!(n(&conn, "SELECT count(*) FROM preference_history"), history);
     assert_eq!(n(&conn, "SELECT coalesce(max(sequence), 0) FROM audit_events"), audit, "seeding writes no audit event");
@@ -392,7 +397,7 @@ fn repeat_seeding_is_idempotent_and_never_resurrects_a_removed_or_disabled_sibli
     catalog::seed_all(&conn).unwrap();
     assert!(!entry(&conn, "microsoft-playwright-cli").enabled);
     assert!(entry(&conn, "microsoft-playwright-mcp").removed_at.is_some());
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 18);
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 22);
     assert_eq!(health(&conn), "passed");
 }
 
@@ -417,7 +422,7 @@ fn user_added_links_to_the_siblings_win_are_reported_and_never_duplicated_or_ref
     catalog::seed_all(&conn).unwrap();
 
     // 13 earlier + Apify + Exa + the three user rows; the three colliding seeds were not inserted
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 18);
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 22);
     for source in ["microsoft/playwright", "microsoft/playwright-cli", "microsoft/playwright-mcp"] {
         assert_eq!(n(&conn, &format!("SELECT count(*) FROM catalog_entries WHERE source_key = '{source}'")), 1, "{source}");
     }
@@ -456,7 +461,7 @@ fn a_removed_user_entry_for_a_sibling_stays_removed_and_the_invariant_explains_t
 
 /// The machine-checkable half of the catalog-wide description-quality requirement (docs/catalog-02/NEXT_BACKLOG.md): the criteria an entry's
 /// stored data can fail. "Relevant project situations" cannot be checked by a machine and stays a manual review item.
-fn quality_gaps(e: &CatalogEntry) -> Vec<&'static str> {
+pub(crate) fn quality_gaps(e: &CatalogEntry) -> Vec<&'static str> {
     let r = &e.record;
     let mut gaps = Vec::new();
     let chars = e.purpose.chars().count();
@@ -498,6 +503,9 @@ fn the_description_quality_gaps_of_the_catalog_are_exactly_the_documented_backlo
         ("betterleaks", &["Q1", "Q4"]),
         ("anthropic-frontend-design", &["Q4"]),
         ("agentic-awesome-skills", &["Q2", "Q4"]),
+        // CATALOG-03, a justified exception: the repository has no LICENSE file (README, plugin manifest and skill file only say "MIT"), so there is no
+        // independently reviewable grant. It is recorded as review-required and NO SPDX identifier is invented to satisfy this criterion.
+        ("multica-ai-andrej-karpathy-skills", &["Q2"]),
     ];
     let mut actual: Vec<(String, Vec<String>)> = catalog::list_catalog(&conn)
         .unwrap()

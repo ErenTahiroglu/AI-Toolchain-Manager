@@ -1,0 +1,188 @@
+{
+  "schemaVersion": 1,
+  "snapshotDate": "2026-10-25",
+  "note": "CATALOG-03 candidates (Issue #28): four user-selected repositories. Metadata only: every field is the publisher's own description read from the pinned commit, never a review, a test or an authorisation; the publishers' instructions (including pipe-to-shell installers) were read as data and are recorded only as labels. Each `record` conforms to schemas/catalog-entry.schema.json v2. `entryKind`, `pluginIdentity`, `sourcePath`, `purpose` and `executionPolicy` are application-level wrapper fields, as in the earlier candidate files.",
+  "records": [
+    {
+      "entryKind": "agent_plugin",
+      "pluginIdentity": null,
+      "sourcePath": null,
+      "purpose": "Bir kod tabanını ajanla çözümleyip dosya ve ilişkilerinden etkileşimli bir bilgi grafiği ve panel çıkarır; yeni bir projeye hızlı hâkim olmak için uygundur. İlk çözümleme tüm projeyi okur ve çok jeton harcayabilir, yerel durum dosyaları yazar. Bu uygulama kurmaz, çalıştırmaz.",
+      "executionPolicy": "manual-only",
+      "record": {
+        "schemaVersion": 2,
+        "toolId": "egonex-ai-understand-anything",
+        "displayName": "Understand Anything",
+        "repository": { "url": "https://github.com/Egonex-AI/Understand-Anything", "owner": "Egonex-AI", "name": "Understand-Anything" },
+        "sourceSnapshot": { "observedRef": "main", "immutableCommit": "e24fcf6d371bcfa529bc110bacb1bb43de1b8d33", "releaseVersion": null, "revisionState": "immutable-commit", "observedAt": "2026-10-25T00:00:00Z", "evidenceIds": ["R41"] },
+        "category": "agent-plugin",
+        "reviewState": "unreviewed",
+        "license": { "state": "known", "spdxId": "MIT", "evidenceId": "R41" },
+        "targetEvidence": [
+          { "platformTarget": "macos-arm64", "agentSurface": "local-cli", "compatibilityState": "unknown", "evidenceId": "R41", "limitation": "No stand-alone command-line use is documented except an optional read-only dashboard viewer (Node 18 or newer); no operating system is named for it." },
+          { "platformTarget": "windows-x64", "agentSurface": "local-cli", "compatibilityState": "unknown", "evidenceId": "R41", "limitation": "No stand-alone command-line use is documented except an optional read-only dashboard viewer (Node 18 or newer); no operating system is named for it." },
+          { "platformTarget": "macos-arm64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R41", "limitation": "README documents a native Claude Code plugin route but names no operating system for it; operating systems appear only for the one-line installers of other platforms. Nothing was tested." },
+          { "platformTarget": "windows-x64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R41", "limitation": "README documents a native Claude Code plugin route but names no operating system for it; operating systems appear only for the one-line installers of other platforms. Nothing was tested." },
+          { "platformTarget": "macos-arm64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R41", "limitation": "README lists 'Antigravity' among the installer platforms without naming the IDE, CLI or Antigravity 2 surface; that route is a pipe-to-shell installer, which this application never uses." },
+          { "platformTarget": "windows-x64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R41", "limitation": "README lists 'Antigravity' among the installer platforms without naming the IDE, CLI or Antigravity 2 surface; that route is a pipe-to-shell installer, which this application never uses." }
+        ],
+        "installMethods": [
+          { "methodId": "native-plugin-manager", "evidenceId": "R41", "publisherPin": "understand-anything from the marketplace Egonex-AI/Understand-Anything (publisher-stated; not checked against the marketplace)" },
+          { "methodId": "unknown", "evidenceId": "R41", "publisherPin": "Also described: pipe-to-shell installers (macOS/Linux, Windows), a repository clone and a viewer fetched from a release URL. None is approved; the pipe-to-shell forms must never be run or reproduced." }
+        ],
+        "dependencies": ["Node.js 18 or newer for the stand-alone dashboard viewer (README)", "pnpm 10.6.2 only for building from a clone (root package.json)", "A host coding agent and its model provider do the analysis", "Git: the publisher's installer clones the repository"],
+        "privilegeClaims": ["Current user account; reads the whole project, writes a .ua (or legacy .understand-anything) data folder, can add hooks that react to commands and sessions"],
+        "networkClaims": ["Project content goes to the host agent's model provider during analysis (publisher warns of heavy token use)", "The dashboard is a tokenised page on 127.0.0.1; the stand-alone viewer is fetched from a release URL", "Publisher's one-line installers pipe a remote script into a shell: never run here"],
+        "artifactEvidence": null,
+        "verificationClaims": [{ "kind": "function", "state": "publisher-describes", "evidenceId": "R41" }],
+        "privacy": {
+          "telemetry": "unknown",
+          "mayTransmitProjectContent": true,
+          "evidenceId": "R41",
+          "notes": [
+            "The first analysis reads every file of the project and can use a large number of model tokens; the publisher suggests a subscription plan or a local model. Cost and what leaves the machine depend on the host agent's provider.",
+            "It writes its graph and state into the project (a .ua folder, or the legacy .understand-anything folder, which the publisher suggests committing except scratch files). A PostToolUse hook for Bash and a SessionStart hook can update the graph; the SessionStart hook injects an instruction for the agent to follow. None of this is authorised here.",
+            "Similar in purpose to the catalogued graphify and codebase-memory-mcp but not interchangeable: different outputs, different storage, different hosts. See docs/catalog-03/RISK_AND_OVERLAP.md.",
+            "The LICENSE names an individual as copyright holder while the repository owner is an organisation; this was not investigated. Telemetry is not stated in the snapshot, so it is unknown."
+          ]
+        },
+        "updatedAt": "2026-10-25T00:00:00Z"
+      }
+    },
+    {
+      "entryKind": "agent_plugin",
+      "pluginIdentity": null,
+      "sourcePath": null,
+      "purpose": "Claude Code oturumlarındaki araç gözlemlerini kaydedip sıkıştırarak sonraki oturumlara taşıyan bellek eklentisi; uzun projelerde bağlam için. Komut, dosya içeriği ve gizli bilgileri saklayabilir, sağlayıcıya veya barındırılan hizmete gidebilir; karantinada. Bu uygulama kurmaz, çalıştırmaz.",
+      "executionPolicy": "blocked-until-scoped-authorization",
+      "record": {
+        "schemaVersion": 2,
+        "toolId": "thedotmack-claude-mem",
+        "displayName": "Claude-Mem",
+        "repository": { "url": "https://github.com/thedotmack/claude-mem", "owner": "thedotmack", "name": "claude-mem" },
+        "sourceSnapshot": { "observedRef": "main", "immutableCommit": "75fc021a40655cbdd258f0e070f55a03ea9c8642", "releaseVersion": null, "revisionState": "immutable-commit", "observedAt": "2026-10-25T00:00:00Z", "evidenceIds": ["R42"] },
+        "category": "agent-plugin",
+        "reviewState": "quarantined",
+        "license": { "state": "known", "spdxId": "Apache-2.0", "evidenceId": "R42" },
+        "targetEvidence": [
+          { "platformTarget": "macos-arm64", "agentSurface": "local-cli", "compatibilityState": "unknown", "evidenceId": "R42", "limitation": "A launcher command exists but is used by hooks; it is not documented as a stand-alone command-line tool for users. No operating system is named for it." },
+          { "platformTarget": "windows-x64", "agentSurface": "local-cli", "compatibilityState": "unknown", "evidenceId": "R42", "limitation": "A launcher command exists but is used by hooks; it is not documented as a stand-alone command-line tool for users." },
+          { "platformTarget": "macos-arm64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R42", "limitation": "README documents the Claude Code plugin but names no macOS behaviour; only a Windows setup section exists. Nothing was tested." },
+          { "platformTarget": "windows-x64", "agentSurface": "claude-code-terminal", "compatibilityState": "vendor-declared", "evidenceId": "R42", "limitation": "README has a Windows setup section for Claude Code hooks (a launcher placed in the user profile and added to the user Path); no CPU architecture; documentation is not a functional test and nothing was tested. The entry is quarantined, so this never permits 'accepted'." },
+          { "platformTarget": "macos-arm64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R42", "limitation": "README documents an Antigravity CLI setup, not the IDE (and the CLI is not a surface this application offers); no operating system is named." },
+          { "platformTarget": "windows-x64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R42", "limitation": "README documents an Antigravity CLI setup, not the IDE (and the CLI is not a surface this application offers); no operating system is named." }
+        ],
+        "installMethods": [
+          { "methodId": "native-plugin-manager", "evidenceId": "R42", "publisherPin": "claude-mem from the marketplace thedotmack/claude-mem (publisher-stated; not checked against the marketplace)" },
+          { "methodId": "unknown", "evidenceId": "R42", "publisherPin": "Also described: an npx installer with an account sign-in that may fetch Bun and uv and edits the user Path, plus pipe-to-shell installers for other hosts. None is approved." }
+        ],
+        "dependencies": ["Node.js >=20.12.0 per package.json; the README says 20.0.0: not reconciled, so no install requirement is approved", "Bun >=1.1.31 (package.json); README: auto-installed if missing", "uv (README: auto-installed if missing) and a Chroma vector index", "Claude Code with plugin support; SQLite is bundled", "An account sign-in or a provider key for the observer, per the installer"],
+        "privilegeClaims": ["Current user account; hooks on sessions, prompts and tool use; a local worker, database and vector index; adds a launcher to the user Path"],
+        "networkClaims": ["Observations may go to a hosted observer after sign-in, to your own OpenRouter or Gemini key, or to your Anthropic plan", "Optional cloud sync and the separate Cowork module send data to cmem.ai", "The installer may fetch Bun and uv when they are missing"],
+        "artifactEvidence": null,
+        "verificationClaims": [{ "kind": "function", "state": "publisher-describes", "evidenceId": "R42" }],
+        "privacy": {
+          "telemetry": "unknown",
+          "mayTransmitProjectContent": true,
+          "evidenceId": "R42",
+          "notes": [
+            "High privacy impact: it records what the agent does (commands, file contents, project details) and summarises it with a model, so secrets that appear in a session can be stored and sent to whichever provider is configured. A private-tag mechanism exists to exclude content; whether it is sufficient was not reviewed.",
+            "Local storage (SQLite and a vector index) and hosted options are different things. The README names a hosted memory service as the default for one integration path (Grok Bot), a hosted observer with a free trial after sign-in, and cloud backup; none of that may be assumed for other clients, and none was reviewed. Retention, deletion and provider data handling are unreviewed.",
+            "Quarantined and blocked until a scoped review of data flow, hooks, storage, retention and provider handling. This record starts no storage, worker or hook. Overlaps in purpose with a per-session memory the user may already use; see docs/catalog-03/RISK_AND_OVERLAP.md.",
+            "The README also contains a section about a third-party token named CMEM; it was not evaluated and is irrelevant to this catalog. Telemetry is not stated in the README, so it is unknown (the repository root holds a report file whose name mentions an analytics product; it was not opened)."
+          ]
+        },
+        "updatedAt": "2026-10-25T00:00:00Z"
+      }
+    },
+    {
+      "entryKind": "skill_collection",
+      "pluginIdentity": null,
+      "sourcePath": null,
+      "purpose": "Claude Code için dört ilkeli kısa bir yönerge ve tek yetenek: önce düşün, basit tut, cerrahi değişiklik yap, hedefe dayalı doğrula. Karpathy’den esinlenmiş, üçüncü taraf bir depodur; Karpathy’ye ait değildir ve lisansı ayrı bir dosyayla doğrulanamıyor. Bu uygulama hiçbir ayara yazmaz.",
+      "executionPolicy": "manual-only",
+      "record": {
+        "schemaVersion": 2,
+        "toolId": "multica-ai-andrej-karpathy-skills",
+        "displayName": "Karpathy-inspired guidelines (third party)",
+        "repository": { "url": "https://github.com/multica-ai/andrej-karpathy-skills", "owner": "multica-ai", "name": "andrej-karpathy-skills" },
+        "sourceSnapshot": { "observedRef": "main", "immutableCommit": "2c606141936f1eeef17fa3043a72095b4765b9c2", "releaseVersion": null, "revisionState": "immutable-commit", "observedAt": "2026-10-25T00:00:00Z", "evidenceIds": ["R43"] },
+        "category": "agent-skill",
+        "reviewState": "unreviewed",
+        "license": { "state": "review-required", "spdxId": null, "evidenceId": null },
+        "targetEvidence": [
+          { "platformTarget": "macos-arm64", "agentSurface": "local-cli", "compatibilityState": "unknown", "evidenceId": "R43", "limitation": "Plain-text guidance, not a command-line tool." },
+          { "platformTarget": "windows-x64", "agentSurface": "local-cli", "compatibilityState": "unknown", "evidenceId": "R43", "limitation": "Plain-text guidance, not a command-line tool." },
+          { "platformTarget": "macos-arm64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R43", "limitation": "README documents a Claude Code plugin install and a per-project CLAUDE.md route but names no operating system; both routes still point at the former owner 'forrestchang'. Nothing was tested." },
+          { "platformTarget": "windows-x64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R43", "limitation": "README documents a Claude Code plugin install and a per-project CLAUDE.md route but names no operating system; both routes still point at the former owner 'forrestchang'. Nothing was tested." },
+          { "platformTarget": "macos-arm64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R43", "limitation": "No Antigravity evidence: the repository documents Claude Code and Cursor only." },
+          { "platformTarget": "windows-x64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R43", "limitation": "No Antigravity evidence: the repository documents Claude Code and Cursor only." }
+        ],
+        "installMethods": [
+          { "methodId": "native-plugin-manager", "evidenceId": "R43", "publisherPin": "andrej-karpathy-skills@karpathy-skills; the README still names the former owner 'forrestchang' as the marketplace source: that source must not be used." },
+          { "methodId": "unknown", "evidenceId": "R43", "publisherPin": "README also shows commands that download CLAUDE.md from the former owner's repository into a project file. Never an approved method." }
+        ],
+        "dependencies": ["No runtime or package dependency: the pinned tree holds only documents, a skill file, a Cursor rule and manifests; the host agent reads them as instructions"],
+        "privilegeClaims": ["Adds text instructions to the host agent's context; no code, hook or network access in the pinned tree"],
+        "networkClaims": ["None in the pinned tree; the README's download commands point at a former owner's repository and are not to be used"],
+        "artifactEvidence": null,
+        "verificationClaims": [{ "kind": "function", "state": "publisher-describes", "evidenceId": "R43" }],
+        "privacy": {
+          "telemetry": "unknown",
+          "mayTransmitProjectContent": null,
+          "evidenceId": "R43",
+          "notes": [
+            "Identity: the canonical repository is multica-ai/andrej-karpathy-skills. The README and the plugin manifest still name 'forrestchang' as author, owner and install source; treat that as historical or stale, not as the source to use. The README text is inspired by public remarks of Andrej Karpathy; this third-party repository is not authored or endorsed by him.",
+            "Licence: README, the plugin manifest and the skill file each say MIT, but the pinned tree has no LICENSE file and GitHub detects none, so no independently reviewable licence grant or copyright holder exists. Recorded as review-required; no SPDX identifier is asserted.",
+            "It is one root CLAUDE.md of four themes (think before coding, simplicity first, surgical changes, goal-driven execution), a skill file and a Cursor rule. This application never writes CLAUDE.md, AGENTS.md or any project instruction. As instructions it may conflict with higher-priority host or project instructions and with workflow methods the user already uses (for example superpowers).",
+            "Telemetry is not stated and nothing in the tree could send data, but no code was audited."
+          ]
+        },
+        "updatedAt": "2026-10-25T00:00:00Z"
+      }
+    },
+    {
+      "entryKind": "agent_plugin",
+      "pluginIdentity": null,
+      "sourcePath": null,
+      "purpose": "Claude Code ve Codex için ajan sürüleri, kancalar, bellek ve arka plan işçileriyle çok modüllü orkestrasyon çatısı; çok sayıda ajanı koordine etmek isteyenler için. Çalışma alanına dosya yazar, kanca ve arka plan süreci kurar, uzak iletişim açabilir; karantinada. Bu uygulama kurmaz, çalıştırmaz.",
+      "executionPolicy": "blocked-until-scoped-authorization",
+      "record": {
+        "schemaVersion": 2,
+        "toolId": "ruvnet-ruflo",
+        "displayName": "Ruflo",
+        "repository": { "url": "https://github.com/ruvnet/ruflo", "owner": "ruvnet", "name": "ruflo" },
+        "sourceSnapshot": { "observedRef": "main", "immutableCommit": "fe99f748c577158ec3e517c7b421670a4601f54f", "releaseVersion": null, "revisionState": "immutable-commit", "observedAt": "2026-10-25T00:00:00Z", "evidenceIds": ["R44"] },
+        "category": "workflow",
+        "reviewState": "quarantined",
+        "license": { "state": "known", "spdxId": "MIT", "evidenceId": "R44" },
+        "targetEvidence": [
+          { "platformTarget": "macos-arm64", "agentSurface": "local-cli", "compatibilityState": "unknown", "evidenceId": "R44", "limitation": "A command-line interface exists under a package named 'claude-flow' in the root manifest while the README uses 'ruflo'; that identity is unverified, so no support statement is accepted." },
+          { "platformTarget": "windows-x64", "agentSurface": "local-cli", "compatibilityState": "unknown", "evidenceId": "R44", "limitation": "A command-line interface exists under a package named 'claude-flow' in the root manifest while the README uses 'ruflo'; that identity is unverified, so no support statement is accepted." },
+          { "platformTarget": "macos-arm64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R44", "limitation": "README documents Claude Code integration and says one install path works on all platforms, but that path's package identity is unverified (root manifest: claude-flow) and the entry is quarantined; not accepted as an operating-system statement." },
+          { "platformTarget": "windows-x64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R44", "limitation": "README documents Claude Code integration and says one install path works on all platforms including native Windows, but that path's package identity is unverified (root manifest: claude-flow) and the entry is quarantined; not accepted as an operating-system statement." },
+          { "platformTarget": "macos-arm64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R44", "limitation": "No Antigravity evidence in the README." },
+          { "platformTarget": "windows-x64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R44", "limitation": "No Antigravity evidence in the README." }
+        ],
+        "installMethods": [{ "methodId": "unknown", "evidenceId": "R44", "publisherPin": "Described: an npx init that writes into the workspace, a pipe-to-shell installer, a global npm install, marketplace modules. Package identity (ruflo vs claude-flow) unverified; none approved." }],
+        "dependencies": ["Node.js >=20.0.0 (root package.json, which is named claude-flow, not ruflo)", "npm packages under the claude-flow and @claude-flow names at the root; their equivalence with the README's 'ruflo' package is unverified", "Optional native and WASM add-ons (for example better-sqlite3 and ruvector packages) in the optional dependencies", "Model providers and their API keys for the agents (README: Claude, GPT, Gemini, Cohere, Ollama)"],
+        "privilegeClaims": ["Current user account; installs hooks and a daemon, writes .claude, .claude-flow, CLAUDE.md and settings in the workspace, runs autonomous loops and workers"],
+        "networkClaims": ["Agents call model providers; optional federation connects agents on other machines over secure websockets", "Some bundled MCP servers in the manifests are cloud services that need authentication", "Publisher's one-line installer pipes a remote script into a shell: never run here"],
+        "artifactEvidence": null,
+        "verificationClaims": [{ "kind": "function", "state": "publisher-describes", "evidenceId": "R44" }],
+        "privacy": {
+          "telemetry": "unknown",
+          "mayTransmitProjectContent": true,
+          "evidenceId": "R44",
+          "notes": [
+            "This single repository is a multi-module harness: the marketplace manifest lists 47 separate plugin modules (core, console, mods, swarm, browser, security, federation and more). It is one catalog candidate here, not 'all modules installed'; each module would need its own review.",
+            "Packaging identity is ambiguous: the root package.json is named claude-flow (3.61.1) and the plugin manifest is a stale claude-flow 2.5.0 that points at another repository and at 'alpha' and 'latest' npm tags, while the README offers 'ruflo'. Nothing here concludes that they are the same package.",
+            "High runtime privilege: hooks, a daemon, autonomous loops, workspace files, delegated agents, resource use and optional remote communication can change how the user works. Quarantined and blocked until a scoped review; no hook, daemon or file is created by this record.",
+            "Conflicts to expect with the application's own future agent-orchestration and control model, with workflow methods such as superpowers, and with memory plugins such as claude-mem (two hook systems rewriting the same session). See docs/catalog-03/RISK_AND_OVERLAP.md. Telemetry is not stated in the README, so it is unknown."
+          ]
+        },
+        "updatedAt": "2026-10-25T00:00:00Z"
+      }
+    }
+  ]
+}

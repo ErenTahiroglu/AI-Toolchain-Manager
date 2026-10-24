@@ -20,11 +20,14 @@ const CANDIDATES_JSON: &str = include_str!("../../data/catalog-candidates-1b.jso
 const CATALOG01_JSON: &str = include_str!("../../data/catalog-candidates-c01.json");
 /// CATALOG-02 candidates (two entries, Issue #27: the other Playwright offerings) plus `purposeRefinements` for an entry of an earlier file.
 const CATALOG02_JSON: &str = include_str!("../../data/catalog-candidates-c02.json");
+/// CATALOG-03 candidates (four entries, Issue #28: Understand Anything, Claude-Mem, a Karpathy-inspired skill repository, Ruflo).
+const CATALOG03_JSON: &str = include_str!("../../data/catalog-candidates-c03.json");
 pub const PHASE0_TOOL_COUNT: usize = 9;
 pub const CANDIDATE_COUNT: usize = 4;
 pub const CATALOG01_COUNT: usize = 3;
 pub const CATALOG02_COUNT: usize = 2;
-pub const SEED_ENTRY_COUNT: usize = PHASE0_TOOL_COUNT + CANDIDATE_COUNT + CATALOG01_COUNT + CATALOG02_COUNT;
+pub const CATALOG03_COUNT: usize = 4;
+pub const SEED_ENTRY_COUNT: usize = PHASE0_TOOL_COUNT + CANDIDATE_COUNT + CATALOG01_COUNT + CATALOG02_COUNT + CATALOG03_COUNT;
 
 pub const KINDS: &[&str] = &["executable_tool", "agent_plugin", "skill_collection", "prompt_source"];
 const EXECUTION_POLICIES: &[&str] = &["manual-only", "blocked-until-scoped-authorization"];
@@ -207,6 +210,10 @@ fn catalog02_seed_entries() -> AppResult<Vec<SeedEntry>> {
     wrapped_seed_entries(CATALOG02_JSON, CATALOG02_COUNT, "iki aday bekleniyordu")
 }
 
+fn catalog03_seed_entries() -> AppResult<Vec<SeedEntry>> {
+    wrapped_seed_entries(CATALOG03_JSON, CATALOG03_COUNT, "dört aday bekleniyordu")
+}
+
 /// Rewrites only the displayed purpose of entries that come from EARLIER data files, so those files can stay byte-identical. A refinement for an
 /// unknown id, an empty text or one over the purpose cap is a build-time data error, not something to guess around.
 fn apply_purpose_refinements(all: &mut [SeedEntry]) -> AppResult<()> {
@@ -257,6 +264,7 @@ fn all_seed_entries() -> AppResult<Vec<SeedEntry>> {
     all.extend(candidate_seed_entries()?);
     all.extend(catalog01_seed_entries()?);
     all.extend(catalog02_seed_entries()?);
+    all.extend(catalog03_seed_entries()?);
     apply_purpose_refinements(&mut all)?;
     let mut ids = std::collections::BTreeSet::new();
     let mut keys = std::collections::BTreeSet::new();
@@ -976,14 +984,14 @@ mod tests {
             )
         };
         let first = snapshot(&conn);
-        assert_eq!(first, (18, 3, 6, 3, 6)); // 9 Phase 0 + 4 Phase 1B + 3 CATALOG-01 + 2 CATALOG-02
+        assert_eq!(first, (22, 3, 6, 3, 6)); // 9 Phase 0 + 4 Phase 1B + 3 CATALOG-01 + 2 CATALOG-02 + 4 CATALOG-03
         set_enabled(&conn, "agent-browser", false).unwrap();
         remove_entry(&conn, "gitleaks").unwrap();
         // The user resets a demonstration decision; a restart must not bring it back.
         conn.execute("DELETE FROM project_preferences WHERE entry_id = 'graphify'", []).unwrap();
         seed_all(&conn).unwrap();
         seed_all(&conn).unwrap();
-        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 18);
+        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 22);
         assert_eq!(count(&conn, "SELECT count(*) FROM project_preferences"), 5);
         assert!(!get_entry(&conn, "agent-browser").unwrap().enabled);
         assert!(get_entry(&conn, "gitleaks").unwrap().removed_at.is_some());
@@ -1034,7 +1042,7 @@ mod tests {
             add_entry(&conn, "https://github.com/vercel-labs/Agent-Browser", "executable_tool", "").unwrap_err().code,
             "ENTRY_DUPLICATE"
         );
-        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 19);
+        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 23);
         let preview = preview_url(&conn, "https://github.com/acme/WIDGET").unwrap();
         assert!(!preview.ok && preview.duplicate_of.is_some());
     }
@@ -1059,7 +1067,7 @@ mod tests {
             assert!(add_entry(&conn, bad, "executable_tool", "").is_err(), "accepted {bad}");
             assert!(!preview_url(&conn, bad).unwrap().ok, "preview ok for {bad}");
         }
-        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 18);
+        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 22);
         assert_eq!(add_entry(&conn, "https://github.com/acme/widget", "everything", "").unwrap_err().code, "KIND_INVALID");
     }
 
