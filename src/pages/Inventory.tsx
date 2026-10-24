@@ -2,19 +2,9 @@ import { useMemo, useState } from "react";
 import { api, toAppError } from "../api";
 import { ErrorNotice, useLoad } from "../components/common";
 import {
-  backupStatusLabel, configurationLabel, layerLabel, confidenceLabel, formatTime, methodLabel, notPerformedLabel, obsScopeLabel, observedLabel, platformLabel, presenceLabel, subjectLabel, surfaceLabel,
+  backupStatusLabel, configurationLabel, layerLabel, confidenceLabel, formatTime, methodLabel, notPerformedLabel, obsScopeLabel, observedLabel, permissionText, platformLabel, presenceLabel, subjectLabel, surfaceLabel,
 } from "../labels";
 import type { AppError, CleanupPlan, ScanRef, StoredObservation } from "../types";
-
-const permissionText = (p: { authorizedPath: boolean; authorizedUserConfig: boolean; authorizedProject: boolean; authorizedFingerprint: boolean }) => {
-  const parts = [
-    p.authorizedPath ? "program adları (PATH)" : null,
-    p.authorizedUserConfig ? "Claude Code kullanıcı dosyaları" : null,
-    p.authorizedProject ? "bir proje klasörü" : null,
-    p.authorizedFingerprint ? "dosya parmak izi (SHA-256)" : null,
-  ].filter(Boolean);
-  return parts.length ? parts.join(" + ") : "hiçbir bölüm";
-};
 
 function ScanProvenance({ scan }: { scan: ScanRef }) {
   return (

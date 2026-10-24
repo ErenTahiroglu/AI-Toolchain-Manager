@@ -2,7 +2,7 @@
 // tested; the real behaviour of every command (validation, gates, migration, audit) is covered by the
 // Rust tests and by the --self-check contract test, not by this mock.
 import { createInstallMock, installCommand, type InstallMock } from "./installMock";
-import type { CatalogEntry, CleanupPlan, Evaluation, HealthReport, InstallPlan, Inventory, PlanRequest, PreferenceView, ProjectView, Recommendation, StoredObservation } from "../types";
+import type { CatalogEntry, CleanupPlan, Evaluation, HealthReport, InstallPlan, Inventory, PlanRequest, PreferenceView, ProjectView, Recommendation, RequestStatus, RequestVsObservation, ScanRef, StoredObservation } from "../types";
 
 export const SEED_IDS = [
   "ponytail", "codebase-memory-mcp", "graphify", "gitleaks", "markitdown", "caveman", "cloudflare-security-audit-skill", "superpowers", "betterleaks",
@@ -51,6 +51,31 @@ export const emptyInventory = (): Inventory => ({
   lastScan: null, observations: [], requests: [], staleAfterHours: 24,
   notChecked: ["Henüz hiç tarama yapılmadı; aşağıdakilerin hiçbirine bakılmadı.", "Programların sürümleri: kimliği doğrulanmamış hiçbir program çalıştırılmadı."],
 });
+
+export const scanRef = (over: Partial<ScanRef> = {}): ScanRef => ({
+  scanId: "scan-12345678", finishedAt: "2026-10-23T09:00:00Z", authorizedPath: true, authorizedUserConfig: false, authorizedProject: false, authorizedFingerprint: false, ...over,
+});
+
+/** The notes the Rust classifier writes (store.rs::classify_request), so the UI tests show what the backend really says. */
+export const REQUEST_NOTES: Record<RequestStatus, string> = {
+  present_current: "Son taramada bu bilgisayarda bulundu (bulunması, çalıştığı veya projede etkin olduğu anlamına gelmez).",
+  absent_current: "Etkinleştirmek istediniz, ancak son taramada bu bilgisayarda bulunamadı.",
+  unknown_current: "Etkinleştirmek istediniz; son taramada bu bilgisayarda olup olmadığı belirlenemedi.",
+  previously_present: "Eski sonuç (Son tarama 24 saatten eski; yeniden tarayın.) Yeniden tarayın; eski bir sonuç hiçbir işlem için dayanak sayılmaz.",
+  previously_absent: "Eski sonuç (Son tarama 24 saatten eski; yeniden tarayın.) Yeniden tarayın; eski bir sonuç hiçbir işlem için dayanak sayılmaz.",
+  previously_unknown: "Eski sonuç (Son tarama 24 saatten eski; yeniden tarayın.) Yeniden tarayın; eski bir sonuç hiçbir işlem için dayanak sayılmaz.",
+  platform_mismatch: "Yalnızca başka bir işletim sistemi/mimari için gözlem var; bu tercihin platformu için hiçbir şey gözlenmedi.",
+  not_scanned: "Bu proje, ajan yüzeyi ve platform için henüz bir gözlem yok. Bu, aracın olmadığı anlamına gelmez.",
+};
+
+/** One row of Inventory.requests in the wire shape. Like the backend, only the statuses that name a scan carry a basis. */
+export const makeRequest = (over: Partial<RequestVsObservation> = {}): RequestVsObservation => {
+  const status = over.status ?? "present_current";
+  return {
+    entryId: "alfa", entryName: "Alfa Araç", projectAlias: "ornek-web-sitesi", projectName: "Örnek: Web sitesi", agentSurface: "claude-code-terminal", platformTarget: "windows-x64",
+    status, note: REQUEST_NOTES[status], basis: status === "not_scanned" || status === "platform_mismatch" ? null : scanRef(), ...over,
+  };
+};
 
 export const PLAN_STATEMENT =
   "Bu bir ÖNİZLEMEDİR. Hiçbir şey kurulmadı, indirilmedi, çalıştırılmadı veya değiştirilmedi; üçüncü taraf araçlara dokunulmadı. Bu plan bir izin değildir: onaylanmış bir tarif ve ayrı bir kullanıcı onayı olmadan hiçbir adım uygulanamaz.";

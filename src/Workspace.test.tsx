@@ -544,12 +544,12 @@ describe("accessibility", () => {
 
 describe("safety: the workspace only records or forgets a wish", () => {
   const FORBIDDEN = [
-    "prepare_install", "confirm_install", "cancel_install", "get_installed_details", "recover_installations", "list_install_states", "run_discovery_scan", "list_inventory",
+    "prepare_install", "confirm_install", "cancel_install", "get_installed_details", "recover_installations", "list_install_states", "run_discovery_scan",
     "plan_install", "preview_github_url", "add_catalog_entry", "remove_catalog_entry", "restore_catalog_entry", "set_catalog_entry_enabled", "explain_execution_block",
     "evaluate_task", "add_project_reference", "remove_project_reference", "set_setting", "set_startup_enabled", "preview_backup_cleanup",
   ];
 
-  it("a full session issues only the four existing read / wish commands, and never touches the network, a new window or another command", async () => {
+  it("a full session issues only the three existing reads (projects, catalog, STORED inventory) and the two wish commands, and never touches the network, a new window or another command", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
@@ -564,7 +564,7 @@ describe("safety: the workspace only records or forgets a wish", () => {
     await userEvent.click(r.getByRole("button", { name: "Listeyi yenile" }));
     await waitFor(() => expect(calls("list_catalog").length).toBeGreaterThanOrEqual(2));
     const used = new Set(backend.calls.map((c) => c.cmd));
-    for (const cmd of used) expect(["list_projects", "list_catalog", "set_project_preference", "reset_project_preference"], cmd).toContain(cmd);
+    for (const cmd of used) expect(["list_projects", "list_catalog", "list_inventory", "set_project_preference", "reset_project_preference"], cmd).toContain(cmd);
     for (const cmd of FORBIDDEN) expect(used.has(cmd), cmd).toBe(false);
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(openSpy).not.toHaveBeenCalled();
@@ -591,7 +591,7 @@ describe("safety: the workspace only records or forgets a wish", () => {
       }
     }
     const used = (text: string) => [...new Set([...text.matchAll(/\bapi\.([A-Za-z]+)/g)].map((m) => m[1]))].sort();
-    expect(used(projectsSource)).toEqual(["addProjectReference", "listCatalog", "listProjects", "removeProjectReference"]);
+    expect(used(projectsSource)).toEqual(["addProjectReference", "listCatalog", "listInventory", "listProjects", "removeProjectReference"]);
     expect(used(appSource)).toEqual(["getAppInfo", "getSettings"]);
   });
 

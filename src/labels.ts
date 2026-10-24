@@ -145,6 +145,17 @@ const OBSERVED: Record<string, string> = {
 };
 export const observedLabel = (s: string) => OBSERVED[s] ?? s;
 
+/** Which parts of the computer a scan was ALLOWED to look at (a permission record, not a result). */
+export const permissionText = (p: { authorizedPath: boolean; authorizedUserConfig: boolean; authorizedProject: boolean; authorizedFingerprint: boolean }) => {
+  const parts = [
+    p.authorizedPath ? "program adları (PATH)" : null,
+    p.authorizedUserConfig ? "Claude Code kullanıcı dosyaları" : null,
+    p.authorizedProject ? "bir proje klasörü" : null,
+    p.authorizedFingerprint ? "dosya parmak izi (SHA-256)" : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(" + ") : "hiçbir bölüm";
+};
+
 export const subjectLabel = (subject: string, names: Record<string, string>) =>
   subject === "agent:claude-code" ? "Claude Code (ajan)" : subject === "agent:antigravity-ide" ? "Antigravity masaüstü IDE (ajan)" : names[subject] ?? subject;
 

@@ -5,13 +5,15 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, toAppError } from "../api";
 import { compatLabel, formatTime, kindLabel, licenseLabel, metadataLabel, platformLabel, policyLabel, reviewLabel, scopeLabel, surfaceLabel } from "../labels";
-import type { AppError, CatalogEntry, EntryKind, ProjectView } from "../types";
+import { observationFor, type ObservationView } from "../observation";
+import type { AppError, CatalogEntry, EntryKind, Inventory, ProjectView } from "../types";
 import {
   DECISION_VALUES, NO_FILTER, TARGET_PLATFORMS, TARGET_SURFACES, WORKSPACE_DECISION_HELP, WORKSPACE_DECISION_LABEL, buildRows, contextKey, filterRows,
   isFiltering, recordedInstallText, recordedVerificationText, resolveEntryFocus, resolveTarget, sameKey, summarize, targetCounts, workspaceDecisionLabel,
   type CompatFilter, type DecisionFilter, type DecisionValue, type MatrixHandoff, type TargetRequest, type WorkspaceFilter, type WorkspaceRow,
 } from "../workspace";
 import { ErrorNotice } from "./common";
+import { ObservationSection } from "./ObservationSection";
 
 export interface LoadState<T> {
   data: T | null;
@@ -29,8 +31,10 @@ function catalogStatus(entry: CatalogEntry): string {
   return entry.enabled ? "Katalogda etkin" : "Katalogda kapalı";
 }
 
-function ToolRow({ row, project, platform, surface, onChanged, onNotice, spot = 0 }: {
+function ToolRow({ row, project, platform, surface, observation, onChanged, onNotice, spot = 0 }: {
   row: WorkspaceRow; project: ProjectView; platform: string; surface: string; onChanged: () => void; onNotice: (text: string) => void;
+  /** What the last stored discovery observation says about THIS row (see observationFor). Read-only; it is not part of the wish. */
+  observation: ObservationView;
   /** > 0: this is the tool a recommendation pointed at. The row is marked in text, scrolled into view and focused once per request (the value is that request's nonce). */
   spot?: number;
 }) {
@@ -154,6 +158,8 @@ function ToolRow({ row, project, platform, surface, onChanged, onNotice, spot = 
               <div className="muted">Katalog durumu (“{catalogStatus(entry)}”) yalnızca bir katalog işaretidir; kurulum veya ajan durumu değildir.</div>
             </dd>
           </dl>
+
+          <ObservationSection view={observation} entryName={entry.displayName} />
         </div>
 
         <details>
@@ -205,9 +211,11 @@ function ToolRow({ row, project, platform, surface, onChanged, onNotice, spot = 
   );
 }
 
-export function ProjectToolWorkspace({ projects, catalog, target, onTarget, focusNonce = 0, focus = null }: {
+export function ProjectToolWorkspace({ projects, catalog, inventory, target, onTarget, focusNonce = 0, focus = null }: {
   projects: LoadState<ProjectView[]>;
   catalog: LoadState<CatalogEntry[]>;
+  /** The stored (database-only) inventory read. Never a scan; a failed read is shown as unknown, never as "not found". */
+  inventory: LoadState<Inventory>;
   /** The REQUESTED target (project alias, operating system, agent surface). It is resolved against what exists; see resolveTarget. */
   target: TargetRequest;
   onTarget: (t: TargetRequest) => void;
@@ -250,8 +258,10 @@ export function ProjectToolWorkspace({ projects, catalog, target, onTarget, focu
   const all = useMemo(() => (built ? summarize(built.rows) : null), [built]);
 
   const waiting = (projects.loading && !projects.data) || (catalog.loading && !catalog.data);
-  const refreshing = projects.loading || catalog.loading;
-  const refresh = () => { projects.reload(); catalog.reload(); };
+  const refreshing = projects.loading || catalog.loading || inventory.loading;
+  // everything below re-reads the application's own stored records; none of it scans the computer
+  const refresh = () => { projects.reload(); catalog.reload(); inventory.reload(); };
+  const afterSave = () => { projects.reload(); inventory.reload(); };
   const set = (patch: Partial<WorkspaceFilter>) => setFilter((f) => ({ ...f, ...patch }));
   const ctx = project ? contextKey(project.alias, platform, surface) : "";
 
@@ -321,6 +331,14 @@ export function ProjectToolWorkspace({ projects, catalog, target, onTarget, focu
         <>
           <ErrorNotice error={catalog.error} onRetry={catalog.reload} />
           {catalog.data && <p className="small bad-text">⚠ Katalog yenilenemedi; aşağıda gösterilenler eski olabilir.</p>}
+        </>
+      )}
+      {inventory.error && (
+        <>
+          <ErrorNotice error={inventory.error} onRetry={inventory.reload} />
+          <p className="small bad-text">
+            ⚠ Kayıtlı envanter okunamadı. {inventory.data ? "Araç satırlarındaki gözlemler önceki başarılı okumadan ve eski olabilir." : "Gözlemler bilinmiyor; bu, “taranmadı” veya “bulunamadı” anlamına gelmez."}
+          </p>
         </>
       )}
       {waiting && <p role="status">Yükleniyor…</p>}
@@ -461,7 +479,8 @@ export function ProjectToolWorkspace({ projects, catalog, target, onTarget, focu
           <ul className="ws-list" aria-label="Araçlar">
             {visible.map((row) => (
               <ToolRow
-                key={`${ctx}\u0000${row.entry.entryId}`} row={row} project={project} platform={platform} surface={surface} onChanged={projects.reload} onNotice={(text) => setNotice({ ctx, text })}
+                key={`${ctx}\u0000${row.entry.entryId}`} row={row} project={project} platform={platform} surface={surface} onChanged={afterSave} onNotice={(text) => setNotice({ ctx, text })}
+                observation={observationFor(row, { alias: project.alias, platform, surface }, inventory)}
                 spot={spot && spot.ctx === ctx && spot.entryId === row.entry.entryId ? spot.nonce : 0}
               />
             ))}

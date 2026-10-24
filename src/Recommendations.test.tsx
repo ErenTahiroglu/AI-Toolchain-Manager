@@ -434,9 +434,11 @@ describe("the Recommendations page has no second write path", () => {
     expect(main.queryByRole("button", { name: /kullanmak istiyorum|Şimdi değil|Reddet|Kaydet|Etkinleştir|Kur\b/ })).not.toBeInTheDocument();
     await userEvent.click(main.getByRole("button", { name: /^Bu hedefi Proje Araç Matrisi/ }));
     await screen.findByRole("region", { name: "Proje Araç Matrisi" });
-    for (const bad of ["set_project_preference", "reset_project_preference", "prepare_install", "confirm_install", "plan_install", "run_discovery_scan", "set_catalog_entry_enabled", "list_install_states", "list_inventory"]) {
+    // the matrix (not this page) reads the stored inventory since PRODUCT-04; that is a database read and must not have happened before the handoff
+    for (const bad of ["set_project_preference", "reset_project_preference", "prepare_install", "confirm_install", "plan_install", "run_discovery_scan", "set_catalog_entry_enabled", "list_install_states"]) {
       expect(calls(bad), bad).toHaveLength(0);
     }
+    expect(calls("list_inventory").every((c) => backend.calls.indexOf(c) > backend.calls.findIndex((x) => x.cmd === "evaluate_task"))).toBe(true);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

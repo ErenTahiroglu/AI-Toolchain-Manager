@@ -148,3 +148,6 @@ fieldset.panel legend { font-weight: 700; padding: 0 .4rem; }
 .ws-spot { border-width: 3px; border-color: var(--accent); }
 .ws-row article:focus { outline: 3px solid var(--accent); outline-offset: 3px; }
 .ws-focus-note p { margin: .15rem 0; }
+.ws-observe { min-width: 0; border-left: 3px solid var(--border); padding-left: .75rem; }
+.ws-observe h4 { margin: 0 0 .25rem; font-size: .95rem; }
+.ws-observe p { margin: .2rem 0; }

@@ -109,6 +109,7 @@ function ProjectCard({ project, onChanged, onOpenInMatrix }: { project: ProjectV
 export function ProjectsPage({ handoff = null }: { handoff?: MatrixHandoff | null }) {
   const projects = useLoad(api.listProjects);
   const catalog = useLoad(api.listCatalog);
+  const inventory = useLoad(api.listInventory); // stored observations only (a database read); this page never starts a scan
   const [target, setTarget] = useState<TargetRequest>(handoff ? targetOf(handoff) : DEFAULT_TARGET);
   const [focusNonce, setFocusNonce] = useState(0);
   const reload = () => projects.reload();
@@ -126,7 +127,7 @@ export function ProjectsPage({ handoff = null }: { handoff?: MatrixHandoff | nul
       <SyntheticBanner>
         "Örnek" etiketli projeler uydurmadır; bilgisayarınızdaki gerçek klasörlerle ilgisi yoktur. Gerçek proje kayıtlarınız ayrıca etiketlenir.
       </SyntheticBanner>
-      <ProjectToolWorkspace projects={projects} catalog={catalog} target={target} onTarget={setTarget} focusNonce={focusNonce} focus={handoff} />
+      <ProjectToolWorkspace projects={projects} catalog={catalog} inventory={inventory} target={target} onTarget={setTarget} focusNonce={focusNonce} focus={handoff} />
       <AddReference onAdded={reload} />
       {projects.error && <ErrorNotice error={projects.error} onRetry={projects.reload} />}
       {projects.loading && !projects.data && <p role="status">Yükleniyor…</p>}

@@ -100,8 +100,8 @@ describe("a recommendation opens the matrix on the suggested tool of the evaluat
     expect(row.getByLabelText(/^Karar/)).toHaveValue(""); // nothing pre-selected, least of all "accepted"
     expect(row.getByRole("button", { name: /^Yalnızca tercihimi kaydet/ })).toBeDisabled();
     const after = [...new Set(backend.calls.slice(before).map((c) => c.cmd))];
-    for (const cmd of after) expect(["list_projects", "list_catalog"], cmd).toContain(cmd);
-    for (const bad of ["evaluate_task", "set_project_preference", "reset_project_preference", "prepare_install", "confirm_install", "plan_install", "run_discovery_scan", "set_catalog_entry_enabled", "list_install_states", "list_inventory"]) {
+    for (const cmd of after) expect(["list_projects", "list_catalog", "list_inventory"], cmd).toContain(cmd); // list_inventory: the stored read of PRODUCT-04
+    for (const bad of ["evaluate_task", "set_project_preference", "reset_project_preference", "prepare_install", "confirm_install", "plan_install", "run_discovery_scan", "set_catalog_entry_enabled", "list_install_states"]) {
       expect(calls(bad).filter((c) => backend.calls.indexOf(c) >= before), bad).toHaveLength(0);
     }
     expect(calls("evaluate_task")).toHaveLength(1);

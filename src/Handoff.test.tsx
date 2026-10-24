@@ -60,7 +60,7 @@ describe("Recommendations -> matrix handoff", () => {
     expect((await shownTarget()).text).toContain("Benim sitem · macOS Apple Silicon · Antigravity IDE");
   });
 
-  it("only moves the user: no task is evaluated, nothing is written, read or installed", async () => {
+  it("only moves the user: no task is evaluated, nothing is written or installed, and the only extra read is the stored inventory (never a scan)", async () => {
     render(<App />);
     await go("Öneriler");
     await pick("benim-sitem", "macos-arm64", "local-cli");
@@ -69,7 +69,7 @@ describe("Recommendations -> matrix handoff", () => {
     await screen.findByRole("heading", { level: 1, name: "Projeler" });
     await matrix();
     const after = backend.calls.slice(before).map((c) => c.cmd);
-    for (const cmd of new Set(after)) expect(["list_projects", "list_catalog"], cmd).toContain(cmd);
+    for (const cmd of new Set(after)) expect(["list_projects", "list_catalog", "list_inventory"], cmd).toContain(cmd);
     for (const bad of ["evaluate_task", "set_project_preference", "reset_project_preference", "prepare_install", "confirm_install", "list_install_states", "plan_install", "run_discovery_scan", "set_catalog_entry_enabled"]) {
       expect(calls(bad), bad).toHaveLength(0);
     }
