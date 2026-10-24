@@ -84,7 +84,7 @@ export default function App() {
         <h1 tabIndex={-1} ref={headingRef}>{current.label}</h1>
         <ErrorBoundary key={page}>
           {page === "dashboard" && <DashboardPage onNavigate={navigate} />}
-          {page === "projects" && <ProjectsPage handoff={handoff} />}
+          {page === "projects" && <ProjectsPage handoff={handoff} onOpenInMatrix={openInMatrix} />}
           {page === "tools" && <CatalogPage />}
           {page === "recommendations" && <RecommendationsPage onOpenInMatrix={openInMatrix} />}
           {page === "inventory" && <InventoryPage />}

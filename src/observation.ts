@@ -51,15 +51,23 @@ export const requestMatches = (r: RequestVsObservation, entryId: string, t: Obse
   r.projectAlias === t.alias && r.entryId === entryId && r.platformTarget === t.platform && r.agentSurface === t.surface;
 
 export function observationFor(row: WorkspaceRow, target: ObservationTarget, inventory: InventoryRead): ObservationView {
+  return observationOfWish({ removed: row.removed, decision: row.pref?.decision ?? null }, row.entry.entryId, target, inventory);
+}
+
+/**
+ * The same answer for a bare wish (used by the matrix row above and by the review queue, so both always agree): only an ACCEPTED wish on a catalog
+ * entry that still exists is compared, and only through the exact four-field key.
+ */
+export function observationOfWish(wish: { removed: boolean; decision: string | null }, entryId: string, target: ObservationTarget, inventory: InventoryRead): ObservationView {
   // these two answers do not depend on the inventory at all
-  if (row.removed) return { kind: "removed" };
-  if (row.pref?.decision !== "accepted") return { kind: "no_wish" };
+  if (wish.removed) return { kind: "removed" };
+  if (wish.decision !== "accepted") return { kind: "no_wish" };
 
   const data = inventory.data;
   if (!data) return inventory.error ? { kind: "unreadable", error: inventory.error } : { kind: "loading" };
 
   const old = inventory.error !== null; // a refresh failed: what we hold is the earlier successful read
-  const hits = data.requests.filter((r) => requestMatches(r, row.entry.entryId, target));
+  const hits = data.requests.filter((r) => requestMatches(r, entryId, target));
   if (hits.length === 0) return { kind: "no_row", reading: inventory.loading, old };
   if (hits.length > 1) return { kind: "ambiguous" };
   const request = hits[0];

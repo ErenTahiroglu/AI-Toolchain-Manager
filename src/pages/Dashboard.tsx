@@ -1,5 +1,6 @@
 import { api } from "../api";
 import { StatusBadge, ErrorNotice, useLoad } from "../components/common";
+import { ReviewSummary } from "../components/ReviewSummary";
 import { OVERALL, formatTime } from "../labels";
 
 export function DashboardPage({ onNavigate }: { onNavigate: (page: string) => void }) {
@@ -51,6 +52,8 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: string) => vo
           "Örnek" etiketli projeler <strong>örnek veridir</strong>. Kayıtlı kararlar yalnızca isteğinizdir; gerçek kurulum durumu değildir.
         </p>
       </section>
+
+      <ReviewSummary onNavigate={onNavigate} />
 
       <section aria-labelledby="h-audit">
         <h2 id="h-audit">Denetim kaydı</h2>

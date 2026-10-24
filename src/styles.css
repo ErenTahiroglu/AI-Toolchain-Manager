@@ -151,3 +151,6 @@ fieldset.panel legend { font-weight: 700; padding: 0 .4rem; }
 .ws-observe { min-width: 0; border-left: 3px solid var(--border); padding-left: .75rem; }
 .ws-observe h4 { margin: 0 0 .25rem; font-size: .95rem; }
 .ws-observe p { margin: .2rem 0; }
+.rq-list { list-style: none; margin: 0 0 .75rem; padding: 0; display: grid; gap: .6rem; }
+.rq-item { border: 1px solid var(--border); border-radius: 10px; padding: .6rem .9rem; background: var(--surface); min-width: 0; }
+.rq-item p, .rq-item ul { margin: .2rem 0; }

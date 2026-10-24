@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, toAppError } from "../api";
 import { ErrorNotice, SyntheticBanner, useLoad } from "../components/common";
 import { ProjectToolWorkspace } from "../components/ProjectToolWorkspace";
+import { ReviewQueue } from "../components/ReviewQueue";
 import type { AppError, ProjectView } from "../types";
 import { DEFAULT_TARGET, type MatrixHandoff, type TargetRequest } from "../workspace";
 
@@ -106,7 +107,11 @@ function ProjectCard({ project, onChanged, onOpenInMatrix }: { project: ProjectV
  * `handoff`: what another page asks to be opened - a target (project alias, operating system, agent surface) and optionally one suggested tool. It only
  * selects and points at what the matrix shows; it never decides, saves, evaluates or installs anything.
  */
-export function ProjectsPage({ handoff = null }: { handoff?: MatrixHandoff | null }) {
+export function ProjectsPage({ handoff = null, onOpenInMatrix }: {
+  handoff?: MatrixHandoff | null;
+  /** The typed callback of App that hands a target + tool to the matrix. Without it the review queue (whose only action is that handoff) is not shown. */
+  onOpenInMatrix?: (request: TargetRequest & { entryId: string }) => void;
+}) {
   const projects = useLoad(api.listProjects);
   const catalog = useLoad(api.listCatalog);
   const inventory = useLoad(api.listInventory); // stored observations only (a database read); this page never starts a scan
@@ -127,6 +132,7 @@ export function ProjectsPage({ handoff = null }: { handoff?: MatrixHandoff | nul
       <SyntheticBanner>
         "Örnek" etiketli projeler uydurmadır; bilgisayarınızdaki gerçek klasörlerle ilgisi yoktur. Gerçek proje kayıtlarınız ayrıca etiketlenir.
       </SyntheticBanner>
+      {onOpenInMatrix && <ReviewQueue projects={projects} inventory={inventory} onOpen={onOpenInMatrix} />}
       <ProjectToolWorkspace projects={projects} catalog={catalog} inventory={inventory} target={target} onTarget={setTarget} focusNonce={focusNonce} focus={handoff} />
       <AddReference onAdded={reload} />
       {projects.error && <ErrorNotice error={projects.error} onRetry={projects.reload} />}

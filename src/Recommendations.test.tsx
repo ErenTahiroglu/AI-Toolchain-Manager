@@ -438,7 +438,10 @@ describe("the Recommendations page has no second write path", () => {
     for (const bad of ["set_project_preference", "reset_project_preference", "prepare_install", "confirm_install", "plan_install", "run_discovery_scan", "set_catalog_entry_enabled", "list_install_states"]) {
       expect(calls(bad), bad).toHaveLength(0);
     }
-    expect(calls("list_inventory").every((c) => backend.calls.indexOf(c) > backend.calls.findIndex((x) => x.cmd === "evaluate_task"))).toBe(true);
+    // the Dashboard tile (PRODUCT-05) and the matrix read the stored inventory; the Recommendations page itself never does: nothing between its own first read and the evaluation
+    const order = backend.calls.map((c) => c.cmd);
+    const between = order.slice(order.indexOf("list_scenarios"), order.indexOf("evaluate_task") + 1);
+    expect(between).not.toContain("list_inventory");
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -450,6 +453,10 @@ describe("the Recommendations page has no second write path", () => {
     await gates[0].resolve({}, [RA()]);
     await screen.findByRole("heading", { level: 3, name: /Anthropic Frontend Design/ });
     const beyondTheShell = new Set(backend.calls.map((c) => c.cmd));
-    for (const cmd of beyondTheShell) expect(["get_app_info", "get_settings", "get_dashboard", "list_projects", "list_scenarios", "evaluate_task"], cmd).toContain(cmd);
+    // list_inventory comes only from the Dashboard's review tile (PRODUCT-05), which has finished before this page issues its own first command
+    for (const cmd of beyondTheShell) expect(["get_app_info", "get_settings", "get_dashboard", "list_projects", "list_inventory", "list_scenarios", "evaluate_task"], cmd).toContain(cmd);
+    const order = backend.calls.map((c) => c.cmd);
+    const own = order.slice(order.indexOf("list_scenarios"));
+    expect(own.filter((c) => c !== "list_projects" && c !== "list_scenarios" && c !== "evaluate_task")).toEqual([]);
   });
 });
