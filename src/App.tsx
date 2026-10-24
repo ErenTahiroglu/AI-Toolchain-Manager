@@ -85,7 +85,7 @@ export default function App() {
         <ErrorBoundary key={page}>
           {page === "dashboard" && <DashboardPage onNavigate={navigate} />}
           {page === "projects" && <ProjectsPage handoff={handoff} onOpenInMatrix={openInMatrix} />}
-          {page === "tools" && <CatalogPage />}
+          {page === "tools" && <CatalogPage onOpenInMatrix={openInMatrix} />}
           {page === "recommendations" && <RecommendationsPage onOpenInMatrix={openInMatrix} />}
           {page === "inventory" && <InventoryPage />}
           {page === "plan" && <PlanPage />}

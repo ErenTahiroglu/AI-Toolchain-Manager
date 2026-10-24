@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "snapshotDate": "2026-10-24",
+  "note": "CATALOG-02 candidates (Issue #27): the Playwright family's two other offerings. Metadata only: every field is the publisher's own description read from the pinned commit, never a review, a test or an authorisation. Each `record` conforms to schemas/catalog-entry.schema.json v2. `entryKind`, `pluginIdentity`, `sourcePath`, `purpose` and `executionPolicy` are application-level wrapper fields, as in catalog-candidates-1b.json and catalog-candidates-c01.json. `purposeRefinements` rewrites ONLY the displayed purpose of an entry from an earlier file (the earlier data files stay byte-identical).",
+  "purposeRefinements": [
+    {
+      "toolId": "microsoft-playwright",
+      "purpose": "Bir projenin kendi uçtan uca tarayıcı testlerini yazıp sürdürmek için Playwright test çalıştırıcısı ve kitaplığı; makine genelindeki bir CLI, projenin sabitlenmiş test bağımlılıklarının yerini tutmaz. Tarayıcı açar ve çalışma zamanı indirir; MCP sunucusu değildir. Bu uygulama hiçbirini yapmaz."
+    }
+  ],
+  "records": [
+    {
+      "entryKind": "executable_tool",
+      "pluginIdentity": null,
+      "sourcePath": null,
+      "purpose": "Kodlama ajanının (ör. Claude Code) kısa komutlarla tarayıcı denemesi için komut satırı aracı; yayıncıya göre bir ajan birçok depoda tarayıcı işi yapacaksa MCP'den hafif bir başlangıç noktasıdır. Çerez ve oturum durumu tutabilir; bu uygulama kurmaz, çalıştırmaz.",
+      "executionPolicy": "manual-only",
+      "record": {
+        "schemaVersion": 2,
+        "toolId": "microsoft-playwright-cli",
+        "displayName": "Microsoft Playwright CLI",
+        "repository": { "url": "https://github.com/microsoft/playwright-cli", "owner": "microsoft", "name": "playwright-cli" },
+        "sourceSnapshot": { "observedRef": "main", "immutableCommit": "b1a5903c5b633b8c9f843ad7b629c2a78437040c", "releaseVersion": null, "revisionState": "immutable-commit", "observedAt": "2026-10-24T00:00:00Z", "evidenceIds": ["R38", "R40"] },
+        "category": "native-cli",
+        "reviewState": "unreviewed",
+        "license": { "state": "known", "spdxId": "Apache-2.0", "evidenceId": "R38" },
+        "targetEvidence": [
+          { "platformTarget": "macos-arm64", "agentSurface": "local-cli", "compatibilityState": "unknown", "evidenceId": "R38", "limitation": "README and package.json say Node.js 18 or newer but name no operating system or CPU architecture; not executed here." },
+          { "platformTarget": "windows-x64", "agentSurface": "local-cli", "compatibilityState": "unknown", "evidenceId": "R38", "limitation": "README and package.json say Node.js 18 or newer but name no operating system or CPU architecture; not executed here." },
+          { "platformTarget": "macos-arm64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R38", "limitation": "README and the official page name Claude Code as a coding agent that can use the optional skills, but name no operating system; nothing was tested." },
+          { "platformTarget": "windows-x64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R38", "limitation": "README and the official page name Claude Code as a coding agent that can use the optional skills, but name no operating system; nothing was tested." },
+          { "platformTarget": "macos-arm64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R38", "limitation": "No Antigravity evidence: the README says Claude Code, GitHub Copilot or any other coding agent." },
+          { "platformTarget": "windows-x64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R38", "limitation": "No Antigravity evidence: the README says Claude Code, GitHub Copilot or any other coding agent." }
+        ],
+        "installMethods": [{ "methodId": "unknown", "evidenceId": "R38", "publisherPin": "Publisher describes a global npm install (unpinned 'latest') and an optional skills install step; neither is an approved method." }],
+        "dependencies": ["Node.js 18 or newer (README and package.json of the pinned commit)", "A browser: the publisher's command list has an install-browser step; what it downloads was not examined"],
+        "privilegeClaims": ["Current user account; launches and controls real browsers for a coding agent; can read and change cookies and storage, run page code, record traces and video"],
+        "networkClaims": ["Loads whatever sites the agent points it at, including local or private ones", "Optional skills install adds files that coding agents read; a browser runtime may be fetched (not examined)"],
+        "artifactEvidence": null,
+        "verificationClaims": [{ "kind": "function", "state": "publisher-describes", "evidenceId": "R38" }],
+        "privacy": {
+          "telemetry": "unknown",
+          "mayTransmitProjectContent": null,
+          "evidenceId": "R38",
+          "notes": [
+            "Publisher says CLI plus skills is more token-efficient than MCP for coding agents working in large codebases because page data is not forced into the model context. This was not benchmarked here.",
+            "Browser sessions keep cookies and storage in memory while open; the persistent option saves the profile to disk; named sessions can separate projects. Sharing one installed tool does not by itself mean sharing or isolating a browser profile: that depends on how sessions are named and used.",
+            "Commands can read, set and clear cookies and storage, run page code, record traces and video, and mock network requests. Page content and results are untrusted data.",
+            "Installing the skills or running any command is not authorised by this catalog entry. Telemetry is not stated in the snapshot, so it is unknown."
+          ]
+        },
+        "updatedAt": "2026-10-24T00:00:00Z"
+      }
+    },
+    {
+      "entryKind": "agent_plugin",
+      "pluginIdentity": null,
+      "sourcePath": null,
+      "purpose": "Playwright'ı ajana MCP sunucusu olarak açar: sayfayı yapısal görüp durumlu, keşfe dayalı tarayıcı işleri için CLI'dan zengindir ama bağlam ve jeton maliyeti yüksektir. Ajanın MCP yapılandırması gerekir; varsayılan profil diskte kalıcıdır. Bu uygulama bağlanmaz.",
+      "executionPolicy": "manual-only",
+      "record": {
+        "schemaVersion": 2,
+        "toolId": "microsoft-playwright-mcp",
+        "displayName": "Microsoft Playwright MCP",
+        "repository": { "url": "https://github.com/microsoft/playwright-mcp", "owner": "microsoft", "name": "playwright-mcp" },
+        "sourceSnapshot": { "observedRef": "main", "immutableCommit": "0c4107acbecb75472b23c05c0e42471a0011874f", "releaseVersion": null, "revisionState": "immutable-commit", "observedAt": "2026-10-24T00:00:00Z", "evidenceIds": ["R39", "R40"] },
+        "category": "mcp-server",
+        "reviewState": "unreviewed",
+        "license": { "state": "known", "spdxId": "Apache-2.0", "evidenceId": "R39" },
+        "targetEvidence": [
+          { "platformTarget": "macos-arm64", "agentSurface": "local-cli", "compatibilityState": "unknown", "evidenceId": "R39", "limitation": "An MCP server is started by an MCP client; the README documents client configuration, not use as a stand-alone command." },
+          { "platformTarget": "windows-x64", "agentSurface": "local-cli", "compatibilityState": "unknown", "evidenceId": "R39", "limitation": "An MCP server is started by an MCP client; the README documents client configuration, not use as a stand-alone command." },
+          { "platformTarget": "macos-arm64", "agentSurface": "claude-code-terminal", "compatibilityState": "vendor-declared", "evidenceId": "R39", "limitation": "README documents adding the server with the Claude Code command line and names macOS and Windows locations for its browser profile; no CPU architecture; documentation is not a functional test and nothing was tested." },
+          { "platformTarget": "windows-x64", "agentSurface": "claude-code-terminal", "compatibilityState": "vendor-declared", "evidenceId": "R39", "limitation": "README documents adding the server with the Claude Code command line and names macOS and Windows locations for its browser profile; no CPU architecture; documentation is not a functional test and nothing was tested." },
+          { "platformTarget": "macos-arm64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R39", "limitation": "README has an Antigravity configuration section that does not name the IDE, CLI or Antigravity 2 surface or an operating system; the official page does not mention Antigravity." },
+          { "platformTarget": "windows-x64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R39", "limitation": "README has an Antigravity configuration section that does not name the IDE, CLI or Antigravity 2 surface or an operating system; the official page does not mention Antigravity." }
+        ],
+        "installMethods": [{ "methodId": "unknown", "evidenceId": "R39", "publisherPin": "Publisher describes MCP-client configuration through npx with an unpinned 'latest' tag and client-specific commands; none is an approved method." }],
+        "dependencies": ["Node.js 18 or newer per README and package.json; another Playwright manifest says 20: not reconciled, so no install requirement is approved", "An MCP client; agent-specific configuration is required"],
+        "privilegeClaims": ["Current user account; drives a real browser with tools that evaluate page JavaScript, upload files and run Playwright code (one is named 'unsafe')"],
+        "networkClaims": ["Loads whatever sites the agent points it at, including local or private ones", "Optional extension mode attaches to an existing logged-in Chrome or Edge browser"],
+        "artifactEvidence": null,
+        "verificationClaims": [{ "kind": "function", "state": "publisher-describes", "evidenceId": "R39" }],
+        "privacy": {
+          "telemetry": "unknown",
+          "mayTransmitProjectContent": true,
+          "evidenceId": "R39",
+          "notes": [
+            "Publisher says MCP suits specialised stateful loops (exploratory automation, self-healing tests, long-running workflows) at a higher token cost, and points coding agents to CLI plus skills instead. Not benchmarked here.",
+            "Page snapshots and tool results enter the agent's context and therefore reach its model provider.",
+            "The default browser profile is persistent on disk (separate per workspace), so logged-in state survives sessions; an isolated option keeps it in memory. Extension mode can reuse an existing browser's logged-in sessions, which is sensitive.",
+            "The publisher says the origin allow and block lists are not a security boundary. Its Claude Code and Antigravity configuration notes are documentation, not an architecture-specific test; this catalog never edits any agent configuration. Telemetry is not stated, so it is unknown."
+          ]
+        },
+        "updatedAt": "2026-10-24T00:00:00Z"
+      }
+    }
+  ]
+}

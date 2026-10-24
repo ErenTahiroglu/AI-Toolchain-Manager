@@ -18,10 +18,13 @@ const SEED_JSON: &str = include_str!("../../data/catalog-seed.json");
 const CANDIDATES_JSON: &str = include_str!("../../data/catalog-candidates-1b.json");
 /// CATALOG-01 candidates (three entries, Issue #26) — an additive file in the same wrapper shape; the two files above are untouched.
 const CATALOG01_JSON: &str = include_str!("../../data/catalog-candidates-c01.json");
+/// CATALOG-02 candidates (two entries, Issue #27: the other Playwright offerings) plus `purposeRefinements` for an entry of an earlier file.
+const CATALOG02_JSON: &str = include_str!("../../data/catalog-candidates-c02.json");
 pub const PHASE0_TOOL_COUNT: usize = 9;
 pub const CANDIDATE_COUNT: usize = 4;
 pub const CATALOG01_COUNT: usize = 3;
-pub const SEED_ENTRY_COUNT: usize = PHASE0_TOOL_COUNT + CANDIDATE_COUNT + CATALOG01_COUNT;
+pub const CATALOG02_COUNT: usize = 2;
+pub const SEED_ENTRY_COUNT: usize = PHASE0_TOOL_COUNT + CANDIDATE_COUNT + CATALOG01_COUNT + CATALOG02_COUNT;
 
 pub const KINDS: &[&str] = &["executable_tool", "agent_plugin", "skill_collection", "prompt_source"];
 const EXECUTION_POLICIES: &[&str] = &["manual-only", "blocked-until-scoped-authorization"];
@@ -200,6 +203,30 @@ fn catalog01_seed_entries() -> AppResult<Vec<SeedEntry>> {
     wrapped_seed_entries(CATALOG01_JSON, CATALOG01_COUNT, "üç aday bekleniyordu")
 }
 
+fn catalog02_seed_entries() -> AppResult<Vec<SeedEntry>> {
+    wrapped_seed_entries(CATALOG02_JSON, CATALOG02_COUNT, "iki aday bekleniyordu")
+}
+
+/// Rewrites only the displayed purpose of entries that come from EARLIER data files, so those files can stay byte-identical. A refinement for an
+/// unknown id, an empty text or one over the purpose cap is a build-time data error, not something to guess around.
+fn apply_purpose_refinements(all: &mut [SeedEntry]) -> AppResult<()> {
+    let root: Value = serde_json::from_str(CATALOG02_JSON).map_err(|_| seed_error("aday JSON okunamadı"))?;
+    refine_purposes(&root, all)
+}
+
+fn refine_purposes(root: &Value, all: &mut [SeedEntry]) -> AppResult<()> {
+    for refinement in root.get("purposeRefinements").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default() {
+        let id = str_at(refinement, "/toolId");
+        let purpose = str_at(refinement, "/purpose");
+        if purpose.is_empty() || purpose.chars().count() > MAX_PURPOSE_CHARS {
+            return Err(seed_error("amaç iyileştirmesi boş veya çok uzun"));
+        }
+        let entry = all.iter_mut().find(|e| e.entry_id == id).ok_or_else(|| seed_error("amacı iyileştirilecek kayıt yok"))?;
+        entry.purpose = purpose.to_string();
+    }
+    Ok(())
+}
+
 /// Shared by every wrapped candidate file (`entryKind` / `executionPolicy` / `purpose` wrapper around a schema-v2 record).
 fn wrapped_seed_entries(raw: &str, expected: usize, count_error: &str) -> AppResult<Vec<SeedEntry>> {
     let root: Value = serde_json::from_str(raw).map_err(|_| seed_error("aday JSON okunamadı"))?;
@@ -229,6 +256,8 @@ fn all_seed_entries() -> AppResult<Vec<SeedEntry>> {
     let mut all = nine_seed_entries()?;
     all.extend(candidate_seed_entries()?);
     all.extend(catalog01_seed_entries()?);
+    all.extend(catalog02_seed_entries()?);
+    apply_purpose_refinements(&mut all)?;
     let mut ids = std::collections::BTreeSet::new();
     let mut keys = std::collections::BTreeSet::new();
     for e in &all {
@@ -947,14 +976,14 @@ mod tests {
             )
         };
         let first = snapshot(&conn);
-        assert_eq!(first, (16, 3, 6, 3, 6)); // 9 Phase 0 + 4 Phase 1B + 3 CATALOG-01
+        assert_eq!(first, (18, 3, 6, 3, 6)); // 9 Phase 0 + 4 Phase 1B + 3 CATALOG-01 + 2 CATALOG-02
         set_enabled(&conn, "agent-browser", false).unwrap();
         remove_entry(&conn, "gitleaks").unwrap();
         // The user resets a demonstration decision; a restart must not bring it back.
         conn.execute("DELETE FROM project_preferences WHERE entry_id = 'graphify'", []).unwrap();
         seed_all(&conn).unwrap();
         seed_all(&conn).unwrap();
-        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 16);
+        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 18);
         assert_eq!(count(&conn, "SELECT count(*) FROM project_preferences"), 5);
         assert!(!get_entry(&conn, "agent-browser").unwrap().enabled);
         assert!(get_entry(&conn, "gitleaks").unwrap().removed_at.is_some());
@@ -1005,7 +1034,7 @@ mod tests {
             add_entry(&conn, "https://github.com/vercel-labs/Agent-Browser", "executable_tool", "").unwrap_err().code,
             "ENTRY_DUPLICATE"
         );
-        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 17);
+        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 19);
         let preview = preview_url(&conn, "https://github.com/acme/WIDGET").unwrap();
         assert!(!preview.ok && preview.duplicate_of.is_some());
     }
@@ -1030,7 +1059,7 @@ mod tests {
             assert!(add_entry(&conn, bad, "executable_tool", "").is_err(), "accepted {bad}");
             assert!(!preview_url(&conn, bad).unwrap().ok, "preview ok for {bad}");
         }
-        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 16);
+        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 18);
         assert_eq!(add_entry(&conn, "https://github.com/acme/widget", "everything", "").unwrap_err().code, "KIND_INVALID");
     }
 
@@ -1082,6 +1111,26 @@ mod tests {
         let mut net = get_entry(&conn, "agent-browser").unwrap().record;
         net["networkClaims"] = json!(["now also uploads everything"]);
         assert_ne!(capability_fingerprint(&net, "executable_tool", "manual-only"), base);
+    }
+
+    #[test]
+    fn purpose_refinements_change_only_the_purpose_of_a_known_entry_and_reject_bad_data() {
+        let mut all = all_seed_entries().unwrap();
+        let before: Vec<(String, String)> = all.iter().map(|e| (e.entry_id.clone(), e.record.to_string())).collect();
+        let ok = json!({ "purposeRefinements": [{ "toolId": "strix", "purpose": "Yeni kısa amaç." }] });
+        refine_purposes(&ok, &mut all).unwrap();
+        assert_eq!(all.iter().find(|e| e.entry_id == "strix").unwrap().purpose, "Yeni kısa amaç.");
+        assert_eq!(before, all.iter().map(|e| (e.entry_id.clone(), e.record.to_string())).collect::<Vec<_>>(), "records are never touched");
+        assert!(all.iter().filter(|e| e.entry_id != "strix").all(|e| e.purpose != "Yeni kısa amaç."), "only the named entry changes");
+        for bad in [
+            json!({ "purposeRefinements": [{ "toolId": "does-not-exist", "purpose": "x" }] }),
+            json!({ "purposeRefinements": [{ "toolId": "strix", "purpose": "" }] }),
+            json!({ "purposeRefinements": [{ "toolId": "strix", "purpose": "x".repeat(MAX_PURPOSE_CHARS + 1) }] }),
+            json!({ "purposeRefinements": [{ "purpose": "no id" }] }),
+        ] {
+            assert_eq!(refine_purposes(&bad, &mut all).unwrap_err().code, "SEED_INVALID", "{bad}");
+        }
+        assert!(refine_purposes(&json!({}), &mut all).is_ok(), "no refinements is fine");
     }
 
     #[test]

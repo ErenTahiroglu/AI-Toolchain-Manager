@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, toAppError } from "../api";
 import { ErrorNotice, UnavailableButton, useLoad } from "../components/common";
 import { InstallPanel } from "../components/InstallPanel";
+import { PlaywrightChoice, hasPlaywrightFamily, type OpenInMatrix } from "../components/PlaywrightChoice";
 import {
   KIND_HELP, compatLabel, installLabel, kindLabel, licenseLabel, metadataLabel, platformLabel, policyLabel, reviewLabel, surfaceLabel,
   validationLabel,
@@ -202,7 +203,7 @@ function EntryCard({ entry, onChanged, install, onInstallChanged }: { entry: Cat
   );
 }
 
-export function CatalogPage() {
+export function CatalogPage({ onOpenInMatrix }: { onOpenInMatrix?: OpenInMatrix } = {}) {
   const { data, error, loading, reload } = useLoad(api.listCatalog);
   const installs = useLoad(api.listInstallStates);
   const stateOf = (id: string) => installs.data?.find((s) => s.entryId === id);
@@ -228,6 +229,7 @@ export function CatalogPage() {
           doğrulanmadı. Bu uygulama bu sürümde hiçbir şeyi kurmaz, çalıştırmaz veya ajan ayarlarına dokunmaz.
         </p>
       )}
+      {hasPlaywrightFamily(data ?? []) && <PlaywrightChoice entries={data ?? []} onOpenInMatrix={onOpenInMatrix} />}
       <AddForm onAdded={(e) => { setNotice(`${e.displayName} aday olarak eklendi. Hiçbir şey indirilmedi veya çalıştırılmadı.`); reload(); }} />
       {error && <ErrorNotice error={error} onRetry={reload} />}
       {loading && !data && <p role="status">Yükleniyor…</p>}
