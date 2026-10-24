@@ -20,6 +20,7 @@ export function ReviewSummary({ onNavigate }: { onNavigate: (page: string) => vo
       {queue.complete && queue.uncertain.length > 0 && (
         <p className="small bad-text">⚠ {queue.uncertain.length} karar için kayıtlı kanıt belirsiz; ayrıntı Projeler sayfasında.</p>
       )}
+      {(queue.projects === "refreshing" || queue.evidence === "refreshing") && <p className="small bad-text">⚠ Okuma sürüyor; yukarıdaki sayı kesin değil.</p>}
       {queue.projects !== "loading" && queue.projects !== "failed" && (queue.evidence === "failed" || queue.evidence === "old") && (
         <p className="small bad-text">⚠ Kayıtlı envanter okunamadı veya yenilenemedi; gözlemden doğan nedenler eksik ya da eski olabilir.</p>
       )}

@@ -58,7 +58,11 @@ export interface ReviewItem {
   openable: boolean;
 }
 
-export type ReadPhase = "loading" | "failed" | "ready" | "old";
+/**
+ * loading: first read in progress (no data). failed: first read failed (no data). old: data retained after a FAILED refresh. refreshing: data retained
+ * while a new read is still running (nothing has failed, nothing is final yet). ready: data, no error, nothing running - the only final phase.
+ */
+export type ReadPhase = "loading" | "failed" | "ready" | "old" | "refreshing";
 
 export interface ReviewQueue {
   /** Items with at least one reason, in a fixed order. */
@@ -107,7 +111,9 @@ export function parseRfc3339(text: string): number | null {
   return Number.isFinite(out) ? out : null;
 }
 
-const phaseOf = (r: { data: unknown; error: AppError | null }): ReadPhase => (r.data === null ? (r.error ? "failed" : "loading") : r.error ? "old" : "ready");
+// useLoad keeps the previous good data while a new read runs, so `loading` must be looked at even when data is present
+const phaseOf = (r: { data: unknown; error: AppError | null; loading: boolean }): ReadPhase =>
+  r.data === null ? (r.error ? "failed" : "loading") : r.error ? "old" : r.loading ? "refreshing" : "ready";
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const byItem = (a: ReviewItem, b: ReviewItem) =>
@@ -122,7 +128,11 @@ export function reviewHeadline(q: ReviewQueue): string {
   if (q.projects === "loading") return "Kararlar okunuyor…";
   if (q.projects === "failed") return "Kararlar okunamadı; incelenecek öğelerin sayısı bilinmiyor. Bu, “hiç yok” anlamına gelmez.";
   const n = q.items.length;
-  if (!q.complete) return `En az ${n} öğe incelenmeyi bekliyor (liste eksik veya eski olabilir).`;
+  // a read that is still running is provisional, whatever the retained data says (including an earlier clean zero)
+  if (!q.complete) {
+    const running = q.projects === "refreshing" || q.evidence === "refreshing";
+    return `En az ${n} öğe incelenmeyi bekliyor (${running ? "okuma sürüyor; sonuç kesin değil" : "liste eksik veya eski olabilir"}).`;
+  }
   if (n === 0) {
     return "Bu ölçütlere göre incelenmesi gereken öğe yok. Bu, her şeyin doğru olduğu ya da herhangi bir aracın kurulu ve çalışır olduğu anlamına gelmez; yalnızca aşağıdaki ölçütler denetlendi.";
   }

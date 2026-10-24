@@ -561,5 +561,143 @@ describe("existing flows stay intact", () => {
   });
 });
 
+describe("P05-RT-01: a read that is still running is never final (through the real App)", () => {
+  const NONE = /incelenmesi gereken öğe yok/;
+  const PROVISIONAL0 = /^En az 0 öğe incelenmeyi bekliyor \(okuma sürüyor; sonuç kesin değil\)\./;
+  const cleanWorld = () => {
+    backend.projects = [project(ORNEK, "Örnek: Web sitesi", [wish("alfa", { entryName: "Alfa Araç" })], "synthetic")];
+    backend.inventory = { ...backend.inventory, requests: [request("alfa", "present_current")] };
+  };
+  const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
+  const refresh = async () => userEvent.click((await matrix()).getByRole("button", { name: "Listeyi yenile" }));
+  const betaRow = async () => within(((await (await matrix()).findByRole("heading", { level: 3, name: "Beta Eklenti" })).closest("article")) as HTMLElement);
+
+  it.each([["list_projects"], ["list_inventory"], ["both"]])("clean queue, then a refresh with %s pending: provisional - never 'nothing to review' - and final again once it settles", async (which) => {
+    cleanWorld();
+    render(<App />);
+    await go("Projeler");
+    const q = await queue();
+    expect(await q.findByText(NONE)).toBeInTheDocument();
+    const gates = { list_projects: which !== "list_inventory" ? defer("list_projects") : [], list_inventory: which !== "list_projects" ? defer("list_inventory") : [] };
+    await refresh();
+    await waitFor(() => {
+      if (which !== "list_inventory") expect(gates.list_projects).toHaveLength(1);
+      if (which !== "list_projects") expect(gates.list_inventory).toHaveLength(1);
+    });
+    expect(q.getByText(PROVISIONAL0)).toBeInTheDocument();
+    expect(q.queryByText(NONE)).not.toBeInTheDocument();
+    if (which !== "list_inventory") expect(q.getByText(/Kararlar yeniden okunuyor; gösterilenler kesin değil/)).toBeInTheDocument();
+    if (which !== "list_projects") expect(q.getByText(/Kayıtlı envanter yeniden okunuyor; gözlemden doğan nedenler kesin değil/)).toBeInTheDocument();
+    expect(q.queryByRole("button", { name: "Listeyi yeniden oku" })).not.toBeInTheDocument(); // nothing failed: no retry to offer
+    await act(async () => {
+      gates.list_projects.forEach((g) => g.resolve(backend.projects));
+      gates.list_inventory.forEach((g) => g.resolve(backend.inventory));
+    });
+    expect(await q.findByText(NONE)).toBeInTheDocument();
+    expect(q.queryByText(/kesin değil/)).not.toBeInTheDocument();
+    const settled = backend.calls.length;
+    await act(async () => { await new Promise((r) => setTimeout(r, 80)); });
+    expect(backend.calls.length).toBe(settled); // nothing polls
+  });
+
+  it("retained NON-empty queue during a refresh: still listed, but 'at least N' and marked not final; the answer replaces it", async () => {
+    render(<App />);
+    await go("Projeler");
+    const q = await queue();
+    await q.findByText("6 öğe incelenmeyi bekliyor.");
+    const projectsGate = defer("list_projects");
+    const inventoryGate = defer("list_inventory");
+    await refresh();
+    await waitFor(() => { expect(projectsGate).toHaveLength(1); expect(inventoryGate).toHaveLength(1); });
+    expect(q.getByText("En az 6 öğe incelenmeyi bekliyor (okuma sürüyor; sonuç kesin değil).")).toBeInTheDocument();
+    expect(q.queryByText("6 öğe incelenmeyi bekliyor.")).not.toBeInTheDocument();
+    expect(q.getAllByRole("button", { name: /^Matriste incele/ })).toHaveLength(7); // the retained answer is still shown
+    backend.projects = backend.projects.filter((p) => p.alias !== BENIM);
+    await act(async () => { projectsGate[0].resolve(backend.projects); inventoryGate[0].resolve(backend.inventory); });
+    expect(await q.findByText("5 öğe incelenmeyi bekliyor.")).toBeInTheDocument();
+  });
+
+  it("overlapping reads, the NEWER one settles first: it is final at once, and the late older answer changes nothing", async () => {
+    cleanWorld();
+    render(<App />);
+    await go("Projeler");
+    const q = await queue();
+    await q.findByText(NONE);
+    const fresh = clone(backend.projects);
+    const stale = clone(backend.projects);
+    stale[0].preferences[0].materialChange = true; // what the older read would have said: one item
+    const projectsGate = defer("list_projects");
+    const inventoryGate = defer("list_inventory");
+    await refresh(); // older request
+    await waitFor(() => expect(projectsGate).toHaveLength(1));
+    const beta = await betaRow();
+    await userEvent.selectOptions(beta.getByLabelText(/^Karar/), "rejected");
+    await userEvent.click(beta.getByRole("button", { name: /^Yalnızca tercihimi kaydet/ })); // a save re-reads: the newer request
+    await waitFor(() => { expect(projectsGate).toHaveLength(2); expect(inventoryGate).toHaveLength(2); });
+    expect(q.getByText(PROVISIONAL0)).toBeInTheDocument();
+    await act(async () => { projectsGate[1].resolve(fresh); inventoryGate[1].resolve(backend.inventory); });
+    expect(await q.findByText(NONE)).toBeInTheDocument();
+    await act(async () => { projectsGate[0].resolve(stale); inventoryGate[0].resolve(backend.inventory); }); // late, older
+    expect(q.getByText(NONE)).toBeInTheDocument();
+    expect(q.queryByRole("button", { name: /^Matriste incele/ })).not.toBeInTheDocument();
+    expect(q.queryByText(/kesin değil|En az/)).not.toBeInTheDocument();
+  });
+
+  it("overlapping reads, the OLDER one settles first: it is ignored and the queue stays provisional until the newer one answers", async () => {
+    cleanWorld();
+    render(<App />);
+    await go("Projeler");
+    const q = await queue();
+    await q.findByText(NONE);
+    const fresh = clone(backend.projects);
+    const stale = clone(backend.projects);
+    stale[0].preferences[0].materialChange = true;
+    const projectsGate = defer("list_projects");
+    const inventoryGate = defer("list_inventory");
+    await refresh();
+    await waitFor(() => expect(projectsGate).toHaveLength(1));
+    const beta = await betaRow();
+    await userEvent.selectOptions(beta.getByLabelText(/^Karar/), "rejected");
+    await userEvent.click(beta.getByRole("button", { name: /^Yalnızca tercihimi kaydet/ }));
+    await waitFor(() => { expect(projectsGate).toHaveLength(2); expect(inventoryGate).toHaveLength(2); });
+    await act(async () => { projectsGate[0].resolve(stale); inventoryGate[0].resolve(backend.inventory); }); // older answers first
+    expect(q.getByText(PROVISIONAL0)).toBeInTheDocument(); // still waiting for the newer one
+    expect(q.queryByText(NONE)).not.toBeInTheDocument();
+    expect(q.queryByRole("button", { name: /^Matriste incele/ })).not.toBeInTheDocument(); // the older answer's item never shows
+    await act(async () => { projectsGate[1].resolve(fresh); inventoryGate[1].resolve(backend.inventory); });
+    expect(await q.findByText(NONE)).toBeInTheDocument();
+  });
+
+  it("a refresh that FAILS keeps the retained answer as 'old' with a retry (not as 'refreshing' and never as clean), and a successful retry makes it final", async () => {
+    cleanWorld();
+    render(<App />);
+    await go("Projeler");
+    const q = await queue();
+    await q.findByText(NONE);
+    const projectsGate = defer("list_projects");
+    await refresh();
+    await waitFor(() => expect(projectsGate).toHaveLength(1));
+    expect(q.getByText(PROVISIONAL0)).toBeInTheDocument();
+    await act(async () => projectsGate[0].reject({ code: "DB_BUSY", message: "Veritabanı meşgul." }));
+    expect(await q.findByText(/Kararlar yenilenemedi; gösterilenler önceki başarılı okumadan ve eski olabilir/)).toBeInTheDocument();
+    expect(q.getByText(/^En az 0 öğe incelenmeyi bekliyor \(liste eksik veya eski olabilir\)\./)).toBeInTheDocument();
+    expect(q.queryByText(NONE)).not.toBeInTheDocument();
+    expect(q.queryByText(/okuma sürüyor/)).not.toBeInTheDocument();
+    await userEvent.click(q.getByRole("button", { name: "Listeyi yeniden oku" }));
+    await waitFor(() => expect(projectsGate).toHaveLength(2));
+    await act(async () => projectsGate[1].resolve(backend.projects));
+    expect(await q.findByText(NONE)).toBeInTheDocument();
+  });
+
+  it("the Dashboard summary and the queue print the same headline for the same final state", async () => {
+    cleanWorld();
+    render(<App />);
+    const t = await tile();
+    const zeroText = (await t.findByText(NONE)).textContent;
+    await go("Projeler");
+    expect((await (await queue()).findByText(NONE)).textContent).toBe(zeroText);
+  });
+});
+
 // keep the unused-import linter honest about helpers used only in some branches
 void ({} as Inventory);

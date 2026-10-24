@@ -33,10 +33,11 @@ When the whole inventory is pending or failed (no earlier read) nothing per row 
 |---|---|---|
 | loading | — | "Kararlar okunuyor…" (no number) |
 | failed (first read) | — | "Kararlar okunamadı; incelenecek öğelerin sayısı bilinmiyor. Bu, ‘hiç yok’ anlamına gelmez." + **Listeyi yeniden oku** |
+| ready | refreshing (previous data kept, read running) | "En az N öğe incelenmeyi bekliyor (okuma sürüyor; sonuç kesin değil)." — a previous clean zero is **not** repeated as final (P05-RT-01); the same holds when the decisions are the source that is refreshing |
 | ready | loading / failed / old | "En az N öğe…", plus a warning; evidence reasons are absent (loading, failed) or possibly out of date (old); never the "nothing to review" text |
 | old (data + failed refresh) | any | "En az N…" and "Kararlar yenilenemedi; … eski olabilir" |
 | ready | ready | "N öğe incelenmeyi bekliyor." — and, for N = 0, "Bu ölçütlere göre incelenmesi gereken öğe yok. Bu, her şeyin doğru olduğu ya da herhangi bir aracın kurulu ve çalışır olduğu anlamına gelmez." |
-Only "ready + ready" is *complete*. The Dashboard section uses the same `reviewHeadline`, so the two counts and caveats cannot differ.
+Only "ready + ready" is *complete*: for both sources data present, no error and no read running. The Dashboard section uses the same `reviewHeadline`, so the two counts and caveats cannot differ.
 
 ## Viewing changes nothing
 There is no acknowledge, dismiss, mark-seen or auto-clear, and no stored state of any kind. Opening or viewing an item never lowers a count. The count changes only when the saved decision, the catalog state, the clock or the stored evidence really changes: it can fall when a decision is changed in the matrix or the stored evidence changes, and it can *rise* when a reminder date is reached or the catalog changes. A test saves a real decision in the matrix and watches the count follow. The page says this, and says that a count is not a to-do list that is meant to reach zero. The clock is read once per answer, not on a timer: a reminder that falls due while the page stays open appears at the next read.

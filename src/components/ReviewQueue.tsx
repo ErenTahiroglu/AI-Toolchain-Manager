@@ -139,6 +139,8 @@ export function ReviewQueue({ projects, inventory, onOpen }: {
         {queue.projects !== "loading" && queue.projects !== "failed" && queue.evidence === "failed" && (
           <p className="bad-text">⚠ Kayıtlı envanter okunamadı; gözlemden doğan nedenler dahil değil ({queue.evidenceUnavailableFor} kabul edilmiş istek için kayıtlı gözlem bilinmiyor). Bu, “taranmadı” veya “bulunamadı” anlamına gelmez.</p>
         )}
+        {queue.projects === "refreshing" && <p className="bad-text">⚠ Kararlar yeniden okunuyor; gösterilenler kesin değil, okuma bitince değişebilir.</p>}
+        {queue.evidence === "refreshing" && <p className="bad-text">⚠ Kayıtlı envanter yeniden okunuyor; gözlemden doğan nedenler kesin değil.</p>}
         {queue.projects === "old" && <p className="bad-text">⚠ Kararlar yenilenemedi; gösterilenler önceki başarılı okumadan ve eski olabilir.</p>}
         {queue.evidence === "old" && <p className="bad-text">⚠ Kayıtlı envanter yenilenemedi; gözlemden doğan nedenler önceki başarılı okumadan ve eski olabilir.</p>}
       </div>

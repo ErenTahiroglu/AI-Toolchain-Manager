@@ -334,3 +334,75 @@ describe("filtering", () => {
     expect(q.items).toHaveLength(3);
   });
 });
+
+describe("P05-RT-01: a read that is still running is never final", () => {
+  const NONE = "incelenmesi gereken öğe yok";
+  const clean = () => [project("a", [wish("alfa")])]; // an accepted wish with a present_current row: nothing to review
+  const cleanInv = () => inv(req("present_current"));
+  const pending = <T,>(data: T) => ({ data, error: null, loading: true });
+
+  it("projects refreshing (previous good data retained): not complete, no 'nothing to review', marked provisional", () => {
+    const q = deriveReview(pending(clean()), cleanInv(), NOW);
+    expect(q.projects).toBe("refreshing");
+    expect(q.evidence).toBe("ready");
+    expect(q.complete).toBe(false);
+    expect(reviewHeadline(q)).not.toContain(NONE);
+    expect(reviewHeadline(q)).toBe("En az 0 öğe incelenmeyi bekliyor (okuma sürüyor; sonuç kesin değil).");
+  });
+
+  it("inventory refreshing (previous good data retained): same", () => {
+    const q = deriveReview(ready(clean()), pending(cleanInv().data), NOW);
+    expect(q.projects).toBe("ready");
+    expect(q.evidence).toBe("refreshing");
+    expect(q.complete).toBe(false);
+    expect(reviewHeadline(q)).not.toContain(NONE);
+    expect(reviewHeadline(q)).toBe("En az 0 öğe incelenmeyi bekliyor (okuma sürüyor; sonuç kesin değil).");
+  });
+
+  it("both refreshing: same", () => {
+    const q = deriveReview(pending(clean()), pending(cleanInv().data), NOW);
+    expect([q.projects, q.evidence, q.complete]).toEqual(["refreshing", "refreshing", false]);
+    expect(reviewHeadline(q)).not.toContain(NONE);
+  });
+
+  it("retained NON-empty data is still shown, but the count is 'at least' and marked not final", () => {
+    const withReason = [project("a", [wish("alfa", { materialChange: true })])];
+    for (const [p, i] of [[pending(withReason), cleanInv()], [ready(withReason), pending(cleanInv().data)], [pending(withReason), pending(cleanInv().data)]] as const) {
+      const q = deriveReview(p, i, NOW);
+      expect(q.items).toHaveLength(1);
+      expect(q.complete).toBe(false);
+      expect(reviewHeadline(q)).toBe("En az 1 öğe incelenmeyi bekliyor (okuma sürüyor; sonuç kesin değil).");
+    }
+  });
+
+  it("a refresh that already failed is 'old', not 'refreshing', even while a retry runs; a first-read failure and a first read in progress keep their own phases", () => {
+    expect(deriveReview({ data: clean(), error: ERR, loading: true }, cleanInv(), NOW).projects).toBe("old");
+    expect(deriveReview(ready(clean()), { data: cleanInv().data, error: ERR, loading: true }, NOW).evidence).toBe("old");
+    expect(deriveReview({ data: null, error: ERR, loading: true }, cleanInv(), NOW).projects).toBe("failed");
+    expect(deriveReview({ data: null, error: null, loading: true }, cleanInv(), NOW).projects).toBe("loading");
+    expect(deriveReview(ready(clean()), { data: null, error: ERR, loading: true }, NOW).evidence).toBe("failed");
+  });
+
+  it("a complete answer needs BOTH sources: data present, no error, not loading - checked over every combination", () => {
+    const states = [
+      { data: null, error: null, loading: false }, { data: null, error: null, loading: true },
+      { data: null, error: ERR, loading: false }, { data: null, error: ERR, loading: true },
+      { data: "d", error: null, loading: false }, { data: "d", error: null, loading: true },
+      { data: "d", error: ERR, loading: false }, { data: "d", error: ERR, loading: true },
+    ] as const;
+    const finished = (s: (typeof states)[number]) => s.data !== null && s.error === null && s.loading === false;
+    for (const a of states) {
+      for (const b of states) {
+        const q = deriveReview({ ...a, data: a.data === null ? null : clean() }, { ...b, data: b.data === null ? null : cleanInv().data }, NOW);
+        expect(q.complete, JSON.stringify([a, b])).toBe(finished(a) && finished(b));
+        if (!q.complete) expect(reviewHeadline(q), JSON.stringify([a, b])).not.toContain(NONE);
+      }
+    }
+  });
+
+  it("only a finished, clean pair of reads says 'nothing to review' (the control)", () => {
+    const q = deriveReview(ready(clean()), cleanInv(), NOW);
+    expect(q.complete).toBe(true);
+    expect(reviewHeadline(q)).toContain(NONE);
+  });
+});
