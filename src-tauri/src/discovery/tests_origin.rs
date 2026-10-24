@@ -462,3 +462,180 @@ fn the_origin_code_has_no_io_process_network_or_write() {
         assert!(!origin_fn.contains(forbidden), "origin_of must not touch the database ({forbidden})");
     }
 }
+
+// ---- P06-RT-01: an observation from the future never gets an age -------------------------------------------------------------------------
+// These go through the PRODUCTION age computation (store::latest_observations -> age_hours -> origin_of -> serialization): a real scan is stored, its
+// `observed_at` is then moved to a chosen instant relative to the real clock, and the inventory is read again. The margins (15 min, 30 min, 49 h)
+// are large against the few seconds a test takes, so there is no sub-second clock edge.
+
+fn stamp_at(offset: chrono::Duration) -> String {
+    (chrono::Utc::now() + offset).to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+/// One accepted `local-cli` preference, one real scan of a stand-in program, then every observation's `observed_at` set to `stamp`.
+fn inventory_with_stamp(stamp: &str) -> store::Inventory {
+    let env = Env::new();
+    let conn = seeded();
+    projects::add_reference(&conn, "proje", "Proje", "").unwrap();
+    projects::set_preference(&conn, "proje", "agent-browser", "local-cli", platform(), "accepted", None).unwrap();
+    env.fake_exe("agent-browser");
+    let auth = Authorization { path_executables: true, ..Default::default() };
+    crate::discovery::run_scan(&conn, &env.roots(), &auth).unwrap();
+    conn.execute("UPDATE discovery_observations SET observed_at = ?1", [stamp]).unwrap();
+    store::inventory(&conn).unwrap()
+}
+
+fn agent_browser(inv: &store::Inventory) -> (&RequestVsObservation, serde_json::Value) {
+    let r = inv.requests.iter().find(|r| r.entry_id == "agent-browser").expect("the request exists");
+    (r, serde_json::to_value(r).unwrap())
+}
+
+#[test]
+fn an_observation_from_the_near_future_has_no_age_through_the_real_computation() {
+    for minutes in [15, 30] {
+        let stamp = stamp_at(chrono::Duration::minutes(minutes));
+        let inv = inventory_with_stamp(&stamp);
+        let (r, wire) = agent_browser(&inv);
+        let o = r.origin.as_ref().expect("an observation was selected");
+        assert_eq!(o.observed_at.as_deref(), Some(stamp.as_str()), "{minutes} min ahead: the stamp is valid and shown as stored");
+        assert_eq!(o.age_hours, None, "{minutes} min ahead: it must not say '0 hours ago'");
+        assert!(wire["origin"]["ageHours"].is_null(), "{minutes} min ahead: serialized as null, got {}", wire["origin"]);
+        assert_eq!(wire["origin"]["observedAt"], stamp.as_str());
+        // the stored row itself must not claim an age of zero either
+        assert!(inv.observations.iter().all(|s| s.age_hours < 0), "{:?}", inv.observations.iter().map(|s| s.age_hours).collect::<Vec<_>>());
+        // and nothing else about the answer changed: a not-yet-stale observation is still the current one
+        assert_eq!(r.status, "present_current", "{minutes} min ahead");
+        assert!(r.basis.is_some());
+    }
+}
+
+#[test]
+fn past_observations_keep_their_whole_hour_age_and_invalid_ones_none() {
+    // (offset, expected age, expected status)
+    for (offset, age, status) in [
+        (chrono::Duration::minutes(-30), Some(0), "present_current"),
+        (chrono::Duration::hours(-2), Some(2), "present_current"),
+        (chrono::Duration::hours(-49), Some(49), "previously_present"),
+        (chrono::Duration::hours(-50) - chrono::Duration::minutes(30), Some(50), "previously_present"),
+    ] {
+        let stamp = stamp_at(offset);
+        let inv = inventory_with_stamp(&stamp);
+        let (r, wire) = agent_browser(&inv);
+        let o = r.origin.as_ref().unwrap();
+        assert_eq!((o.observed_at.as_deref(), o.age_hours), (Some(stamp.as_str()), age), "{offset:?}");
+        assert_eq!(r.status, status, "{offset:?}");
+        assert_eq!(wire["origin"]["ageHours"], serde_json::json!(age), "{offset:?}");
+    }
+    for bad in ["garbage", "", "2026-10-24", "2026-10-24T09:00:00"] {
+        let inv = inventory_with_stamp(bad);
+        let (r, wire) = agent_browser(&inv);
+        let o = r.origin.as_ref().expect("still described");
+        assert_eq!((o.observed_at.as_deref(), o.age_hours), (None, None), "{bad:?}");
+        assert!(wire["origin"]["observedAt"].is_null() && wire["origin"]["ageHours"].is_null(), "{bad:?}");
+        assert_eq!(r.status, "previously_present", "an unreadable stamp has always counted as not current: {bad:?}");
+    }
+}
+
+// ---- the same rule, pure and deterministic (an injected reference instant: no clock at all) -----------------------------------------------
+
+fn at(s: &str) -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&chrono::Utc)
+}
+
+#[test]
+fn age_at_a_given_instant_orders_before_it_truncates() {
+    use crate::discovery::store::age_hours_at;
+    let now = at("2026-10-24T12:00:00Z");
+    for (stamp, want) in [
+        ("2026-10-24T12:00:00Z", 0), // equal: accepted, age 0
+        ("2026-10-24T11:59:59Z", 0), // past, under an hour
+        ("2026-10-24T11:30:00Z", 0),
+        ("2026-10-24T11:00:00Z", 1), // exactly one hour ago
+        ("2026-10-24T10:59:59Z", 1),
+        ("2026-10-22T11:00:00Z", 49),     // an older past case
+        ("2026-10-24T14:00:00+02:00", 0), // the same instant written with an offset
+        ("2026-10-24T12:00:01Z", -1),     // one second ahead
+        ("2026-10-24T12:15:00Z", -1),     // 15 minutes ahead - used to read as 0
+        ("2026-10-24T12:30:00Z", -1),     // 30 minutes ahead - used to read as 0
+        ("2026-10-24T12:59:59Z", -1),
+        ("2026-10-24T13:00:00Z", -1),      // exactly an hour ahead
+        ("2026-10-24T14:30:00Z", -2),      // further ahead keeps its (already negative) value
+        ("2026-10-24T14:30:00+02:00", -1), // an offset does not hide that it is ahead
+        ("2999-01-01T00:00:00Z", -(at("2999-01-01T00:00:00Z") - now).num_hours()),
+    ] {
+        assert_eq!(age_hours_at(stamp, now), want, "{stamp}");
+    }
+    for bad in ["", "garbage", "2026-10-24", "2026-10-24T11:00:00", "yesterday"] {
+        assert_eq!(age_hours_at(bad, now), i64::MAX, "{bad:?} stays 'unreadable'");
+    }
+}
+
+#[test]
+fn only_the_sub_hour_future_case_differs_from_the_previous_computation() {
+    use crate::discovery::store::age_hours_at;
+    let now = at("2026-10-24T12:00:00Z");
+    let previous =
+        |s: &str| chrono::DateTime::parse_from_rfc3339(s).map(|t| (now - t.with_timezone(&chrono::Utc)).num_hours()).unwrap_or(i64::MAX);
+    let base = at("2026-10-20T00:00:00Z");
+    let mut seen_changed = 0;
+    for step in 0..(8 * 24 * 60 / 7) {
+        let stamp = (base + chrono::Duration::minutes(step * 7)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let (before, after) = (previous(&stamp), age_hours_at(&stamp, now));
+        let future_under_an_hour = at(&stamp) > now && at(&stamp) - now < chrono::Duration::hours(1);
+        if future_under_an_hour {
+            assert_eq!((before, after), (0, -1), "{stamp}");
+            seen_changed += 1;
+        } else {
+            assert_eq!(before, after, "{stamp}: nothing but the sub-hour future may change");
+        }
+    }
+    assert!(seen_changed > 5, "the sweep reaches the case it is about ({seen_changed})");
+}
+
+#[test]
+fn the_winner_decides_whether_an_age_is_shown_not_a_competing_row() {
+    use crate::discovery::store::age_hours_at;
+    let now = at("2026-10-24T12:00:00Z");
+    let w = PLATFORM_WINDOWS;
+    let with_stamp = |id: i64, alias: Option<&str>, stamp: &str| {
+        let mut o = ob(id, alias, SURFACE, w, "present", true);
+        o.observed_at = stamp.into();
+        o.age_hours = age_hours_at(stamp, now); // the production computation, at a fixed instant
+        o
+    };
+    let future = "2026-10-24T12:30:00Z";
+    let past = "2026-10-24T09:00:00Z";
+
+    // computer-wide winner (higher id) from the future; the project-specific loser is a normal past row
+    let (status, _, basis, got) = classify(&[with_stamp(4, Some("p"), past), with_stamp(9, None, future)]);
+    let got = got.unwrap();
+    assert_eq!((status.as_str(), basis.unwrap().scan_id.as_str()), ("present_current", "scan-9"));
+    assert_eq!((got.project_relation, got.observed_at.as_deref(), got.age_hours), (ProjectRelation::ComputerWide, Some(future), None));
+
+    // project-specific winner from the future; the computer-wide loser is a past row with a real age
+    let (_, _, basis, got) = classify(&[with_stamp(9, Some("p"), future), with_stamp(4, None, past)]);
+    let got = got.unwrap();
+    assert_eq!(basis.unwrap().scan_id, "scan-9");
+    assert_eq!((got.project_relation, got.observed_at.as_deref(), got.age_hours), (ProjectRelation::ProjectSpecific, Some(future), None));
+
+    // and the other way round: a past winner is described by its own age, a future loser leaks nothing into it
+    let (_, _, basis, got) = classify(&[with_stamp(9, Some("p"), past), with_stamp(4, None, future)]);
+    let got = got.unwrap();
+    assert_eq!(basis.unwrap().scan_id, "scan-9");
+    assert_eq!((got.observed_at.as_deref(), got.age_hours), (Some(past), Some(3)));
+
+    // a historical winner (not current) keeps its status and its own age
+    let mut old = with_stamp(2, None, "2026-10-22T11:00:00Z");
+    old.current = false;
+    old.not_current_reason = Some("eski".into());
+    let (status, _, _, got) = classify(&[old]);
+    assert_eq!(status, "previously_present");
+    assert_eq!(got.unwrap().age_hours, Some(49));
+
+    // status, note and selected scan do not depend on the stamp at all: only the origin's age differs
+    let same = |stamp: &str| {
+        let (s, n, b, _) = classify(&[with_stamp(1, None, stamp)]);
+        (s, n, b.map(|b| b.scan_id))
+    };
+    assert_eq!(same(future), same(past));
+}

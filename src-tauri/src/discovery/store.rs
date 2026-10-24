@@ -366,8 +366,22 @@ pub struct Inventory {
 }
 
 fn age_hours(observed_at: &str) -> i64 {
+    age_hours_at(observed_at, chrono::Utc::now())
+}
+
+/// Whole hours between `observed_at` and `now`; `i64::MAX` when the stamp is not RFC 3339. The ordering is decided BEFORE the hours are truncated:
+/// `num_hours()` rounds toward zero, so a stamp 30 minutes in the future would otherwise read as "0 hours" and be indistinguishable from a fresh one.
+/// An instant after `now` is therefore always negative (at most -1), so `origin_of` and every `age >= …` test treat it as "no age".
+pub(crate) fn age_hours_at(observed_at: &str, now: chrono::DateTime<chrono::Utc>) -> i64 {
     chrono::DateTime::parse_from_rfc3339(observed_at)
-        .map(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_hours())
+        .map(|t| {
+            let elapsed = now - t.with_timezone(&chrono::Utc);
+            if elapsed < chrono::Duration::zero() {
+                elapsed.num_hours().min(-1)
+            } else {
+                elapsed.num_hours()
+            }
+        })
         .unwrap_or(i64::MAX)
 }
 
