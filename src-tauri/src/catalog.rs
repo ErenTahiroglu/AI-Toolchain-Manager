@@ -16,9 +16,12 @@ use serde_json::{json, Value};
 const SEED_JSON: &str = include_str!("../../data/catalog-seed.json");
 /// Phase 1B candidates (four entries) — same record schema plus application wrapper fields.
 const CANDIDATES_JSON: &str = include_str!("../../data/catalog-candidates-1b.json");
+/// CATALOG-01 candidates (three entries, Issue #26) — an additive file in the same wrapper shape; the two files above are untouched.
+const CATALOG01_JSON: &str = include_str!("../../data/catalog-candidates-c01.json");
 pub const PHASE0_TOOL_COUNT: usize = 9;
 pub const CANDIDATE_COUNT: usize = 4;
-pub const SEED_ENTRY_COUNT: usize = PHASE0_TOOL_COUNT + CANDIDATE_COUNT;
+pub const CATALOG01_COUNT: usize = 3;
+pub const SEED_ENTRY_COUNT: usize = PHASE0_TOOL_COUNT + CANDIDATE_COUNT + CATALOG01_COUNT;
 
 pub const KINDS: &[&str] = &["executable_tool", "agent_plugin", "skill_collection", "prompt_source"];
 const EXECUTION_POLICIES: &[&str] = &["manual-only", "blocked-until-scoped-authorization"];
@@ -190,10 +193,19 @@ fn nine_seed_entries() -> AppResult<Vec<SeedEntry>> {
 }
 
 fn candidate_seed_entries() -> AppResult<Vec<SeedEntry>> {
-    let root: Value = serde_json::from_str(CANDIDATES_JSON).map_err(|_| seed_error("aday JSON okunamadı"))?;
+    wrapped_seed_entries(CANDIDATES_JSON, CANDIDATE_COUNT, "dört aday bekleniyordu")
+}
+
+fn catalog01_seed_entries() -> AppResult<Vec<SeedEntry>> {
+    wrapped_seed_entries(CATALOG01_JSON, CATALOG01_COUNT, "üç aday bekleniyordu")
+}
+
+/// Shared by every wrapped candidate file (`entryKind` / `executionPolicy` / `purpose` wrapper around a schema-v2 record).
+fn wrapped_seed_entries(raw: &str, expected: usize, count_error: &str) -> AppResult<Vec<SeedEntry>> {
+    let root: Value = serde_json::from_str(raw).map_err(|_| seed_error("aday JSON okunamadı"))?;
     let records = root.get("records").and_then(Value::as_array).ok_or_else(|| seed_error("aday records yok"))?;
-    if records.len() != CANDIDATE_COUNT {
-        return Err(seed_error("dört aday bekleniyordu"));
+    if records.len() != expected {
+        return Err(seed_error(count_error));
     }
     records
         .iter()
@@ -216,6 +228,7 @@ fn candidate_seed_entries() -> AppResult<Vec<SeedEntry>> {
 fn all_seed_entries() -> AppResult<Vec<SeedEntry>> {
     let mut all = nine_seed_entries()?;
     all.extend(candidate_seed_entries()?);
+    all.extend(catalog01_seed_entries()?);
     let mut ids = std::collections::BTreeSet::new();
     let mut keys = std::collections::BTreeSet::new();
     for e in &all {
@@ -386,14 +399,44 @@ pub fn migrate_phase1a_data(tx: &Transaction) -> AppResult<()> {
     Ok(())
 }
 
+/// How many shipped seed entries are legitimately absent because the user already owns their id or their live source (a link added earlier).
+/// Such an entry is never replaced or duplicated, so the "all seeds present" health invariant must count it as explained, not as missing.
+pub fn seed_entries_held_by_the_user(conn: &Connection) -> AppResult<usize> {
+    let mut held = 0;
+    for e in all_seed_entries()? {
+        let seeded: Option<i64> = conn
+            .query_row("SELECT 1 FROM catalog_entries WHERE entry_id = ?1 AND origin = 'seed'", [&e.entry_id], |r| r.get(0))
+            .optional()?;
+        if seeded.is_some() {
+            continue;
+        }
+        let owned: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM catalog_entries WHERE origin <> 'seed' AND (entry_id = ?1 OR (source_key = ?2 AND removed_at IS NULL))",
+                rusqlite::params![e.entry_id, e.source_key],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if owned.is_some() {
+            held += 1;
+        }
+    }
+    Ok(held)
+}
+
 pub fn seed_all(conn: &Connection) -> AppResult<()> {
     let entries = all_seed_entries()?;
     let now = now_utc();
     let tx = conn.unchecked_transaction()?;
     for e in &entries {
-        let exists: Option<i64> =
-            tx.query_row("SELECT 1 FROM catalog_entries WHERE entry_id = ?1", [&e.entry_id], |r| r.get(0)).optional()?;
-        if exists.is_none() {
+        let existing_origin: Option<String> =
+            tx.query_row("SELECT origin FROM catalog_entries WHERE entry_id = ?1", [&e.entry_id], |r| r.get(0)).optional()?;
+        if matches!(existing_origin.as_deref(), Some(origin) if origin != "seed") {
+            // The user already owns this id (an entry added from a link, possibly since removed): theirs wins, nothing is merged, said once per start.
+            diagnostics::log(&tx, "warn", "catalog", "SEED_SOURCE_TAKEN", &format!("tohum kaydı atlandı: {}", e.entry_id))?;
+            continue;
+        }
+        if existing_origin.is_none() {
             // A user-added live entry may already own this source; never fight it, and say so.
             let taken: Option<String> = tx
                 .query_row("SELECT entry_id FROM catalog_entries WHERE source_key = ?1 AND removed_at IS NULL", [&e.source_key], |r| {
@@ -501,7 +544,10 @@ fn limitations(e: &CatalogEntry) -> Vec<String> {
     if e.metadata_state == "not-fetched" {
         out.push("Çevrimdışı kayıt: yalnızca bağlantıdan türetilen bilgiler var; lisans, sürüm ve uyumluluk bilinmiyor.".to_string());
     } else {
-        out.push("Bilgiler 2026-10-17 tarihli herkese açık belgelerden alındı; bağımsız inceleme yapılmadı.".to_string());
+        // the date the record itself says it was read (older records fall back to the date this text always named)
+        let read_on =
+            e.record.pointer("/sourceSnapshot/observedAt").and_then(Value::as_str).and_then(|s| s.get(..10)).unwrap_or("2026-10-17");
+        out.push(format!("Bilgiler {read_on} tarihli herkese açık belgelerden alındı; bağımsız inceleme yapılmadı."));
     }
     match e.review_state.as_str() {
         "quarantined" => out.push("Karantinada: kapsamlı yazılı yetki olmadan hiçbir çalıştırma yapılamaz.".to_string()),
@@ -901,14 +947,14 @@ mod tests {
             )
         };
         let first = snapshot(&conn);
-        assert_eq!(first, (13, 3, 6, 3, 6));
+        assert_eq!(first, (16, 3, 6, 3, 6)); // 9 Phase 0 + 4 Phase 1B + 3 CATALOG-01
         set_enabled(&conn, "agent-browser", false).unwrap();
         remove_entry(&conn, "gitleaks").unwrap();
         // The user resets a demonstration decision; a restart must not bring it back.
         conn.execute("DELETE FROM project_preferences WHERE entry_id = 'graphify'", []).unwrap();
         seed_all(&conn).unwrap();
         seed_all(&conn).unwrap();
-        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 13);
+        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 16);
         assert_eq!(count(&conn, "SELECT count(*) FROM project_preferences"), 5);
         assert!(!get_entry(&conn, "agent-browser").unwrap().enabled);
         assert!(get_entry(&conn, "gitleaks").unwrap().removed_at.is_some());
@@ -959,7 +1005,7 @@ mod tests {
             add_entry(&conn, "https://github.com/vercel-labs/Agent-Browser", "executable_tool", "").unwrap_err().code,
             "ENTRY_DUPLICATE"
         );
-        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 14);
+        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 17);
         let preview = preview_url(&conn, "https://github.com/acme/WIDGET").unwrap();
         assert!(!preview.ok && preview.duplicate_of.is_some());
     }
@@ -984,7 +1030,7 @@ mod tests {
             assert!(add_entry(&conn, bad, "executable_tool", "").is_err(), "accepted {bad}");
             assert!(!preview_url(&conn, bad).unwrap().ok, "preview ok for {bad}");
         }
-        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 13);
+        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 16);
         assert_eq!(add_entry(&conn, "https://github.com/acme/widget", "everything", "").unwrap_err().code, "KIND_INVALID");
     }
 

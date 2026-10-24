@@ -104,6 +104,8 @@ fn check_invariants(conn: &Connection) -> CheckResult {
     const ID: &str = "catalog-invariants";
     const TITLE: &str = "Katalog ve tercih güvenlik kuralları";
     let seeded = scalar(conn, "SELECT count(*) FROM catalog_entries WHERE origin = 'seed'");
+    // a shipped entry whose id or live source the user already owns (a link added earlier) is never replaced: explained, not missing
+    let held = crate::catalog::seed_entries_held_by_the_user(conn).ok().map(|n| n as i64);
     let claims =
         scalar(conn, "SELECT count(*) FROM catalog_entries WHERE install_state <> 'not_managed' OR verification_state <> 'unknown'");
     let bad_prefs = scalar(
@@ -136,7 +138,7 @@ fn check_invariants(conn: &Connection) -> CheckResult {
         })
         .unwrap_or(false);
     let ok = fingerprints_ok
-        && seeded == Some(crate::catalog::SEED_ENTRY_COUNT as i64)
+        && seeded.zip(held).map(|(s, h)| s + h) == Some(crate::catalog::SEED_ENTRY_COUNT as i64)
         && claims == Some(0)
         && bad_prefs == Some(0)
         && bad_kind == Some(0)
@@ -149,7 +151,11 @@ fn check_invariants(conn: &Connection) -> CheckResult {
     if ok {
         check(
             ID, TITLE, "passed",
-            "13 kaynak kayıtlı; hiçbir araç kurulu veya doğrulanmış görünmüyor; kayıtlı kararlar yalnızca istek durumudur; Strix karantinada ve çalıştırma kapalı; eski Faz 1A tabloları donduruldu.",
+            format!(
+                "{} kaynak kayıtlı{}; hiçbir araç kurulu veya doğrulanmış görünmüyor; kayıtlı kararlar yalnızca istek durumudur; Strix karantinada ve çalıştırma kapalı; eski Faz 1A tabloları donduruldu.",
+                seeded.unwrap_or(0) + held.unwrap_or(0),
+                if held.unwrap_or(0) > 0 { " (bir kısmı sizin eklediğiniz kayıtlardır; aynı kaynaklı tohum kaydı yerine geçmedi)" } else { "" }
+            ),
             None,
         )
     } else {

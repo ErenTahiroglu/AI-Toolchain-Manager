@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "snapshotDate": "2026-10-24",
+  "note": "CATALOG-01 candidates (Issue #26). Metadata only: every field is the publisher's own description read from the pinned commit, never a review, a test or an authorisation. Each `record` conforms to schemas/catalog-entry.schema.json v2. `entryKind`, `pluginIdentity`, `sourcePath`, `purpose` and `executionPolicy` are application-level wrapper fields, as in catalog-candidates-1b.json.",
+  "records": [
+    {
+      "entryKind": "executable_tool",
+      "pluginIdentity": null,
+      "sourcePath": null,
+      "purpose": "Web uygulamalarını gerçek tarayıcılarda otomatikleştirmek ve uçtan uca test etmek için Microsoft çatısı (test çalıştırıcı ve kitaplık). Bu depo bir MCP sunucusu değildir; tarayıcı açar ve tarayıcı çalışma zamanı indirir. Bu uygulama hiçbirini yapmaz.",
+      "executionPolicy": "manual-only",
+      "record": {
+        "schemaVersion": 2,
+        "toolId": "microsoft-playwright",
+        "displayName": "Microsoft Playwright",
+        "repository": { "url": "https://github.com/microsoft/playwright", "owner": "microsoft", "name": "playwright" },
+        "sourceSnapshot": { "observedRef": "main", "immutableCommit": "91a765d1681cb3eeb0d0fb89fefec3cf0d21bd9b", "releaseVersion": null, "revisionState": "immutable-commit", "observedAt": "2026-10-24T00:00:00Z", "evidenceIds": ["R35"] },
+        "category": "library",
+        "reviewState": "unreviewed",
+        "license": { "state": "known", "spdxId": "Apache-2.0", "evidenceId": "R35" },
+        "targetEvidence": [
+          { "platformTarget": "macos-arm64", "agentSurface": "local-cli", "compatibilityState": "vendor-declared", "evidenceId": "R35", "limitation": "README Cross-Browser table lists macOS for Chromium, WebKit and Firefox; CPU architecture not stated; the framework itself, not executed here." },
+          { "platformTarget": "windows-x64", "agentSurface": "local-cli", "compatibilityState": "vendor-declared", "evidenceId": "R35", "limitation": "README Cross-Browser table lists Windows for Chromium, WebKit and Firefox; CPU architecture not stated; the framework itself, not executed here." },
+          { "platformTarget": "macos-arm64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R35", "limitation": "The README points coding agents to Playwright CLI and Playwright MCP, which live in separate repositories not reviewed here; nothing is documented for this repository on this surface." },
+          { "platformTarget": "windows-x64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R35", "limitation": "The README points coding agents to Playwright CLI and Playwright MCP, which live in separate repositories not reviewed here; nothing is documented for this repository on this surface." },
+          { "platformTarget": "macos-arm64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R35", "limitation": "No Antigravity evidence in the snapshot." },
+          { "platformTarget": "windows-x64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R35", "limitation": "No Antigravity evidence in the snapshot." }
+        ],
+        "installMethods": [{ "methodId": "unknown", "evidenceId": "R35", "publisherPin": "Publisher describes an npm-based setup for each offering (test runner, CLI, MCP server, library) plus a browser-download step; none is an approved method." }],
+        "dependencies": ["Node.js (the version end users need is not established: the root package.json of this monorepo is private)", "Browser runtimes (Chromium, Firefox, WebKit) fetched by the publisher's own browser-install step"],
+        "privilegeClaims": ["Current user account; launches and controls real browsers; can write test results, screenshots, traces and saved sign-in state to disk"],
+        "networkClaims": ["Loads whatever sites the scripts point at, including local or private ones", "Downloads browser runtimes during the publisher's setup step"],
+        "artifactEvidence": null,
+        "verificationClaims": [{ "kind": "function", "state": "publisher-describes", "evidenceId": "R35" }],
+        "privacy": {
+          "telemetry": "unknown",
+          "mayTransmitProjectContent": null,
+          "evidenceId": "R35",
+          "notes": [
+            "This repository is the framework (Playwright Test and the library). Playwright CLI (microsoft/playwright-cli) and Playwright MCP (microsoft/playwright-mcp) are separate repositories, not catalogued or reviewed here; this entry is not a ready-to-use MCP server.",
+            "Saved authentication state, cookies, screenshots and traces can contain private session data.",
+            "Test scripts are code that runs on the user's machine; scripts from an untrusted source must not be run.",
+            "Telemetry is not stated in the README snapshot, so it is unknown."
+          ]
+        },
+        "updatedAt": "2026-10-24T00:00:00Z"
+      }
+    },
+    {
+      "entryKind": "agent_plugin",
+      "pluginIdentity": null,
+      "sourcePath": null,
+      "purpose": "Apify Actor'larını (hazır kazıyıcılar ve otomasyonlar) bir yapay zekâ ajanına MCP aracı olarak sunan hizmet. Actor çalıştırmak üçüncü taraf sitelere erişebilir, girdileri Apify'a gönderir ve ücretli olabilir. Bu uygulama bağlanmaz, anahtar saklamaz.",
+      "executionPolicy": "manual-only",
+      "record": {
+        "schemaVersion": 2,
+        "toolId": "apify-mcp-server",
+        "displayName": "Apify MCP Server",
+        "repository": { "url": "https://github.com/apify/apify-mcp-server", "owner": "apify", "name": "apify-mcp-server" },
+        "sourceSnapshot": { "observedRef": "master", "immutableCommit": "cdf5b23230b26cd42e5d0db81528365f6b9cdc9c", "releaseVersion": null, "revisionState": "immutable-commit", "observedAt": "2026-10-24T00:00:00Z", "evidenceIds": ["R36"] },
+        "category": "mcp-server",
+        "reviewState": "unreviewed",
+        "license": { "state": "known", "spdxId": "MIT", "evidenceId": "R36" },
+        "targetEvidence": [
+          { "platformTarget": "macos-arm64", "agentSurface": "local-cli", "compatibilityState": "vendor-declared", "evidenceId": "R36", "limitation": "Local npm stdio package; manifest.json lists darwin, win32 and linux; CPU architecture not stated; needs an Apify token; not executed here." },
+          { "platformTarget": "windows-x64", "agentSurface": "local-cli", "compatibilityState": "vendor-declared", "evidenceId": "R36", "limitation": "Local npm stdio package; manifest.json lists darwin, win32 and linux; CPU architecture not stated; needs an Apify token; not executed here." },
+          { "platformTarget": "macos-arm64", "agentSurface": "claude-code-terminal", "compatibilityState": "vendor-declared", "evidenceId": "R36", "limitation": "README states compatibility with Claude Code; the operating-system list comes from the local package's manifest.json (no CPU architecture); no setup was tested." },
+          { "platformTarget": "windows-x64", "agentSurface": "claude-code-terminal", "compatibilityState": "vendor-declared", "evidenceId": "R36", "limitation": "README states compatibility with Claude Code; the operating-system list comes from the local package's manifest.json (no CPU architecture); no setup was tested." },
+          { "platformTarget": "macos-arm64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R36", "limitation": "README names Claude Code, Claude.ai, Cursor and VS Code, not Antigravity." },
+          { "platformTarget": "windows-x64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R36", "limitation": "README names Claude Code, Claude.ai, Cursor and VS Code, not Antigravity." }
+        ],
+        "installMethods": [{ "methodId": "unknown", "evidenceId": "R36", "publisherPin": "Publisher describes a hosted Streamable HTTP service (sign-in or bearer token) and a local npm stdio package; neither is an approved method." }],
+        "dependencies": ["Node.js >=22.0.0 (local package: package.json and manifest.json)", "Apify account and API token (the local package's manifest marks the token as required)"],
+        "privilegeClaims": ["Acts with the permissions of the connected Apify account or token; its full tool set can also create, change and delete Actors and stored data in that account"],
+        "networkClaims": ["Hosted service at https://mcp.apify.com (informational only, not an authorised endpoint)", "Actors may fetch third-party websites on your behalf and send Actor inputs to Apify"],
+        "artifactEvidence": null,
+        "verificationClaims": [{ "kind": "function", "state": "publisher-describes", "evidenceId": "R36" }],
+        "privacy": {
+          "telemetry": "opt-out",
+          "mayTransmitProjectContent": true,
+          "evidenceId": "R36",
+          "notes": [
+            "Cost: Actor runs use paid compute and can incur variable charges. The README describes discovery calls (search-actors, fetch-actor-details) as free; running an Actor is not.",
+            "No sign-in, token, payment method or billing was authorised here. A token must never be placed in a URL, configuration file, log or test artifact.",
+            "Publisher states telemetry is on by default and can be switched off; the stdio transport also reports errors to Sentry unless telemetry is opted out.",
+            "The hosted server can differ from the open-source local stdio server: the publisher says some features exist only on the hosted one."
+          ]
+        },
+        "updatedAt": "2026-10-24T00:00:00Z"
+      }
+    },
+    {
+      "entryKind": "agent_plugin",
+      "pluginIdentity": null,
+      "sourcePath": null,
+      "purpose": "Exa web arama, sayfa okuma ve çok adımlı araştırma araçlarını bir yapay zekâ ajanına MCP hizmeti olarak sunar. Aramalar ve adresler üçüncü taraf hizmete gönderilir; ücretli özellikler olabilir. Bu uygulama bağlanmaz, anahtar saklamaz.",
+      "executionPolicy": "manual-only",
+      "record": {
+        "schemaVersion": 2,
+        "toolId": "exa-mcp-server",
+        "displayName": "Exa MCP Server",
+        "repository": { "url": "https://github.com/exa-labs/exa-mcp-server", "owner": "exa-labs", "name": "exa-mcp-server" },
+        "sourceSnapshot": { "observedRef": "main", "immutableCommit": "0b499f095c4ca145eee07b09137641c037d58449", "releaseVersion": null, "revisionState": "immutable-commit", "observedAt": "2026-10-24T00:00:00Z", "evidenceIds": ["R37"] },
+        "category": "mcp-server",
+        "reviewState": "unreviewed",
+        "license": { "state": "known", "spdxId": "MIT", "evidenceId": "R37" },
+        "targetEvidence": [
+          { "platformTarget": "macos-arm64", "agentSurface": "local-cli", "compatibilityState": "unknown", "evidenceId": "R37", "limitation": "A local npm package exists (Node >=20) but the snapshot lists no operating system." },
+          { "platformTarget": "windows-x64", "agentSurface": "local-cli", "compatibilityState": "unknown", "evidenceId": "R37", "limitation": "A local npm package exists (Node >=20) but the snapshot lists no operating system." },
+          { "platformTarget": "macos-arm64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R37", "limitation": "README documents a Claude plugin route but names no operating system; behaviour on this OS is neither documented nor tested." },
+          { "platformTarget": "windows-x64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R37", "limitation": "README documents a Claude plugin route but names no operating system; behaviour on this OS is neither documented nor tested." },
+          { "platformTarget": "macos-arm64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R37", "limitation": "README lists Google Antigravity (manual mcp_config.json entry) without naming the IDE, CLI or Antigravity 2 surface, or an operating system." },
+          { "platformTarget": "windows-x64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R37", "limitation": "README lists Google Antigravity (manual mcp_config.json entry) without naming the IDE, CLI or Antigravity 2 surface, or an operating system." }
+        ],
+        "installMethods": [
+          { "methodId": "native-plugin-manager", "evidenceId": "R37", "publisherPin": "exa@claude-plugins-official (stated by the publisher; not checked against the marketplace)" },
+          { "methodId": "unknown", "evidenceId": "R37", "publisherPin": "Publisher also describes a hosted Streamable HTTP service and a local npm package; neither is an approved method." }
+        ],
+        "dependencies": ["Node.js >=20.0.0 (local npm package only; the hosted service needs no local runtime)"],
+        "privilegeClaims": ["Sends your search queries, page addresses and (with Exa Agent) task prompts to a third-party service; optional account sign-in"],
+        "networkClaims": ["Hosted Streamable HTTP service at https://mcp.exa.ai/mcp (informational only, not an authorised endpoint)", "Searches and page fetches send queries and URLs to Exa; the README says anonymous use is rate-limited"],
+        "artifactEvidence": null,
+        "verificationClaims": [{ "kind": "function", "state": "publisher-describes", "evidenceId": "R37" }],
+        "privacy": {
+          "telemetry": "unknown",
+          "mayTransmitProjectContent": true,
+          "evidenceId": "R37",
+          "notes": [
+            "Paid features or credits may apply: the README says Exa Agent needs sign-in or an API key. No account, sign-in or key was authorised here.",
+            "The README shows that an API key can be put in the URL. That must never be done: URLs end up in configuration files and logs. This catalog stores and accepts no key.",
+            "The repository is also an agent plugin with skills (search, exa-agent). A plugin or skill distribution is not the same thing as an installed MCP server.",
+            "Telemetry is not stated in the README snapshot, so it is unknown."
+          ]
+        },
+        "updatedAt": "2026-10-24T00:00:00Z"
+      }
+    }
+  ]
+}
