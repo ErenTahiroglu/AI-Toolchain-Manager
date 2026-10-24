@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { InventoryRead } from "./observation";
 import { EVIDENCE_REVIEW_STATUSES, deriveReview, filterItems, parseRfc3339, reviewHeadline, reviewKey, type ProjectsRead } from "./review";
-import { emptyInventory, makeRequest, pref } from "./test/backend";
+import { emptyInventory, makeRequest, originOf, pref } from "./test/backend";
 import type { AppError, Inventory, PreferenceView, ProjectView, RequestStatus } from "./types";
 
 const NOW = Date.UTC(2026, 9, 24, 12, 0, 0); // 2026-10-24T12:00:00Z
@@ -64,7 +64,7 @@ describe("every reason, alone", () => {
     // next to a real reason it is carried as a plain stored finding
     const both = one(wish("alfa", { materialChange: true }), inv(req("present_current")));
     expect(both.items[0].reasons).toEqual([{ code: "material_change" }]);
-    expect(both.items[0].observation).toEqual({ status: "present_current", scanFinishedAt: "2026-10-23T09:00:00Z" });
+    expect(both.items[0].observation).toEqual({ status: "present_current", scanFinishedAt: "2026-10-23T09:00:00Z", origin: originOf() }); // the origin descriptor is carried through unchanged
   });
 
   it("the review statuses are exactly the ones the backend defines as not-current-or-negative; present_current is not among them", () => {
@@ -254,7 +254,7 @@ describe("evidence that is missing, ambiguous, unrecognised, pending or failed",
     expect(q.evidenceUnavailableFor).toBe(1);
     expect(q.items).toEqual([]);
     expect(q.uncertain).toEqual([]);
-    expect(reviewHeadline(q)).toContain("En az 0");
+    expect(reviewHeadline(q)).toContain("Eldeki geçici görüntüde 0 öğe var");
     expect(reviewHeadline(q)).not.toContain("incelenmesi gereken öğe yok");
   });
 
@@ -264,7 +264,7 @@ describe("evidence that is missing, ambiguous, unrecognised, pending or failed",
     expect(q.complete).toBe(false);
     expect(q.evidenceUnavailableFor).toBe(2);
     expect(q.items).toHaveLength(1); // the decision-based reason does not depend on the inventory
-    expect(reviewHeadline(q)).toMatch(/^En az 1 /);
+    expect(reviewHeadline(q)).toMatch(/^Eldeki geçici görüntüde 1 öğe var; /);
   });
 
   it("failed refresh after a good read keeps the earlier classification but the queue is no longer complete", () => {
@@ -272,7 +272,7 @@ describe("evidence that is missing, ambiguous, unrecognised, pending or failed",
     expect(q.evidence).toBe("old");
     expect(q.complete).toBe(false);
     expect(q.items[0].reasons).toEqual([{ code: "evidence", status: "previously_present" }]);
-    expect(reviewHeadline(q)).toMatch(/^En az 1 /);
+    expect(reviewHeadline(q)).toMatch(/^Eldeki geçici görüntüde 1 öğe var; /);
   });
 
   it("projects loading / failed / old", () => {
@@ -347,7 +347,7 @@ describe("P05-RT-01: a read that is still running is never final", () => {
     expect(q.evidence).toBe("ready");
     expect(q.complete).toBe(false);
     expect(reviewHeadline(q)).not.toContain(NONE);
-    expect(reviewHeadline(q)).toBe("En az 0 öğe incelenmeyi bekliyor (okuma sürüyor; sonuç kesin değil).");
+    expect(reviewHeadline(q)).toBe("Eldeki geçici görüntüde 0 öğe var; okuma sürüyor, sayı artabilir veya azalabilir (sonuç kesin değil).");
   });
 
   it("inventory refreshing (previous good data retained): same", () => {
@@ -356,7 +356,7 @@ describe("P05-RT-01: a read that is still running is never final", () => {
     expect(q.evidence).toBe("refreshing");
     expect(q.complete).toBe(false);
     expect(reviewHeadline(q)).not.toContain(NONE);
-    expect(reviewHeadline(q)).toBe("En az 0 öğe incelenmeyi bekliyor (okuma sürüyor; sonuç kesin değil).");
+    expect(reviewHeadline(q)).toBe("Eldeki geçici görüntüde 0 öğe var; okuma sürüyor, sayı artabilir veya azalabilir (sonuç kesin değil).");
   });
 
   it("both refreshing: same", () => {
@@ -365,13 +365,32 @@ describe("P05-RT-01: a read that is still running is never final", () => {
     expect(reviewHeadline(q)).not.toContain(NONE);
   });
 
-  it("retained NON-empty data is still shown, but the count is 'at least' and marked not final", () => {
+  it("retained NON-empty data is still shown, but the count is a provisional snapshot count (not 'at least') and marked not final", () => {
     const withReason = [project("a", [wish("alfa", { materialChange: true })])];
     for (const [p, i] of [[pending(withReason), cleanInv()], [ready(withReason), pending(cleanInv().data)], [pending(withReason), pending(cleanInv().data)]] as const) {
       const q = deriveReview(p, i, NOW);
       expect(q.items).toHaveLength(1);
       expect(q.complete).toBe(false);
-      expect(reviewHeadline(q)).toBe("En az 1 öğe incelenmeyi bekliyor (okuma sürüyor; sonuç kesin değil).");
+      expect(reviewHeadline(q)).toBe("Eldeki geçici görüntüde 1 öğe var; okuma sürüyor, sayı artabilir veya azalabilir (sonuç kesin değil).");
+    }
+  });
+
+  it("P05-RT-02: six cached items that become five - the provisional wording never promises a lower bound, and the final count is exact", () => {
+    const six = Array.from({ length: 6 }, (_, i) => wish("t" + i, { materialChange: true }));
+    const five = six.slice(0, 5);
+    const during = deriveReview(pending([project("a", six)]), cleanInv(), NOW);
+    expect(during.items).toHaveLength(6);
+    expect(reviewHeadline(during)).toBe("Eldeki geçici görüntüde 6 öğe var; okuma sürüyor, sayı artabilir veya azalabilir (sonuç kesin değil).");
+    expect(reviewHeadline(during)).not.toMatch(/En az|at least/i);
+    expect(reviewHeadline(during)).not.toMatch(/^6 öğe incelenmeyi bekliyor\.$/); // not the exact-count sentence either
+    const after = deriveReview(ready([project("a", five)]), cleanInv(), NOW);
+    expect(after.complete).toBe(true);
+    expect(reviewHeadline(after)).toBe("5 öğe incelenmeyi bekliyor.");
+    // every incomplete phase, with a non-zero retained count, uses the provisional wording and never "En az"
+    const failedProjects = { data: [project("a", six)], error: ERR, loading: false };
+    const failedInventory = { data: cleanInv().data, error: ERR, loading: false };
+    for (const q of [deriveReview(failedProjects, cleanInv(), NOW), deriveReview(ready([project("a", six)]), failedInventory, NOW)]) {
+      expect(reviewHeadline(q)).toBe("Eldeki geçici görüntüde 6 öğe var; liste eksik veya eski olabilir, sayı artabilir veya azalabilir (sonuç kesin değil).");
     }
   });
 

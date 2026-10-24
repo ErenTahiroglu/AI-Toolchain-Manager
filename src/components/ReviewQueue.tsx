@@ -6,6 +6,7 @@ import { formatTime, observedLabel, platformLabel, surfaceLabel } from "../label
 import { deriveReview, filterItems, reviewHeadline, type ReasonFilter, type ReviewItem, type ReviewReason, type UncertainReason } from "../review";
 import type { Inventory, ProjectView } from "../types";
 import { workspaceDecisionLabel, type TargetRequest } from "../workspace";
+import { EvidenceOriginNote } from "./EvidenceOriginNote";
 import type { LoadState } from "./ProjectToolWorkspace";
 
 const EVIDENCE_GLOSS: Record<string, string> = {
@@ -68,6 +69,7 @@ function Item({ item, onOpen }: { item: ReviewItem; onOpen: (r: TargetRequest & 
           {item.observation.scanFinishedAt ? ` · dayanak tarama: ${formatTime(item.observation.scanFinishedAt)}` : ""}
         </p>
       )}
+      {item.observation && <EvidenceOriginNote origin={item.observation.origin} hasBasis={item.observation.scanFinishedAt !== null} />}
       {item.openable ? (
         <p className="actions">
           <button type="button" className="secondary" onClick={() => onOpen({ alias: item.alias, platform: item.platform, surface: item.surface, entryId: item.entryId })}>

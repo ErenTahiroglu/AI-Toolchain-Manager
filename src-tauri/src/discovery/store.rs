@@ -299,6 +299,41 @@ pub struct ScanRef {
     pub authorized_fingerprint: bool,
 }
 
+/// How the selected observation relates to the project the preference belongs to. Taken from the observation's own `project_alias` only
+/// (not from its `scope` column, and not from the other candidates).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectRelation {
+    /// The observation carries this preference's project alias.
+    ProjectSpecific,
+    /// The observation carries no project alias: a computer-wide lookup that applies to every project.
+    ComputerWide,
+}
+
+/// How the selected observation relates to the agent surface the preference asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SurfaceRelation {
+    /// The observation's agent surface is the requested one.
+    ExactSurface,
+    /// The observation is a computer-level program lookup (`local-cli`) standing in for a different requested surface.
+    LocalCliFallback,
+}
+
+/// Where the evidence behind a status came from, described from the ONE observation `classify_request` selected (never from the candidate set).
+/// A descriptor of the evidence, not a verdict about the tool: it never says installed, working, verified, active or supported.
+/// Deliberately small: no path, location, evidence text, fingerprint or version.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceOrigin {
+    pub project_relation: ProjectRelation,
+    pub surface_relation: SurfaceRelation,
+    /// The selected observation's `observed_at`, only when it is a valid RFC 3339 timestamp; otherwise None (never repaired or guessed).
+    pub observed_at: Option<String>,
+    /// Whole hours between `observed_at` and the moment the inventory was read, only when that timestamp is valid and not in the future.
+    pub age_hours: Option<i64>,
+}
+
 /// What the user asked for (one accepted preference) next to what the scans saw, never merged.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -315,6 +350,9 @@ pub struct RequestVsObservation {
     pub note: String,
     /// The scan the status is based on, with the permissions it had. None for not_scanned.
     pub basis: Option<ScanRef>,
+    /// Where the selected observation came from (project-specific or computer-wide; exact surface or `local-cli` fallback). None exactly when
+    /// there is no selected observation (`not_scanned`, `platform_mismatch`): then no scope is guessed.
+    pub origin: Option<EvidenceOrigin>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -640,7 +678,24 @@ fn scan_ref(o: &StoredObservation) -> ScanRef {
     }
 }
 
-/// Pure classification of one accepted preference against the stored observations.
+/// Describes the observation that was selected for a preference. `o` has already passed the relevance filter of `classify_request`, so its
+/// `project_alias` is either None or equal to the preference's alias, and its surface is either the requested one or `local-cli`.
+fn origin_of(o: &StoredObservation, requested_surface: &str) -> EvidenceOrigin {
+    let valid = chrono::DateTime::parse_from_rfc3339(&o.observed_at).is_ok();
+    EvidenceOrigin {
+        project_relation: if o.project_alias.is_some() { ProjectRelation::ProjectSpecific } else { ProjectRelation::ComputerWide },
+        surface_relation: if o.agent_surface == requested_surface {
+            SurfaceRelation::ExactSurface
+        } else {
+            SurfaceRelation::LocalCliFallback
+        },
+        observed_at: valid.then(|| o.observed_at.clone()),
+        age_hours: (valid && o.age_hours >= 0).then_some(o.age_hours),
+    }
+}
+
+/// Pure classification of one accepted preference against the stored observations. The fourth member describes the selected observation's origin;
+/// it never takes part in the selection.
 #[allow(clippy::too_many_arguments)]
 pub fn classify_request(
     entry_id: &str,
@@ -648,7 +703,7 @@ pub fn classify_request(
     surface: &str,
     platform: &str,
     observations: &[StoredObservation],
-) -> (String, String, Option<ScanRef>) {
+) -> (String, String, Option<ScanRef>, Option<EvidenceOrigin>) {
     // An observation belongs to this preference when it is about the same entry, for this project (or computer-wide),
     // on the same surface — or a computer-level program lookup (`local-cli`), which is not tied to one agent surface.
     let relevant = |o: &&StoredObservation| {
@@ -664,11 +719,13 @@ pub fn classify_request(
                 "not_scanned".into(),
                 "Bu proje, ajan yüzeyi ve platform için henüz bir gözlem yok. Bu, aracın olmadığı anlamına gelmez.".into(),
                 None,
+                None,
             )
         } else {
             (
                 "platform_mismatch".into(),
                 "Yalnızca başka bir işletim sistemi/mimari için gözlem var; bu tercihin platformu için hiçbir şey gözlenmedi.".into(),
+                None,
                 None,
             )
         };
@@ -681,7 +738,7 @@ pub fn classify_request(
             2 => "Etkinleştirmek istediniz, ancak son taramada bu bilgisayarda bulunamadı.",
             _ => "Etkinleştirmek istediniz; son taramada bu bilgisayarda olup olmadığı belirlenemedi.",
         };
-        return (format!("{}_current", word(r)), note.into(), Some(scan_ref(o)));
+        return (format!("{}_current", word(r)), note.into(), Some(scan_ref(o)), Some(origin_of(o, surface)));
     }
     let o = best(false).expect("same_platform is not empty and none is current");
     let r = rank(&o.presence);
@@ -690,6 +747,7 @@ pub fn classify_request(
         format!("previously_{}", word(r)),
         format!("Eski sonuç ({why}) Yeniden tarayın; eski bir sonuç hiçbir işlem için dayanak sayılmaz."),
         Some(scan_ref(o)),
+        Some(origin_of(o, surface)),
     )
 }
 
@@ -715,7 +773,7 @@ fn requests(conn: &Connection, observations: &[StoredObservation]) -> AppResult<
     let mut out = Vec::new();
     for row in rows {
         let (entry_id, entry_name, project_alias, project_name, agent_surface, platform_target) = row?;
-        let (status, note, basis) = classify_request(&entry_id, &project_alias, &agent_surface, &platform_target, observations);
+        let (status, note, basis, origin) = classify_request(&entry_id, &project_alias, &agent_surface, &platform_target, observations);
         out.push(RequestVsObservation {
             entry_id,
             entry_name,
@@ -726,6 +784,7 @@ fn requests(conn: &Connection, observations: &[StoredObservation]) -> AppResult<
             status,
             note,
             basis,
+            origin,
         });
     }
     Ok(out)

@@ -148,10 +148,11 @@ describe("computer inventory (read-only discovery)", () => {
         agentSurface: "claude-code-terminal", platformTarget: "windows-x64", status: "absent_current",
         note: "Etkinleştirmek istediniz, ancak son taramada bu bilgisayarda bulunamadı.",
         basis: { scanId: "abcdef0123456789", finishedAt: new Date().toISOString(), authorizedPath: true, authorizedUserConfig: true, authorizedProject: false, authorizedFingerprint: false },
+        origin: { projectRelation: "computer_wide", surfaceRelation: "exact_surface", observedAt: "2026-10-23T09:00:00Z", ageHours: 3 },
       },
       {
         entryId: "gitleaks", entryName: "Gitleaks", projectAlias: "web", projectName: "Web sitesi", agentSurface: "local-cli", platformTarget: "macos-arm64",
-        status: "platform_mismatch", note: "Yalnızca başka bir işletim sistemi/mimari için gözlem var.", basis: null,
+        status: "platform_mismatch", note: "Yalnızca başka bir işletim sistemi/mimari için gözlem var.", basis: null, origin: null,
       },
     ];
     await open();
@@ -173,6 +174,7 @@ describe("computer inventory (read-only discovery)", () => {
         entryId: "gitleaks", entryName: "Gitleaks", projectAlias: "web", projectName: "Web sitesi", agentSurface: "local-cli", platformTarget: "windows-x64",
         status: "previously_present", note: "Eski sonuç (Son taramada bu bölüm denetlenmedi (yetki verilmedi)). Yeniden tarayın; eski bir sonuç hiçbir işlem için dayanak sayılmaz.",
         basis: { scanId: "11111111-aaaa", finishedAt: "2026-10-16T09:00:00Z", authorizedPath: true, authorizedUserConfig: false, authorizedProject: false, authorizedFingerprint: false },
+        origin: { projectRelation: "computer_wide", surfaceRelation: "exact_surface", observedAt: "2026-10-16T09:00:00Z", ageHours: 200 },
       },
     ];
     await open();

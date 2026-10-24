@@ -3,6 +3,7 @@
 import { useId } from "react";
 import { formatTime, observedLabel, permissionText } from "../labels";
 import type { ObservationView } from "../observation";
+import { EvidenceOriginNote } from "./EvidenceOriginNote";
 
 const NOT_LIVE = "Bu, son kaydedilen tarama sonucudur; şu anki bir denetim değildir. Bu ekran hiçbir tarama başlatmaz ve bilgisayara bakmaz.";
 
@@ -60,6 +61,7 @@ function Main({ view }: { view: ObservationView }) {
           ) : (
             <p className="small muted">Bu durum için bir dayanak tarama kaydı gelmedi.</p>
           )}
+          <EvidenceOriginNote origin={request.origin} hasBasis={basis !== null} />
           {view.old && <p className="bad-text">⚠ Envanter yenilenemedi; bu, önceki başarılı okumadan ve güncel olmayabilir.</p>}
         </>
       );

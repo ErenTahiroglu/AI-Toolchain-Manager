@@ -399,6 +399,21 @@ export type RequestStatus =
   | "previously_present" | "previously_absent" | "previously_unknown"
   | "platform_mismatch" | "not_scanned";
 
+/** PRODUCT-06: how the selected observation relates to the preference's project (by its own project alias only) and to the requested agent surface. */
+export type ProjectRelation = "project_specific" | "computer_wide";
+export type SurfaceRelation = "exact_surface" | "local_cli_fallback";
+
+/**
+ * Where the evidence behind a status came from, described from the ONE observation the backend selected (store.rs::EvidenceOrigin). Metadata, not a
+ * verdict. `observedAt` / `ageHours` are null when the stored timestamp was not valid (or in the future, for the age); nothing is repaired.
+ */
+export interface EvidenceOrigin {
+  projectRelation: ProjectRelation;
+  surfaceRelation: SurfaceRelation;
+  observedAt: string | null;
+  ageHours: number | null;
+}
+
 export interface RequestVsObservation {
   entryId: string;
   entryName: string;
@@ -409,6 +424,8 @@ export interface RequestVsObservation {
   status: RequestStatus;
   note: string;
   basis: ScanRef | null;
+  /** Null exactly when no observation was selected (not_scanned, platform_mismatch): then no scope is guessed. */
+  origin: EvidenceOrigin | null;
 }
 
 export interface Inventory {

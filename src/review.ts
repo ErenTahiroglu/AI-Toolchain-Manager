@@ -12,7 +12,7 @@
 //    reason, and is never called resolved, installed or verified.
 //  * The clock is a parameter. No timers, no polling.
 import { observationOfWish, type InventoryRead } from "./observation";
-import type { AppError, ProjectView, RequestStatus } from "./types";
+import type { AppError, EvidenceOrigin, ProjectView, RequestStatus } from "./types";
 import { TARGET_PLATFORMS, TARGET_SURFACES, normalize } from "./workspace";
 
 export interface ProjectsRead {
@@ -53,7 +53,7 @@ export interface ReviewItem {
   reasons: ReviewReason[];
   uncertain: UncertainReason[];
   /** The backend status of an accepted wish, for information (present_current included). Null when none applies or none is known. */
-  observation: { status: RequestStatus; scanFinishedAt: string | null } | null;
+  observation: { status: RequestStatus; scanFinishedAt: string | null; origin: EvidenceOrigin | null } | null;
   /** The matrix can show exactly this target (known operating system and agent surface). Otherwise nothing is opened and no other target is chosen. */
   openable: boolean;
 }
@@ -131,7 +131,8 @@ export function reviewHeadline(q: ReviewQueue): string {
   // a read that is still running is provisional, whatever the retained data says (including an earlier clean zero)
   if (!q.complete) {
     const running = q.projects === "refreshing" || q.evidence === "refreshing";
-    return `En az ${n} öğe incelenmeyi bekliyor (${running ? "okuma sürüyor; sonuç kesin değil" : "liste eksik veya eski olabilir"}).`;
+    // not "at least N": the retained snapshot can shrink as well as grow when the new answer arrives (six cached items may become five)
+    return `Eldeki geçici görüntüde ${n} öğe var; ${running ? "okuma sürüyor" : "liste eksik veya eski olabilir"}, sayı artabilir veya azalabilir (sonuç kesin değil).`;
   }
   if (n === 0) {
     return "Bu ölçütlere göre incelenmesi gereken öğe yok. Bu, her şeyin doğru olduğu ya da herhangi bir aracın kurulu ve çalışır olduğu anlamına gelmez; yalnızca aşağıdaki ölçütler denetlendi.";
@@ -176,7 +177,7 @@ export function deriveReview(projects: ProjectsRead, inventory: InventoryRead, n
       const view = observationOfWish({ removed: p.entryRemoved === true, decision: p.decision }, p.entryId, { alias: project.alias, platform: p.platformTarget, surface: p.agentSurface }, inventory);
       switch (view.kind) {
         case "observed":
-          item.observation = { status: view.status, scanFinishedAt: view.request.basis?.finishedAt ?? null };
+          item.observation = { status: view.status, scanFinishedAt: view.request.basis?.finishedAt ?? null, origin: view.request.origin ?? null };
           if (EVIDENCE_REVIEW_STATUSES.includes(view.status)) item.reasons.push({ code: "evidence", status: view.status });
           break;
         case "no_row": item.uncertain.push("no_row"); break;

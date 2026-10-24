@@ -22,6 +22,8 @@ mod artifact;
 mod fs_security;
 #[path = "tests_history.rs"]
 mod history;
+#[path = "tests_origin.rs"]
+mod origin;
 #[path = "tests_privacy.rs"]
 mod privacy_gate;
 #[path = "tests_provenance.rs"]

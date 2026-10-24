@@ -2,7 +2,7 @@
 // tested; the real behaviour of every command (validation, gates, migration, audit) is covered by the
 // Rust tests and by the --self-check contract test, not by this mock.
 import { createInstallMock, installCommand, type InstallMock } from "./installMock";
-import type { CatalogEntry, CleanupPlan, Evaluation, HealthReport, InstallPlan, Inventory, PlanRequest, PreferenceView, ProjectView, Recommendation, RequestStatus, RequestVsObservation, ScanRef, StoredObservation } from "../types";
+import type { CatalogEntry, CleanupPlan, EvidenceOrigin, Evaluation, HealthReport, InstallPlan, Inventory, PlanRequest, PreferenceView, ProjectView, Recommendation, RequestStatus, RequestVsObservation, ScanRef, StoredObservation } from "../types";
 
 export const SEED_IDS = [
   "ponytail", "codebase-memory-mcp", "graphify", "gitleaks", "markitdown", "caveman", "cloudflare-security-audit-skill", "superpowers", "betterleaks",
@@ -68,12 +68,19 @@ export const REQUEST_NOTES: Record<RequestStatus, string> = {
   not_scanned: "Bu proje, ajan yüzeyi ve platform için henüz bir gözlem yok. Bu, aracın olmadığı anlamına gelmez.",
 };
 
+/** The evidence-origin descriptor in the wire shape (store.rs::EvidenceOrigin). */
+export const originOf = (over: Partial<EvidenceOrigin> = {}): EvidenceOrigin => ({
+  projectRelation: "computer_wide", surfaceRelation: "exact_surface", observedAt: "2026-10-23T09:00:00Z", ageHours: 3, ...over,
+});
+
 /** One row of Inventory.requests in the wire shape. Like the backend, only the statuses that name a scan carry a basis. */
 export const makeRequest = (over: Partial<RequestVsObservation> = {}): RequestVsObservation => {
   const status = over.status ?? "present_current";
   return {
     entryId: "alfa", entryName: "Alfa Araç", projectAlias: "ornek-web-sitesi", projectName: "Örnek: Web sitesi", agentSurface: "claude-code-terminal", platformTarget: "windows-x64",
-    status, note: REQUEST_NOTES[status], basis: status === "not_scanned" || status === "platform_mismatch" ? null : scanRef(), ...over,
+    status, note: REQUEST_NOTES[status], basis: status === "not_scanned" || status === "platform_mismatch" ? null : scanRef(),
+    // like the backend: a descriptor exists exactly when an observation was selected
+    origin: status === "not_scanned" || status === "platform_mismatch" ? null : originOf(), ...over,
   };
 };
 

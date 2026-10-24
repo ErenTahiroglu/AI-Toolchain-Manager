@@ -241,7 +241,7 @@ describe("pending, failed and old reads never produce a reassuring empty queue",
     render(<App />);
     await go("Projeler");
     const q = await queue();
-    expect(await q.findByText(/En az 4 öğe incelenmeyi bekliyor \(liste eksik veya eski olabilir\)/)).toBeInTheDocument(); // material, rejected+material, reminder, removed
+    expect(await q.findByText(/Eldeki geçici görüntüde 4 öğe var; liste eksik veya eski olabilir, sayı artabilir veya azalabilir \(sonuç kesin değil\)/)).toBeInTheDocument(); // material, rejected+material, reminder, removed
     expect(q.getByText(/Kayıtlı envanter okunuyor; gözlemden doğan nedenler henüz dahil değil/)).toBeInTheDocument();
     expect(q.queryByText(/Kayıtlı gözlem: /)).not.toBeInTheDocument();
     await act(async () => pending.forEach((p) => p.resolve(backend.inventory)));
@@ -254,7 +254,7 @@ describe("pending, failed and old reads never produce a reassuring empty queue",
     render(<App />);
     await go("Projeler");
     const q = await queue();
-    expect(await q.findByText(/En az 0 öğe/)).toBeInTheDocument();
+    expect(await q.findByText(/Eldeki geçici görüntüde 0 öğe var/)).toBeInTheDocument();
     expect(q.queryByText(/incelenmesi gereken öğe yok/)).not.toBeInTheDocument();
     await act(async () => pending.forEach((p) => p.resolve(backend.inventory)));
   });
@@ -264,7 +264,7 @@ describe("pending, failed and old reads never produce a reassuring empty queue",
     render(<App />);
     await go("Projeler");
     const q = await queue();
-    expect(await q.findByText(/En az 4 öğe incelenmeyi bekliyor/)).toBeInTheDocument();
+    expect(await q.findByText(/Eldeki geçici görüntüde 4 öğe var/)).toBeInTheDocument();
     expect(q.getByText(/Kayıtlı envanter okunamadı; gözlemden doğan nedenler dahil değil \(5 kabul edilmiş istek için kayıtlı gözlem bilinmiyor\)/)).toBeInTheDocument();
     expect(q.getByText(/“taranmadı” veya “bulunamadı” anlamına gelmez/)).toBeInTheDocument();
     expect(q.queryByText(/Henüz taranmadı|Son taramada bulunamadı/)).not.toBeInTheDocument();
@@ -281,7 +281,7 @@ describe("pending, failed and old reads never produce a reassuring empty queue",
     backend.failures.list_inventory = { code: "DB_BUSY", message: "Veritabanı meşgul." };
     await userEvent.click((await matrix()).getByRole("button", { name: "Listeyi yenile" }));
     expect(await q.findByText(/Kayıtlı envanter yenilenemedi; gözlemden doğan nedenler önceki başarılı okumadan ve eski olabilir/)).toBeInTheDocument();
-    expect(q.getByText(/^En az 6 öğe incelenmeyi bekliyor/)).toBeInTheDocument();
+    expect(q.getByText(/^Eldeki geçici görüntüde 6 öğe var/)).toBeInTheDocument();
     expect(q.getAllByRole("button", { name: /^Matriste incele/ })).toHaveLength(7); // the earlier answer is still there: 6 items + 1 uncertain-only decision
     delete backend.failures.list_inventory;
     backend.failures.list_projects = { code: "DB_BUSY", message: "Veritabanı meşgul." };
@@ -305,11 +305,11 @@ describe("the Dashboard summary uses the same derivation and never shows a bare 
     const pending = defer("list_inventory");
     render(<App />);
     const t = await tile();
-    expect(await t.findByText(/^En az 4 öğe/)).toBeInTheDocument();
+    expect(await t.findByText(/^Eldeki geçici görüntüde 4 öğe var/)).toBeInTheDocument();
     expect(t.queryByText(/incelenmesi gereken öğe yok/)).not.toBeInTheDocument();
     await act(async () => pending[0].reject({ code: "DB_BUSY", message: "meşgul" }));
     expect(await t.findByText(/Kayıtlı envanter okunamadı veya yenilenemedi/)).toBeInTheDocument();
-    expect(t.getByText(/^En az 4 öğe/)).toBeInTheDocument();
+    expect(t.getByText(/^Eldeki geçici görüntüde 4 öğe var/)).toBeInTheDocument();
   });
 
   it("decisions failed: no number at all", async () => {
@@ -563,7 +563,7 @@ describe("existing flows stay intact", () => {
 
 describe("P05-RT-01: a read that is still running is never final (through the real App)", () => {
   const NONE = /incelenmesi gereken öğe yok/;
-  const PROVISIONAL0 = /^En az 0 öğe incelenmeyi bekliyor \(okuma sürüyor; sonuç kesin değil\)\./;
+  const PROVISIONAL0 = /^Eldeki geçici görüntüde 0 öğe var; okuma sürüyor, sayı artabilir veya azalabilir \(sonuç kesin değil\)\./;
   const cleanWorld = () => {
     backend.projects = [project(ORNEK, "Örnek: Web sitesi", [wish("alfa", { entryName: "Alfa Araç" })], "synthetic")];
     backend.inventory = { ...backend.inventory, requests: [request("alfa", "present_current")] };
@@ -600,7 +600,7 @@ describe("P05-RT-01: a read that is still running is never final (through the re
     expect(backend.calls.length).toBe(settled); // nothing polls
   });
 
-  it("retained NON-empty queue during a refresh: still listed, but 'at least N' and marked not final; the answer replaces it", async () => {
+  it("retained NON-empty queue during a refresh: still listed, but a provisional snapshot count and marked not final; the answer replaces it", async () => {
     render(<App />);
     await go("Projeler");
     const q = await queue();
@@ -609,12 +609,30 @@ describe("P05-RT-01: a read that is still running is never final (through the re
     const inventoryGate = defer("list_inventory");
     await refresh();
     await waitFor(() => { expect(projectsGate).toHaveLength(1); expect(inventoryGate).toHaveLength(1); });
-    expect(q.getByText("En az 6 öğe incelenmeyi bekliyor (okuma sürüyor; sonuç kesin değil).")).toBeInTheDocument();
+    expect(q.getByText("Eldeki geçici görüntüde 6 öğe var; okuma sürüyor, sayı artabilir veya azalabilir (sonuç kesin değil).")).toBeInTheDocument();
     expect(q.queryByText("6 öğe incelenmeyi bekliyor.")).not.toBeInTheDocument();
     expect(q.getAllByRole("button", { name: /^Matriste incele/ })).toHaveLength(7); // the retained answer is still shown
     backend.projects = backend.projects.filter((p) => p.alias !== BENIM);
     await act(async () => { projectsGate[0].resolve(backend.projects); inventoryGate[0].resolve(backend.inventory); });
     expect(await q.findByText("5 öğe incelenmeyi bekliyor.")).toBeInTheDocument();
+  });
+
+  it("P05-RT-02: six cached items, the deferred answer has five - the count during the refresh is no lower bound, and the final count is exact", async () => {
+    render(<App />);
+    await go("Projeler");
+    const q = await queue();
+    await q.findByText("6 öğe incelenmeyi bekliyor.");
+    const projectsGate = defer("list_projects");
+    const inventoryGate = defer("list_inventory");
+    await refresh();
+    await waitFor(() => { expect(projectsGate).toHaveLength(1); expect(inventoryGate).toHaveLength(1); });
+    expect(q.getByText(/^Eldeki geçici görüntüde 6 öğe var; okuma sürüyor, sayı artabilir veya azalabilir \(sonuç kesin değil\)\./)).toBeInTheDocument();
+    expect(q.queryByText(/En az/)).not.toBeInTheDocument();
+    expect(q.queryByText(/^6 öğe incelenmeyi bekliyor\./)).not.toBeInTheDocument();
+    backend.projects = backend.projects.filter((p) => p.alias !== BENIM);
+    await act(async () => { projectsGate[0].resolve(backend.projects); inventoryGate[0].resolve(backend.inventory); });
+    expect(await q.findByText("5 öğe incelenmeyi bekliyor.")).toBeInTheDocument();
+    expect(q.queryByText(/geçici görüntü|En az|kesin değil/)).not.toBeInTheDocument();
   });
 
   it("overlapping reads, the NEWER one settles first: it is final at once, and the late older answer changes nothing", async () => {
@@ -640,7 +658,7 @@ describe("P05-RT-01: a read that is still running is never final (through the re
     await act(async () => { projectsGate[0].resolve(stale); inventoryGate[0].resolve(backend.inventory); }); // late, older
     expect(q.getByText(NONE)).toBeInTheDocument();
     expect(q.queryByRole("button", { name: /^Matriste incele/ })).not.toBeInTheDocument();
-    expect(q.queryByText(/kesin değil|En az/)).not.toBeInTheDocument();
+    expect(q.queryByText(/kesin değil|geçici görüntü/)).not.toBeInTheDocument();
   });
 
   it("overlapping reads, the OLDER one settles first: it is ignored and the queue stays provisional until the newer one answers", async () => {
@@ -680,7 +698,7 @@ describe("P05-RT-01: a read that is still running is never final (through the re
     expect(q.getByText(PROVISIONAL0)).toBeInTheDocument();
     await act(async () => projectsGate[0].reject({ code: "DB_BUSY", message: "Veritabanı meşgul." }));
     expect(await q.findByText(/Kararlar yenilenemedi; gösterilenler önceki başarılı okumadan ve eski olabilir/)).toBeInTheDocument();
-    expect(q.getByText(/^En az 0 öğe incelenmeyi bekliyor \(liste eksik veya eski olabilir\)\./)).toBeInTheDocument();
+    expect(q.getByText(/^Eldeki geçici görüntüde 0 öğe var; liste eksik veya eski olabilir, sayı artabilir veya azalabilir \(sonuç kesin değil\)\./)).toBeInTheDocument();
     expect(q.queryByText(NONE)).not.toBeInTheDocument();
     expect(q.queryByText(/okuma sürüyor/)).not.toBeInTheDocument();
     await userEvent.click(q.getByRole("button", { name: "Listeyi yeniden oku" }));
