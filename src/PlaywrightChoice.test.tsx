@@ -39,8 +39,14 @@ const project = (alias: string, name: string, kind: ProjectView["kind"] = "refer
 const calls = (cmd: string) => backend.calls.filter((c) => c.cmd === cmd);
 const group = async () => within(await screen.findByRole("group", { name: "Playwright seçenekleri" }));
 const optionButtons = async () => (await group()).getAllByRole("button", { name: /^Matriste aç/ });
+/** The project list arrives through an async (mocked) IPC read; selecting before it is there is a race that only shows under load. */
+const selectProject = async (g: ReturnType<typeof within>, alias: string) => {
+  const projectSelect = g.getByLabelText("Proje") as HTMLSelectElement;
+  await waitFor(() => expect([...projectSelect.options].some((o) => o.value === alias)).toBe(true));
+  await userEvent.selectOptions(projectSelect, alias);
+};
 const pick = async (g: ReturnType<typeof within>, alias = "benim", os = WIN, surface = CC) => {
-  await userEvent.selectOptions(g.getByLabelText("Proje"), alias);
+  await selectProject(g, alias);
   await userEvent.selectOptions(g.getByLabelText("İşletim sistemi"), os);
   await userEvent.selectOptions(g.getByLabelText("Ajan yüzeyi"), surface);
 };
@@ -129,7 +135,7 @@ describe("opening the matrix: an exact target and an exact variant, or guidance"
     expect(g.getByText("Önce proje, işletim sistemi ve ajan yüzeyini seçin. Hiçbir şey açılmadı, hiçbir kayıt yapılmadı.")).toBeInTheDocument();
     expect(g.getByLabelText("Proje")).toHaveFocus();
     expect(onOpen).not.toHaveBeenCalled();
-    await userEvent.selectOptions(g.getByLabelText("Proje"), "benim");
+    await selectProject(g, "benim");
     expect(g.queryByText(/Önce proje, işletim sistemi/)).not.toBeInTheDocument(); // the message clears when the user acts
     await userEvent.click((await optionButtons())[1]);
     expect(g.getByLabelText("İşletim sistemi")).toHaveFocus(); // the next missing one
@@ -189,7 +195,7 @@ describe("opening the matrix: an exact target and an exact variant, or guidance"
     expect(g.getByLabelText("İşletim sistemi")).toHaveFocus();
     await userEvent.tab();
     expect(g.getByLabelText("Ajan yüzeyi")).toHaveFocus();
-    await userEvent.selectOptions(g.getByLabelText("Proje"), "benim");
+    await selectProject(g, "benim");
     await userEvent.selectOptions(g.getByLabelText("İşletim sistemi"), WIN);
     await userEvent.selectOptions(g.getByLabelText("Ajan yüzeyi"), CLI);
     const [, , mcpButton] = await optionButtons();
