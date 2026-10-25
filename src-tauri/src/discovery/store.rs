@@ -6,6 +6,7 @@
 //! older than `STALE_AFTER_HOURS`, and it was made for this computer's platform. Everything else is shown as an
 //! earlier result with the reason it is not current, and is never used to justify an action.
 
+use super::declarations::{self, DeclarationDetector, DeclarationReading};
 use super::{
     detect::{Authorization, Roots},
     privacy,
@@ -332,6 +333,37 @@ pub struct EvidenceOrigin {
     pub observed_at: Option<String>,
     /// Whole hours between `observed_at` and the moment the inventory was read, only when that timestamp is valid and not in the future.
     pub age_hours: Option<i64>,
+    /// PRODUCT-07 H (additive): HOW the selected observation was produced - a closed whitelist of detection techniques, or None for a pseudo-method
+    /// (`no-detector`, `not-documented`, `unsupported-platform`) and for any unknown/legacy string. It describes the PRESENCE winner's technique; it is not the
+    /// declaration detector's method and it proves neither identity nor execution.
+    pub method: Option<OriginMethod>,
+}
+
+/// The detection techniques an origin may name. Serialized with the same kebab-case strings as `types::Method`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OriginMethod {
+    PathExecutable,
+    NativeInstallLocation,
+    LegacyLocalInstall,
+    ClaudeSettingsFile,
+    ClaudePluginDeclaration,
+    ClaudeMcpConfig,
+}
+
+impl OriginMethod {
+    /// Closed whitelist: anything else (including the pseudo-methods) is None - nothing is guessed.
+    pub fn from_row(method: &str) -> Option<OriginMethod> {
+        Some(match method {
+            "path-executable" => OriginMethod::PathExecutable,
+            "native-install-location" => OriginMethod::NativeInstallLocation,
+            "legacy-local-install" => OriginMethod::LegacyLocalInstall,
+            "claude-settings-file" => OriginMethod::ClaudeSettingsFile,
+            "claude-plugin-declaration" => OriginMethod::ClaudePluginDeclaration,
+            "claude-mcp-config" => OriginMethod::ClaudeMcpConfig,
+            _ => return None,
+        })
+    }
 }
 
 /// What the user asked for (one accepted preference) next to what the scans saw, never merged.
@@ -353,6 +385,11 @@ pub struct RequestVsObservation {
     /// Where the selected observation came from (project-specific or computer-wide; exact surface or `local-cli` fallback). None exactly when
     /// there is no selected observation (`not_scanned`, `platform_mismatch`): then no scope is guessed.
     pub origin: Option<EvidenceOrigin>,
+    /// PRODUCT-07 H (additive): whether anything reads MCP DEFINITIONS for this entry on this surface. Never "supported", never "not configured".
+    pub declaration_detector: DeclarationDetector,
+    /// PRODUCT-07 H (additive): 0..=3 scoped MCP-configuration readings (project, local, global), shown BESIDE the presence status above and never merged with it.
+    /// An empty list does NOT mean "not configured"; `declaration_detector.coverage` says why a scope has no reading.
+    pub declarations: Vec<DeclarationReading>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -705,6 +742,7 @@ fn origin_of(o: &StoredObservation, requested_surface: &str) -> EvidenceOrigin {
         },
         observed_at: valid.then(|| o.observed_at.clone()),
         age_hours: (valid && o.age_hours >= 0).then_some(o.age_hours),
+        method: OriginMethod::from_row(&o.method),
     }
 }
 
@@ -765,7 +803,7 @@ pub fn classify_request(
     )
 }
 
-fn requests(conn: &Connection, observations: &[StoredObservation]) -> AppResult<Vec<RequestVsObservation>> {
+fn requests(conn: &Connection, observations: &[StoredObservation], last: Option<&ScanSummary>) -> AppResult<Vec<RequestVsObservation>> {
     let mut stmt = conn.prepare(
         "SELECT e.entry_id, e.display_name, r.alias, r.display_name, p.agent_surface, p.platform_target
          FROM project_preferences p
@@ -788,6 +826,8 @@ fn requests(conn: &Connection, observations: &[StoredObservation]) -> AppResult<
     for row in rows {
         let (entry_id, entry_name, project_alias, project_name, agent_surface, platform_target) = row?;
         let (status, note, basis, origin) = classify_request(&entry_id, &project_alias, &agent_surface, &platform_target, observations);
+        // independent of the presence selection above: nothing in `classify_request` reads or depends on it
+        let scoped = declarations::scoped_declarations(&entry_id, &project_alias, &agent_surface, &platform_target, observations, last);
         out.push(RequestVsObservation {
             entry_id,
             entry_name,
@@ -799,6 +839,8 @@ fn requests(conn: &Connection, observations: &[StoredObservation]) -> AppResult<
             note,
             basis,
             origin,
+            declaration_detector: scoped.detector,
+            declarations: scoped.readings,
         });
     }
     Ok(out)
@@ -839,6 +881,6 @@ pub fn inventory(conn: &Connection) -> AppResult<Inventory> {
         ]
         .map(str::to_string),
     );
-    let requests = requests(conn, &observations)?;
+    let requests = requests(conn, &observations, last.as_ref())?;
     Ok(Inventory { last_scan: last, observations, requests, not_checked, stale_after_hours: STALE_AFTER_HOURS })
 }

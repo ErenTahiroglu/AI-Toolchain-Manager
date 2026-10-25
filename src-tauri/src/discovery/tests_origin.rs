@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::discovery::store::{
-    classify_request, EvidenceOrigin, ProjectRelation, RequestVsObservation, StoredObservation, SurfaceRelation,
+    classify_request, EvidenceOrigin, OriginMethod, ProjectRelation, RequestVsObservation, StoredObservation, SurfaceRelation,
 };
 
 const SURFACE: &str = "claude-code-terminal";
@@ -50,7 +50,14 @@ fn ob(id: i64, alias: Option<&str>, surface: &str, platform: &str, presence: &st
 }
 
 fn origin(project: ProjectRelation, surface: SurfaceRelation) -> EvidenceOrigin {
-    EvidenceOrigin { project_relation: project, surface_relation: surface, observed_at: Some(STAMP.into()), age_hours: Some(5) }
+    // `ob()` rows are PATH lookups, so the winner's technique is `path-executable` (PRODUCT-07 H added `method`; the four older members are unchanged)
+    EvidenceOrigin {
+        project_relation: project,
+        surface_relation: surface,
+        observed_at: Some(STAMP.into()),
+        age_hours: Some(5),
+        method: Some(OriginMethod::PathExecutable),
+    }
 }
 
 fn classify(obs: &[StoredObservation]) -> (String, String, Option<store::ScanRef>, Option<EvidenceOrigin>) {
@@ -161,6 +168,7 @@ fn a_historical_row_keeps_its_status_and_describes_itself_with_its_own_time() {
             surface_relation: SurfaceRelation::ExactSurface,
             observed_at: Some("2026-10-01T12:30:00+02:00".into()), // as stored: not converted, not rewritten
             age_hours: Some(400),
+            method: Some(OriginMethod::PathExecutable),
         })
     );
 }
@@ -205,6 +213,7 @@ fn the_time_and_age_belong_to_the_winner() {
 
 fn request_json(obs: &[StoredObservation]) -> serde_json::Value {
     let (status, note, basis, origin) = classify(obs);
+    let scoped = crate::discovery::declarations::scoped_declarations("x", "p", SURFACE, PLATFORM_WINDOWS, obs, None);
     serde_json::to_value(RequestVsObservation {
         entry_id: "x".into(),
         entry_name: "X".into(),
@@ -216,6 +225,8 @@ fn request_json(obs: &[StoredObservation]) -> serde_json::Value {
         note,
         basis,
         origin,
+        declaration_detector: scoped.detector,
+        declarations: scoped.readings,
     })
     .unwrap()
 }
@@ -225,11 +236,14 @@ fn the_wire_names_and_the_additive_shape_are_exactly_these() {
     let v = request_json(&[ob(1, Some("p"), "local-cli", PLATFORM_WINDOWS, "present", true)]);
     let keys: std::collections::BTreeSet<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
     let before = ["agentSurface", "basis", "entryId", "entryName", "note", "platformTarget", "projectAlias", "projectName", "status"];
-    let expected: std::collections::BTreeSet<&str> = before.iter().copied().chain(["origin"]).collect();
-    assert_eq!(keys, expected, "the earlier members are unchanged and exactly one is added");
+    // PRODUCT-06 added `origin`; PRODUCT-07 H adds `declarationDetector` and `declarations` (additive; nothing earlier changes)
+    let expected: std::collections::BTreeSet<&str> =
+        before.iter().copied().chain(["origin", "declarationDetector", "declarations"]).collect();
+    assert_eq!(keys, expected, "the earlier members are unchanged and only the documented ones are added");
+    // the four PRODUCT-06 members keep their values; `method` is the one additive nested member (so `origin` as a whole is NOT byte-identical to before)
     assert_eq!(
         v["origin"],
-        serde_json::json!({ "projectRelation": "project_specific", "surfaceRelation": "local_cli_fallback", "observedAt": STAMP, "ageHours": 5 })
+        serde_json::json!({ "projectRelation": "project_specific", "surfaceRelation": "local_cli_fallback", "observedAt": STAMP, "ageHours": 5, "method": "path-executable" })
     );
     let other = request_json(&[ob(1, None, SURFACE, PLATFORM_WINDOWS, "present", true)]);
     assert_eq!(other["origin"]["projectRelation"], "computer_wide");
@@ -251,9 +265,12 @@ fn the_wire_names_and_the_additive_shape_are_exactly_these() {
 #[test]
 fn nothing_from_the_row_beyond_the_four_members_reaches_the_response() {
     let text = request_json(&[ob(1, Some("p"), SURFACE, PLATFORM_WINDOWS, "present", true)]).to_string();
-    for secret in ["SENTINEL", "secret", "C:\\\\Users", "tool.exe", "9.9.9", "path-executable", "fingerprint"] {
+    for secret in ["SENTINEL", "secret", "C:\\\\Users", "tool.exe", "9.9.9", "fingerprint"] {
         assert!(!text.contains(secret), "{secret} leaked into {text}");
     }
+    // the technique name appears exactly once: as the closed `origin.method` value, nowhere else
+    assert_eq!(text.matches("path-executable").count(), 1, "{text}");
+    assert!(text.contains("\"method\":\"path-executable\""), "{text}");
     let origin_keys: Vec<String> = serde_json::to_value(origin(ProjectRelation::ComputerWide, SurfaceRelation::ExactSurface))
         .unwrap()
         .as_object()
@@ -261,7 +278,7 @@ fn nothing_from_the_row_beyond_the_four_members_reaches_the_response() {
         .keys()
         .cloned()
         .collect();
-    assert_eq!(origin_keys.len(), 4, "{origin_keys:?}");
+    assert_eq!(origin_keys.len(), 5, "the four PRODUCT-06 members plus the additive `method`: {origin_keys:?}");
 }
 
 // ---- the selection and the statuses are exactly what they were ---------------------------------------------------------------------------

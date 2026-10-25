@@ -58,6 +58,13 @@ const TRACKED_PLUGINS: &[Tracked] = &[
 
 const MCP_ENTRY: &str = "codebase-memory-mcp";
 
+/// PRODUCT-07 H: is there a detector that reads MCP DEFINITIONS (not program presence) for this catalog entry on this agent surface? Exactly one: the Claude MCP
+/// reader below (`mcp_observation`), for the one catalogued MCP entry, on the Claude Code terminal surface. Everything else - Codex CLI, Antigravity IDE,
+/// Claude Desktop, the bare command line, CLI-only tools, plugin entries, entries without a detector - answers false. A pure comparison of constants; it reads nothing.
+pub fn has_declaration_detector(entry_id: &str, surface: &str) -> bool {
+    entry_id == MCP_ENTRY && surface == SURFACE_CLAUDE
+}
+
 #[derive(Debug, Clone)]
 pub struct Roots {
     pub platform: String,

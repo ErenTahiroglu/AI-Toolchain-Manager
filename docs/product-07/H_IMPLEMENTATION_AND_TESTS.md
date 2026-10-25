@@ -1,0 +1,67 @@
+# PRODUCT-07 H — implementation, tests, evidence and limits
+
+Tracking: [#29](https://github.com/ErenTahiroglu/AI-Toolchain-Manager/issues/29) (stays open for the independent Red Team). Deferred and untouched: F4 → [#36](https://github.com/ErenTahiroglu/AI-Toolchain-Manager/issues/36). The frozen contract written *before* any source edit is `H_WIRE_CONTRACT.md`. Baseline: `development` = `b7eff9e483ff6f3e866e93d571c844b54242464f`, `main` = `68eda3f0407490fabccb517dcf822ab4818fc0bf` (frozen). The commit SHA and the exact-SHA CI result are not written here (they are in the hand-off reply and on #29). This is the author's evidence, **not** independent acceptance.
+
+REAL_INSTALLATION_NO_GO and REAL_CONFIG_WRITE_NO_GO stand. No migration, no IPC command, no Tauri permission, no dependency, no database write, no scan, no network, no GUI/WebView2/CDP/jq pilot/offline harness.
+
+## What was built
+
+| Layer | Change |
+|---|---|
+| Rust, read time only | `src-tauri/src/discovery/declarations.rs` (new, pure): `scoped_declarations(entry, alias, surface, platform, observations, last_scan)` builds the 0–3 scoped readings and the per-scope coverage from rows the store already loaded. `detect.rs`: one pure predicate `has_declaration_detector(entry, surface)` (`codebase-memory-mcp` on `claude-code-terminal` only). `store.rs`: `EvidenceOrigin.method` (closed whitelist `OriginMethod`, `null` for pseudo/unknown), `RequestVsObservation.declaration_detector` and `.declarations`, and `requests()` receives the latest scan summary. **`classify_request` is byte-for-byte unchanged**; nothing in it reads or calls the new code. |
+| Frontend (pure) | `src/scopedDeclarations.ts`: strict validator (fail closed) + all Turkish wording; `src/origin.ts`: validates `method`, adds the technique sentence (D7) and keeps the old view unchanged for old payloads. |
+| Frontend (components) | `ScopedConfigNote.tsx` (new, read-only, no button, neutral styling); `ObservationSection.tsx` (adds the "Saklanan varlık sonucu" label and the block); `EvidenceOriginNote.tsx` (technique line); `ReviewQueue.tsx` + `review.ts` (display only: the members are carried through **only when sent**, no reason, no count). |
+| Docs | `H_WIRE_CONTRACT.md`, this file. The author's 254-line `PRODUCT_07_POLICY_PROPOSAL.md` stays **untracked and unmodified** (SHA-256 `5ed8d6aa…8d5`, verified before and after); it is deliberately not staged. |
+
+## Changed paths (exact)
+Modified: `src-tauri/src/discovery/{detect.rs, mod.rs, store.rs, tests.rs, tests_origin.rs}`, `src/{origin.ts, review.ts, styles.css, types.ts}`, `src/components/{EvidenceOriginNote.tsx, ObservationSection.tsx, ReviewQueue.tsx}`.
+New: `src-tauri/src/discovery/{declarations.rs, tests_p07.rs}`, `src/{scopedDeclarations.ts, scopedDeclarations.test.ts, ScopedConfig.test.tsx}`, `src/components/ScopedConfigNote.tsx`, `tests/test_product07_h_contract.py`, `docs/product-07/{H_WIRE_CONTRACT.md, H_IMPLEMENTATION_AND_TESTS.md}`.
+Not changed: any migration, `commands.rs`, `lib.rs`, `src-tauri/capabilities/`, `Cargo.toml`, `package*.json`, `.github/`, `schemas/`, `data/`, `plan.rs`, the detectors' behaviour, `classify_request`, rank/currentness, status text, `basis`, the review-queue reasons/counts, the Inventory page.
+
+## Changes to EXISTING tests (all four are mechanical consequences of the additive fields; nothing was weakened)
+`tests_origin.rs`: (1) the struct-literal helpers gain `method` / the two new request members so the file compiles; (2) the exact-wire-shape test now expects the two new request members and the additive `origin.method` (it states that `origin` as a whole is **not** byte-identical); (3) the "no row content leaks" test no longer lists `path-executable` as a forbidden string — instead it requires that the technique name appears **exactly once, as `origin.method`**; every other forbidden string is still forbidden; (4) the "origin has four members" count becomes five with the reason in the message. All other existing tests (Rust: 778 earlier tests; vitest: 625; Python: 346) pass unchanged, including the 4000-round "selection identical to the version without an origin" test.
+
+## User-visible behaviour (all read-only)
+* **Matrix row, "Son kayıtlı envanter gözlemi":** the existing headline and backend note are unchanged and are now introduced by *"Saklanan varlık sonucu (program adı / eklenti kaydı araması):"*. Below the unchanged origin block (which gains one line, *"Kanıt türü: …"*, naming the winner's technique) a **separate** block *"Kapsama göre MCP tanımı (yapılandırma dosyası okuması)"* lists, in the fixed order project → local → global, either the reading (current or *"Eski bir taramadan (güncel değil; …)"*) or why the scope was not read. A fixed sentence explains that the two answers are different questions that can both be true; a fixed disclaimer says a recorded match is not "kurulu/onaylı/yüklenmiş/çalışan/doğrulanmış". No red banner, no green badge, no icon, no "çelişki".
+* **Entries/surfaces without a reader** (Codex CLI, Antigravity IDE, Claude Desktop, the bare command line, every CLI-only tool and plugin entry): one sentence says no detector reads MCP definitions there and that this is neither "no definition" nor a support claim; for Codex it adds that the machine-level program lookup above is not Codex-specific.
+* **Plugin presence (D7):** the origin block says the "proje/yerel" label only shows which settings scope was checked and that the presence comes from the shared user-level record/cache — *not* a project-specific installation. The stored origin sentences and the backend `note` are untouched.
+* **Review queue:** the same block appears under an item **only when the backend sent the members**; reasons, counts, the headline and the only action ("Matriste incele") are identical with and without them (tested for every status × six payload variants).
+* **Older backend:** nothing new is rendered and no coverage claim is made; the screen is as before. **Untrusted payload** (unknown value, wrong order, repeated scope, detector on a non-Claude surface, extra member): the whole block is dropped.
+
+## Tests (local runs; CI is reported separately)
+| Suite | Result |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npx vitest run` | 26 files, **662 passed** (625 before; 37 new: `scopedDeclarations.test.ts` 18, `ScopedConfig.test.tsx` 19) |
+| `npm run build` | exit 0 |
+| `cargo fmt --check` | exit 0 |
+| `cargo clippy --all-targets -j 2 -- -D warnings` | exit 0 |
+| `cargo test -j 2 --lib` | **809 passed, 0 failed, 2 ignored** (778 before; 31 new in `tests_p07.rs`) |
+| `python -X utf8 -m unittest discover -s tests` | **359 tests OK**, 58 skipped (346 before; 13 new in `test_product07_h_contract.py`; the skips are unchanged) |
+| Rust `main.rs` bin test target | **NOT RUN** (unchanged policy) |
+No Smart App Control block occurred in this phase; every Rust binary built by the normal command ran.
+
+### What the tests pin
+* **Legacy verdict equals a frozen oracle:** a verbatim copy of the pre-change `classify_request` + `origin_of` (commit `b7eff9e`) is compared over **all 432 × 432 ordered pairs** of rows (presence × currentness × alias × surface × method × platform, both tie orders, both ways to ask) and a seeded random space of **20 000 rounds** (≤ 7 rows, other subjects, garbage methods/timestamps/configuration values, every family of outcome reached ≥ 500 times). Compared: status, note, the selected scan's `basis` fields, and the four PRODUCT-06 origin members; `method` must equal the closed whitelist applied to the **winner's** method. A text pin proves the selection body does not mention `configuration`, `.scope`, `declaration` or `method` and still contains the unchanged ranking expression.
+* **Coexistence:** PATH present + project `not_configured`; PATH absent + project `configured`; one scope `not_configured` and another `configured` stay separate readings; MCP presence stays `unknown` (a real scan is read back).
+* **0/1/2/3 readings and order** under shuffled row/id order; duplicate rows in a scope (current first, then highest id); other alias, `project` row without alias, `global` row with an alias, `unknown`/garbage scope, other OS, other entry, plugin/settings/PATH rows, and the `local-cli` fallback are all ignored.
+* **Currentness:** every freshness class; an old `configured` is never current; an old project scan with a current user-level row; future timestamp → no age; garbage stamp → neither; as-stored stamp kept.
+* **Coverage:** no scan, other platform, not authorised (project / user / both / local needs both), project not in the latest scan, `no_record`; an empty list never reads as not configured.
+* **Other agents:** `has_declaration_detector` truth table (Codex, Antigravity, Desktop, `local-cli`, case variants, CLI-only tools, plugin entries, `agent:*`); eligible-looking Claude rows never leak into another host's request; a Codex request whose answer is a `local-cli` fallback is labelled a fallback.
+* **Wire:** exact keys of the request, readings and coverage; every string in a closed list; sentinels, tampered configuration strings, URLs, server names, paths, scan ids, versions never appear in the new members.
+* **End to end through the real store** (synthetic temp environment, real `run_scan`, real `inventory()`): program on PATH + project file without the server; missing program + project file naming the server; older project scan + newest user-files-only scan; another project's folder; no permission; malformed files; Codex and other hosts; reading the inventory writes nothing and the schema version is unchanged.
+* **Frontend:** the validator (every malformed variation, order, repetition, count, surface, null/extra members, consistency of coverage and readings, time rules); the words (banned-vocabulary scan over every new string; conflict words absent; coverage text never says "no definition"; `unreadable` ≠ `not_configured`); `origin.method` closed list; the matrix and queue renders; older payloads; no IPC beyond reads, no clipboard, no network; pure-source scans.
+* **Python contract:** Rust enums ↔ TypeScript lists identical (scopes, configurations, freshness, coverage, detector kinds, origin methods against `types.rs`); selection untouched; only the Claude MCP method can produce readings; no migration/command/permission/dependency added; the review reasons and the eight statuses unchanged; the contract document states the honest compatibility claim.
+
+### Mutation checks (one change at a time, SHA-256-verified restore) — 33 of 33 caught
+Presence ranking changed; project-specific rows winning the headline; `origin.method` guessed (Rust and frontend) or its whitelist opened; plugin rows or the `local-cli` fallback accepted as declarations; wrong alias; other platform; an unsupported host treated as scanned; a missing reading turned into "not configured"; stale promoted to current; duplicate rule ignoring currentness; scope order changed; unreadable reported as not configured (Rust and wording); missing authorisation ignored; future timestamp given an age; detector believed on another surface; coverage/reading consistency and reading order unchecked; previous reading worded as current; missing coverage worded as "no definition"; a recorded match worded as installed/enabled; coexistence worded as a conflict; plugin text losing the "not a project installation" statement; the queue turning the new members into a reason; the block not shown / the presence block not labelled / an invalid payload still rendering; a Rust configuration value or origin method the frontend does not know; the selection starting to read the method. **One mutant survived on the first run** (T08, "unreadable worded as not configured" in the frontend text): a test was added (every configuration has its own sentence; `malformed`/`unreadable`/`not_assessed` must say nothing can be said and never "bulunamadı") and the mutant was then caught. Thin spots: R04/T09 (whitelist opened) are each killed by one family of tests.
+
+## Honest limits, untested areas and residual risks
+* **`local` scope matching** compares a normalised directory string against the project's key in `~/.claude.json`; a differently spelled key reads as `not_configured` for `local` although the user may have an entry. The wording is "eşleşen tanım bulunamadı (yalnızca bu kapsamda)"; the risk is stated, not removed.
+* `.mcp.json` approval and disable lists are **not** read (existing detector limit): `configured` never implies the agent loads it. PATH absence is not exhaustive.
+* **No real window, screen reader, high-zoom, dark-theme or editorial Turkish review** was done (jsdom only). D6 (a Turkish editorial pass) is therefore **not** satisfied by this work; the wording is conservative but unreviewed by a Turkish reader.
+* The detector reads only the one catalogued MCP entry; for every other entry the block says "no reader". Widening a detector is out of scope.
+* A newer backend adding a field would make today's strict validator drop the whole block (fail closed by design).
+* No real user database was opened; no real Claude/Codex/Antigravity file was read; the end-to-end tests use synthetic temporary environments.
+* Inventory-page parity (D8), a queue reason (D5), a Codex/Antigravity/Desktop detector (D9), the "interest pending" preference (D10) and F4 (#36) are **not** done and were not started.
+* Green CI is not independent acceptance; the Red Team has not reviewed this change.

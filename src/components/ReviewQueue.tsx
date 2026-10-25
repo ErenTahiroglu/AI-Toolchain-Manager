@@ -7,6 +7,7 @@ import { deriveReview, filterItems, reviewHeadline, type ReasonFilter, type Revi
 import type { Inventory, ProjectView } from "../types";
 import { workspaceDecisionLabel, type TargetRequest } from "../workspace";
 import { EvidenceOriginNote } from "./EvidenceOriginNote";
+import { ScopedConfigNote } from "./ScopedConfigNote";
 import type { LoadState } from "./ProjectToolWorkspace";
 
 const EVIDENCE_GLOSS: Record<string, string> = {
@@ -70,6 +71,7 @@ function Item({ item, onOpen }: { item: ReviewItem; onOpen: (r: TargetRequest & 
         </p>
       )}
       {item.observation && <EvidenceOriginNote origin={item.observation.origin} hasBasis={item.observation.scanFinishedAt !== null} />}
+      {item.observation?.scoped && <ScopedConfigNote request={item.observation.scoped} />}
       {item.openable ? (
         <p className="actions">
           <button type="button" className="secondary" onClick={() => onOpen({ alias: item.alias, platform: item.platform, surface: item.surface, entryId: item.entryId })}>

@@ -53,7 +53,13 @@ export interface ReviewItem {
   reasons: ReviewReason[];
   uncertain: UncertainReason[];
   /** The backend status of an accepted wish, for information (present_current included). Null when none applies or none is known. */
-  observation: { status: RequestStatus; scanFinishedAt: string | null; origin: EvidenceOrigin | null } | null;
+  observation: {
+    status: RequestStatus;
+    scanFinishedAt: string | null;
+    origin: EvidenceOrigin | null;
+    /** PRODUCT-07 H: the scoped-configuration members exactly as received, ONLY when the backend sent them. Display data: it creates no reason and changes no count. */
+    scoped?: { agentSurface: string; declarationDetector?: unknown; declarations?: unknown };
+  } | null;
   /** The matrix can show exactly this target (known operating system and agent surface). Otherwise nothing is opened and no other target is chosen. */
   openable: boolean;
 }
@@ -178,6 +184,9 @@ export function deriveReview(projects: ProjectsRead, inventory: InventoryRead, n
       switch (view.kind) {
         case "observed":
           item.observation = { status: view.status, scanFinishedAt: view.request.basis?.finishedAt ?? null, origin: view.request.origin ?? null };
+          if (view.request.declarationDetector !== undefined || view.request.declarations !== undefined) {
+            item.observation.scoped = { agentSurface: view.request.agentSurface, declarationDetector: view.request.declarationDetector, declarations: view.request.declarations };
+          }
           if (EVIDENCE_REVIEW_STATUSES.includes(view.status)) item.reasons.push({ code: "evidence", status: view.status });
           break;
         case "no_row": item.uncertain.push("no_row"); break;

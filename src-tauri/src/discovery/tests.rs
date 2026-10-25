@@ -24,6 +24,8 @@ mod fs_security;
 mod history;
 #[path = "tests_origin.rs"]
 mod origin;
+#[path = "tests_p07.rs"]
+mod p07;
 #[path = "tests_privacy.rs"]
 mod privacy_gate;
 #[path = "tests_provenance.rs"]

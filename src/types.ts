@@ -414,6 +414,11 @@ export interface EvidenceOrigin {
   surfaceRelation: SurfaceRelation;
   observedAt: string | null;
   ageHours: number | null;
+  /**
+   * PRODUCT-07 H (additive; absent from older backends): HOW the selected observation was produced - one of the closed detection-technique names, or null.
+   * It describes the PRESENCE winner, proves neither identity nor execution, and is validated again in src/origin.ts.
+   */
+  method?: string | null;
 }
 
 export interface RequestVsObservation {
@@ -428,6 +433,13 @@ export interface RequestVsObservation {
   basis: ScanRef | null;
   /** Null exactly when no observation was selected (not_scanned, platform_mismatch): then no scope is guessed. */
   origin: EvidenceOrigin | null;
+  /**
+   * PRODUCT-07 H (additive; absent from older backends): whether anything reads MCP DEFINITIONS for this entry on this surface, and for each scope why a reading
+   * is missing. Wire shape: docs/product-07/H_WIRE_CONTRACT.md. Typed loosely on purpose - src/scopedDeclarations.ts validates it and fails closed.
+   */
+  declarationDetector?: unknown;
+  /** PRODUCT-07 H (additive): 0..3 scoped readings (project, local, global). An empty list does NOT mean "not configured". */
+  declarations?: unknown;
 }
 
 export interface Inventory {

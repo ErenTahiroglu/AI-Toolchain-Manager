@@ -3,6 +3,7 @@
 //! Nothing in this module executes a program, starts an agent or MCP server, opens a network
 //! connection, downloads, installs, or writes anywhere except this application's own database.
 
+pub mod declarations;
 pub mod detect;
 pub mod fsx;
 pub mod privacy;
