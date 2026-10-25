@@ -3,10 +3,11 @@
 import { describe, expect, it } from "vitest";
 import { REVIEWED_DECLARATIONS, type ReviewedDeclaration } from "./configDeclarations";
 import {
-  HOSTS, MASK, NO_FILE_TOUCHED, checkServersShape, findDuplicateKeys, hostForSurface, isMcpEntry, isPlanStale, lineDiff, parseConfigText, planConfigPreview, planInputKey,
+  DRAFT_NOTICE, HOSTS, MASK, NO_FILE_TOUCHED, checkServersShape, findDuplicateKeys, hostForSurface, isMcpEntry, isPlanStale, lineDiff, parseConfigText, planConfigPreview, planInputKey,
   redactForDisplay, sha256Hex, validateDeclaration, type JsonValue, type PlanRequest, type PreviewPlan,
 } from "./configPlan";
 import { makeEntry } from "./test/backend";
+import { acceptBlockReason } from "./workspace";
 
 const WIN = "windows-x64";
 const MAC = "macos-arm64";
@@ -19,7 +20,7 @@ const PIN = "0123456789abcdef0123456789abcdef01234567";
 const ev = (platformTarget: string, agentSurface: string, compatibilityState: string) => ({ platformTarget, agentSurface, compatibilityState, limitation: "x" });
 /** A catalog entry that is an MCP server, declared for Claude Code on both OSes and for nothing else (the shape of the shipped Playwright MCP record). */
 const mcp = (over: Record<string, unknown> = {}) =>
-  makeEntry("synthetic-mcp", { displayName: "Sentetik MCP", kind: "agent_plugin", record: { category: "mcp-server", targetEvidence: [ev(WIN, CC, "vendor-declared"), ev(MAC, CC, "vendor-declared"), ev(WIN, AG, "unknown"), ev(MAC, AG, "vendor-declared")] }, ...over });
+  makeEntry("synthetic-mcp", { displayName: "Sentetik MCP", kind: "agent_plugin", record: { category: "mcp-server", sourceSnapshot: { immutableCommit: PIN }, targetEvidence: [ev(WIN, CC, "vendor-declared"), ev(MAC, CC, "vendor-declared"), ev(WIN, AG, "unknown"), ev(MAC, AG, "vendor-declared")] }, ...over });
 
 const CLAUDE_DECL: ReviewedDeclaration = {
   hostId: "claude-code-project-mcp", entryId: "synthetic-mcp", serverName: "synthetic",
@@ -75,11 +76,11 @@ describe("hosts and paths: one fixed relative path per host, surfaces never gues
 });
 
 describe("with no approved declaration: BLOCKED_INSUFFICIENT_EVIDENCE and no recipe, ever", () => {
-  it("the registry the application ships is empty", () => {
-    expect(REVIEWED_DECLARATIONS).toEqual([]);
+  it("the registry the application ships holds exactly ONE declaration (CONFIG-02A): the real Exa catalog entry on Claude Code's .mcp.json", () => {
+    expect(REVIEWED_DECLARATIONS.map((d) => [d.hostId, d.entryId, d.serverName])).toEqual([["claude-code-project-mcp", "exa-mcp-server", "exa"]]);
   });
 
-  it("every host, OS, source mode and entry gets BLOCKED_INSUFFICIENT_EVIDENCE from the shipped registry - no command is made up", () => {
+  it("every host, OS, source mode and every OTHER entry gets BLOCKED_INSUFFICIENT_EVIDENCE from the shipped registry - no command is made up", () => {
     for (const surface of [CC, AG]) {
       for (const platform of [WIN, MAC]) {
         for (const source of [{ kind: "new" } as const, text('{"mcpServers":{}}')]) {
@@ -122,7 +123,8 @@ describe("a usable preview: new file, existing file, unrelated keys preserved", 
     expect(p.diff!.filter((l) => l.kind === "del")).toEqual([]);
     expect(p.diff!.filter((l) => l.kind === "add").length).toBeGreaterThan(3);
     expect(p.relativePath).toBe(".mcp.json");
-    expect(p.declaration).toEqual({ serverName: "synthetic", reviewId: "REV-SYN-1", evidenceIds: ["R99"] });
+    expect(p.declaration).toEqual({ serverName: "synthetic", reviewId: "REV-SYN-1", evidenceIds: ["R99"], note: null });
+    expect(p.draftNotice).toBe(DRAFT_NOTICE);
     expect(p.sourceDigest).toBeNull();
   });
 
@@ -288,16 +290,27 @@ describe("blocked by the catalog: the preview cannot lift an existing block", ()
     expect(p.constraints.join(" ")).toMatch(/kabul\/etkinleştirme engellerini kaldırmaz/);
   });
 
-  it("unknown, unsupported or missing compatibility for the exact OS + surface is blocked", () => {
-    const p = plan({ platform: WIN, surface: AG }); // the fixture is 'unknown' for Windows x Antigravity
-    expect(p.status).toBe("BLOCKED_BY_CATALOG");
-    expect(p.blockers.map((b) => b.code)).toContain("compat_not_declared");
-    expect(p.hypothetical).toBe(true);
-    for (const state of ["unknown", "unsupported"]) {
-      const entry = mcp({ record: { category: "mcp-server", targetEvidence: [ev(WIN, CC, state)] } });
-      expect(plan({ entry }).status, state).toBe("BLOCKED_BY_CATALOG");
+  it("CONFIG-02A: an explicitly UNSUPPORTED combination still blocks the draft; UNKNOWN or missing compatibility no longer does - it is stated beside the draft and activation stays refused elsewhere", () => {
+    const withState = (state: string | null) =>
+      mcp({ record: { category: "mcp-server", sourceSnapshot: { immutableCommit: PIN }, targetEvidence: state === null ? [] : [ev(WIN, CC, state)] } });
+    const unsupported = plan({ entry: withState("unsupported") });
+    expect(unsupported.status).toBe("BLOCKED_BY_CATALOG");
+    expect(unsupported.blockers.map((b) => b.code)).toContain("compat_not_declared");
+    expect(unsupported.hypothetical).toBe(true);
+    expect(unsupported.draftNotice).toBeNull();
+    for (const entry of [withState("unknown"), withState(null)]) {
+      const p = plan({ entry });
+      expect(p.status).toBe("PREVIEW_ONLY_NOT_APPLIED");
+      expect(p.hypothetical).toBe(false);
+      expect(p.blockers).toEqual([]);
+      expect(p.draftNotice).toBe(DRAFT_NOTICE);
+      expect(p.constraints.join(" ")).toMatch(/uyumluluk bilinmiyor\. Bu bir yapılandırma TASLAĞIDIR/);
+      expect(p.constraints.join(" ")).toMatch(/seçilemez; bu önizleme bunu değiştirmez/);
     }
-    expect(plan({ entry: mcp({ record: { category: "mcp-server", targetEvidence: [] } }) }).status).toBe("BLOCKED_BY_CATALOG");
+    // the matrix's own acceptance rule is untouched: an unknown cell still cannot be 'accepted'
+    expect(acceptBlockReason(withState("unknown") as unknown as Parameters<typeof acceptBlockReason>[0], "unknown")).toMatch(/uyumluluk bilinmiyor veya desteklenmiyor/);
+    // a combination the fixture declares for another surface is not borrowed
+    expect(plan({ platform: WIN, surface: AG }).status).toBe("PREVIEW_ONLY_NOT_APPLIED"); // Antigravity has its own declaration in the fixture registry; only its compatibility is unknown
   });
 
   it("removed and disabled entries are blocked", () => {

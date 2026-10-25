@@ -24,6 +24,7 @@ function PlanView({ plan, projectName, entryName }: { plan: PreviewPlan; project
         <span className="tag">ÖNİZLEME — UYGULANMADI</span> <span className={ready ? "" : "bad-text"}>{plan.statusLabel}</span> <code>{plan.status}</code>
       </h4>
       <p role="status"><strong>{plan.notice}</strong></p>
+      {plan.draftNotice !== null && <p className="banner banner-claim" role="note"><strong>{plan.draftNotice}</strong></p>}
       <dl className="facts small" aria-label={`${entryName}: önizleme hedefi`}>
         <dt>Proje</dt><dd>{projectName} <span className="muted">({plan.identity.alias})</span></dd>
         <dt>İşletim sistemi</dt><dd>{platformLabel(plan.identity.platform)}</dd>
@@ -32,7 +33,7 @@ function PlanView({ plan, projectName, entryName }: { plan: PreviewPlan; project
         <dt>Dosya (projenin kökünden göreli)</dt><dd>{plan.relativePath ? <code>{plan.relativePath}</code> : "—"}</dd>
         <dt>Biçim</dt><dd>{plan.configFormat ? plan.configFormat.toUpperCase() : "—"}</dd>
         <dt>Kapsam</dt><dd>{plan.scope ?? "—"}</dd>
-        {plan.declaration && (<><dt>Onaylı bildirim</dt><dd>sunucu adı <code>{plan.declaration.serverName}</code> · gözden geçirme {plan.declaration.reviewId} · kanıt {plan.declaration.evidenceIds.join(", ")}</dd></>)}
+        {plan.declaration && (<><dt>Gözden geçirilmiş bildirim</dt><dd>sunucu adı <code>{plan.declaration.serverName}</code> · gözden geçirme {plan.declaration.reviewId} · kanıt {plan.declaration.evidenceIds.join(", ")}{plan.declaration.note !== null && <> · <em>{plan.declaration.note}</em></>}</dd></>)}
         {plan.sourceDigest && (<><dt>Verdiğiniz metnin SHA-256 özeti</dt><dd><code>{plan.sourceDigest.slice(0, 16)}…</code> <span className="muted">(bir dosyanın değil, yapıştırdığınız metnin özeti)</span></dd></>)}
       </dl>
       {plan.untouched.length > 0 && <p className="small muted">Bu önizlemenin hiçbir zaman dokunmadığı dosyalar: {plan.untouched.join("; ")}.</p>}

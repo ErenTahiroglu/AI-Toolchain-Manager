@@ -1,6 +1,6 @@
 """CONFIG-01 (Issue #30) contract, no running app needed. The configuration preview is a pure TypeScript planner plus a read-only component:
 
-* the registry of reviewed declarations the application ships is EMPTY,
+* the registry of reviewed declarations the application ships holds exactly ONE entry since CONFIG-02A (it was empty in CONFIG-01),
 * the two supported host files are exactly `.mcp.json` and `.agents/mcp_config.json`,
 * the Tauri capability still grants no filesystem / shell / http / dialog / clipboard permission and no configuration command exists,
 * the new sources contain no IPC, file, clipboard, network, storage, timer or process access,
@@ -19,9 +19,10 @@ def read(rel):
 
 
 class ConfigPreviewContract(unittest.TestCase):
-    def test_the_registry_of_reviewed_declarations_is_empty(self):
+    def test_the_registry_of_reviewed_declarations_holds_exactly_one_entry(self):
         src = read("src/configDeclarations.ts")
-        self.assertRegex(src, r"export const REVIEWED_DECLARATIONS: readonly ReviewedDeclaration\[\] = \[\];")
+        self.assertRegex(src, r"export const REVIEWED_DECLARATIONS: readonly ReviewedDeclaration\[\] = \[")
+        self.assertEqual(re.findall(r'entryId: "([^"]+)"', src), ["exa-mcp-server"])
 
     def test_the_two_supported_host_files_and_surfaces(self):
         src = read("src/configPlan.ts")

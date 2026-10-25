@@ -10,6 +10,9 @@
 //     provided text is kept (to detect that a preview has gone stale). Values that look secret-bearing are masked.
 // Sources: Claude Code project MCP servers live in `.mcp.json` at the project root under `mcpServers` (https://code.claude.com/docs/en/mcp); Antigravity's
 // workspace file is `<workspace>/.agents/mcp_config.json` under `mcpServers` (https://www.antigravity.google/docs/mcp). See docs/config-01/SOURCE_AND_TARGET_MAP.md.
+// CONFIG-02A: the registry now holds ONE declaration (a real catalog entry, Claude Code `.mcp.json`). Seeing that TEXT draft is deliberately separated from accepting or
+// activating the tool: unknown vendor compatibility no longer blocks the draft (it is stated next to it), while removed, disabled, execution-blocked, quarantined and
+// explicitly unsupported entries still do, and the matrix's accept rules (workspace.ts) are untouched.
 // AGENT-01: Codex CLI's project file is TOML (`.codex/config.toml`, `[mcp_servers.<name>]`, trusted projects only). It is NEVER fed to the JSON parser below and
 // no `.mcp.json` is produced for it: the surface gets the explicit status TOML_PREVIEW_NOT_IMPLEMENTED, no diff and static read-only guidance (docs/agent-01/).
 import { agentHostFor, type ConfigFormat } from "./agentHosts";
@@ -106,6 +109,10 @@ export const NO_FILE_TOUCHED =
 export const NO_TEXT_PROCESSED =
   "Hiçbir dosyaya dokunulmadı ve hiçbir dosya okunmadı; bu hedef için hiçbir metin de işlenmedi (yapıştırılan metin ayrıştırılmaz). Hiçbir şey uygulanmadı, kurulmadı, çalıştırılmadı veya bağlanılmadı.";
 
+/** Shown on every positive draft. Exactly this sentence (CONFIG-02A): the draft is text; nothing was applied, connected, installed or tested. */
+export const DRAFT_NOTICE =
+  "Yalnızca yapılandırma taslağı; uygulanmadı, bağlantı kurulmadı. Hizmetin ücretleri, gizliliği ve kimlik doğrulaması ayrıca değerlendirilmelidir.";
+
 export interface Reason {
   code: string;
   text: string;
@@ -157,7 +164,9 @@ export interface PreviewPlan {
   /** True when a diff is shown although the plan is blocked: it explains, it is not a recipe. */
   hypothetical: boolean;
   formattingNote: string | null;
-  declaration: { serverName: string; reviewId: string; evidenceIds: string[] } | null;
+  declaration: { serverName: string; reviewId: string; evidenceIds: string[]; note: string | null } | null;
+  /** DRAFT_NOTICE exactly when status is PREVIEW_ONLY_NOT_APPLIED; null otherwise. */
+  draftNotice: string | null;
 }
 
 // ---- SHA-256 (synchronous, no dependency) ------------------------------------------------------------------------------------------
@@ -364,6 +373,9 @@ export function validateDeclaration(host: HostSpec, d: ReviewedDeclaration): str
   if (!r || !r.reviewId || !Array.isArray(r.evidenceIds) || r.evidenceIds.length === 0 || !r.evidenceIds.every((e) => /^R\d{2,3}$/.test(e)) || !/^[a-f0-9]{40}$/.test(r.reviewedAgainst ?? "")) {
     bad.push("review_record");
   }
+  if (r && r.repositoryUrl !== undefined && !/^https:\/\/github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(r.repositoryUrl)) bad.push("review_repository");
+  if (r && r.note !== undefined && (typeof r.note !== "string" || r.note.length > 400 || /[<>\u0000-\u001f]/.test(r.note))) bad.push("review_note");
+  if (d.warnings !== undefined && (!Array.isArray(d.warnings) || d.warnings.length > 8 || d.warnings.some((w) => typeof w !== "string" || w.length === 0 || w.length > 600 || /[<>\u0000-\u001f]/.test(w)))) bad.push("warnings");
   const decl = d.declaration;
   if (!isObject(decl)) return [...bad, "declaration_not_object"];
   const keys = Object.keys(decl);
@@ -453,7 +465,10 @@ export function planInputKey(req: PlanRequest, declarations: readonly ReviewedDe
   return JSON.stringify([
     req.alias, req.platform, req.surface, req.entry.entryId, req.entry.removedAt, req.entry.enabled, req.entry.executionPolicy, req.entry.reviewState,
     req.entry.capabilityFingerprint, req.entry.revision, req.source.kind, req.source.kind === "text" ? sha256Hex(req.source.text) : null,
-    decl ? [decl.review.reviewId, sha256Hex(JSON.stringify(decl.declaration)), decl.serverName] : null,
+    decl ? [decl.review.reviewId, sha256Hex(JSON.stringify([decl.declaration, decl.review, decl.warnings ?? []])), decl.serverName] : null,
+    // the catalog's own pinned source: a changed pin must invalidate a shown preview
+    (req.entry.record as { sourceSnapshot?: { immutableCommit?: unknown }; repository?: { url?: unknown } } | undefined)?.sourceSnapshot?.immutableCommit ?? null,
+    (req.entry.record as { repository?: { url?: unknown } } | undefined)?.repository?.url ?? null,
   ]);
 }
 
@@ -466,7 +481,15 @@ export function isMcpEntry(entry: Pick<CatalogEntry, "record">): boolean {
 
 function equivalentSignature(d: JsonObject, urlField: string): string | null {
   const url = d[urlField];
-  if (typeof url === "string") return `url:${url.toLowerCase().replace(/\/+$/, "")}`;
+  if (typeof url === "string") {
+    // the same endpoint is the same server whatever query string, fragment, case of the host or trailing slash it is written with
+    try {
+      const u = new URL(url);
+      return `url:${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, "")}`.toLowerCase();
+    } catch {
+      return `url:${url.toLowerCase().replace(/\/+$/, "")}`;
+    }
+  }
   if (typeof d.command === "string") return `cmd:${d.command}\u0000${Array.isArray(d.args) ? d.args.join("\u0000") : ""}`;
   return null;
 }
@@ -513,7 +536,10 @@ export function planConfigPreview(req: PlanRequest, declarations: readonly Revie
     diff,
     hypothetical,
     formattingNote,
-    declaration: usedDeclaration ? { serverName: usedDeclaration.serverName, reviewId: usedDeclaration.review.reviewId, evidenceIds: [...usedDeclaration.review.evidenceIds] } : null,
+    declaration: usedDeclaration
+      ? { serverName: usedDeclaration.serverName, reviewId: usedDeclaration.review.reviewId, evidenceIds: [...usedDeclaration.review.evidenceIds], note: usedDeclaration.review.note ?? null }
+      : null,
+    draftNotice: status === "PREVIEW_ONLY_NOT_APPLIED" ? DRAFT_NOTICE : null,
   });
 
   // 1. identity: nothing is defaulted
@@ -533,12 +559,20 @@ export function planConfigPreview(req: PlanRequest, declarations: readonly Revie
   if (!isMcpEntry(req.entry)) {
     blockers.push({ code: "not_mcp", text: "Bu katalog kaydı bir MCP sunucusu olarak kayıtlı değil; bir MCP yapılandırma önizlemesi yapılamaz." });
   }
-  // 4. the existing catalog gates stay in force; the preview cannot lift any of them
+  // 4. the catalog gates. A TEXT draft is not an activation: for the JSON hosts only UNKNOWN vendor compatibility stops being a blocker (it is stated beside the draft and the
+  //    matrix still refuses "kullanmak istiyorum" for it). Removed, disabled, execution-blocked, quarantined/blocked and explicitly unsupported entries still block the draft.
+  //    The TOML target keeps the full CONFIG-01/AGENT-01 listing unchanged (it shows no draft at all).
   const compat = compatStateFor(req.entry as CatalogEntry, req.platform, req.surface);
-  const block = acceptBlockReason(req.entry as CatalogEntry, compat);
-  if (block !== null) blockers.push({ code: "accept_block", text: block });
+  const entryBlock = acceptBlockReason(req.entry as CatalogEntry, host ? "vendor-declared" : compat); // with a declared stand-in only the entry-level reasons remain
+  if (entryBlock !== null) blockers.push({ code: "accept_block", text: entryBlock });
   if (req.entry.reviewState === "quarantined" || req.entry.reviewState === "blocked") blockers.push({ code: "quarantined", text: `Katalog durumu “${req.entry.reviewState}”: yalnızca açıklayıcı bir önizleme gösterilebilir.` });
-  if (compatClass(compat) !== "declared") blockers.push({ code: "compat_not_declared", text: "Bu işletim sistemi ve ajan yüzeyi için uyumluluk bilinmiyor veya desteklenmiyor; yayıncı beyanı yok." });
+  if (!host) {
+    if (compatClass(compat) !== "declared") blockers.push({ code: "compat_not_declared", text: "Bu işletim sistemi ve ajan yüzeyi için uyumluluk bilinmiyor veya desteklenmiyor; yayıncı beyanı yok." });
+  } else if (compatClass(compat) === "unsupported") {
+    blockers.push({ code: "compat_not_declared", text: "Bu işletim sistemi ve ajan yüzeyi için katalog “desteklenmiyor” kaydı taşıyor; taslak gösterilmez." });
+  } else if (compatClass(compat) === "unknown") {
+    constraints.push("Bu hedef için uyumluluk bilinmiyor. Bu bir yapılandırma TASLAĞIDIR: aracın kabul edilmesi, etkinleştirilmesi ya da kurulmasıyla ilgisi yoktur. Matriste “bu projede kullanmak istiyorum” kararı, uyumluluk bilinmediği sürece seçilemez; bu önizleme bunu değiştirmez.");
+  }
   constraints.push(`Uyumluluk (bu hedef için kayıt): ${compat}. “Yayıncı beyan etti” bir işlev testi değildir.`);
   constraints.push(`Katalog durumu: ${req.entry.reviewState}. Bu önizleme, aracın desteklendiği, çalıştığı, kurulu olduğu veya güvenli olduğu anlamına gelmez; mevcut kabul/etkinleştirme engellerini kaldırmaz.`);
   if (!host) {
@@ -591,10 +625,20 @@ export function planConfigPreview(req: PlanRequest, declarations: readonly Revie
   const reviewed = declarationFor(host, req.entry.entryId, declarations);
   if (reviewed) {
     const violations = validateDeclaration(host, reviewed);
+    const record = (req.entry.record ?? {}) as { sourceSnapshot?: { immutableCommit?: unknown }; repository?: { url?: unknown } };
+    const sourceMatches =
+      record.sourceSnapshot?.immutableCommit === reviewed.review.reviewedAgainst &&
+      (reviewed.review.repositoryUrl === undefined || record.repository?.url === reviewed.review.repositoryUrl);
     if (violations.length > 0) {
       problems.push({ code: "declaration_rejected", text: `Kayıt defterindeki bildirim ilke denetiminden geçemedi (${violations.join(", ")}); kullanılmadı.` });
+    } else if (!sourceMatches) {
+      problems.push({
+        code: "source_mismatch",
+        text: "Bildirimin gözden geçirildiği kaynak (depo ve sabit commit) bu katalog kaydının kendi sabitlenmiş kaynağıyla eşleşmiyor ya da katalog kaydında sabit commit yok; kaynak değişmiş olabilir. Bildirim kullanılmadı; yeniden gözden geçirilmesi gerekir.",
+      });
     } else {
       usedDeclaration = reviewed;
+      for (const w of reviewed.warnings ?? []) constraints.push(w);
     }
   }
   if (!usedDeclaration) {
@@ -610,9 +654,13 @@ export function planConfigPreview(req: PlanRequest, declarations: readonly Revie
   if (usedDeclaration && currentUsable) {
     const base: JsonObject = req.source.kind === "new" || parsed === null ? {} : (JSON.parse(JSON.stringify(parsed)) as JsonObject);
     const servers: JsonObject = isObject(base.mcpServers) ? base.mcpServers : {};
+    const wanted = usedDeclaration.serverName.toLowerCase();
     if (Object.prototype.hasOwnProperty.call(servers, usedDeclaration.serverName)) {
       conflict = true;
       problems.push({ code: "server_name_exists", text: `“${usedDeclaration.serverName}” adlı bir sunucu zaten tanımlı; üzerine yazılmaz.` });
+    } else if (Object.keys(servers).some((n) => n.toLowerCase() === wanted)) {
+      conflict = true; // a name that differs only in letter case reads as the same server to a person (and to some clients)
+      problems.push({ code: "server_name_exists", text: `Büyük/küçük harf farkı dışında “${usedDeclaration.serverName}” ile aynı adlı bir sunucu zaten tanımlı; karışıklığı önlemek için üzerine yazılmaz.` });
     }
     const signature = equivalentSignature(usedDeclaration.declaration as JsonObject, host.remoteUrlField);
     if (signature && Object.values(servers).some((s) => isObject(s) && equivalentSignature(s, host.remoteUrlField) === signature)) {
@@ -629,7 +677,7 @@ export function planConfigPreview(req: PlanRequest, declarations: readonly Revie
   }
 
   // 8. one primary status
-  const configBroken = problems.some((p) => !["server_name_exists", "equivalent_exists", "declaration_rejected"].includes(p.code));
+  const configBroken = problems.some((p) => !["server_name_exists", "equivalent_exists", "declaration_rejected", "source_mismatch"].includes(p.code));
   if (configBroken) return done("INVALID_CURRENT_CONFIG");
   if (!usedDeclaration) return done("BLOCKED_INSUFFICIENT_EVIDENCE");
   if (blockers.some((b) => b.code !== "no_reviewed_declaration")) return done("BLOCKED_BY_CATALOG", diff !== null);

@@ -8,6 +8,7 @@ import capabilitySource from "../src-tauri/capabilities/default.json?raw";
 import { ConfigPreview } from "./components/ConfigPreview";
 import previewSource from "./components/ConfigPreview.tsx?raw";
 import { REVIEWED_DECLARATIONS, type ReviewedDeclaration } from "./configDeclarations";
+import { DRAFT_NOTICE } from "./configPlan";
 import planSource from "./configPlan.ts?raw";
 import declarationsSource from "./configDeclarations.ts?raw";
 import { ProjectsPage } from "./pages/Projects";
@@ -28,7 +29,7 @@ const PIN = "0123456789abcdef0123456789abcdef01234567";
 const ev = (platformTarget: string, agentSurface: string, compatibilityState: string) => ({ platformTarget, agentSurface, compatibilityState, limitation: "kayıt" });
 
 const mcp = (over: Partial<CatalogEntry> = {}) =>
-  makeEntry("synthetic-mcp", { displayName: "Sentetik MCP", kind: "agent_plugin", record: { category: "mcp-server", targetEvidence: [ev(WIN, CC, "vendor-declared"), ev(MAC, AG, "vendor-declared")] }, ...over });
+  makeEntry("synthetic-mcp", { displayName: "Sentetik MCP", kind: "agent_plugin", record: { category: "mcp-server", sourceSnapshot: { immutableCommit: PIN }, targetEvidence: [ev(WIN, CC, "vendor-declared"), ev(MAC, AG, "vendor-declared")] }, ...over });
 const DECLS: ReviewedDeclaration[] = [
   { hostId: "claude-code-project-mcp", entryId: "synthetic-mcp", serverName: "synthetic", declaration: { command: "npx", args: ["-y", "@example/synthetic-mcp@1.2.3"] }, review: { reviewId: "REV-SYN-1", evidenceIds: ["R99"], reviewedAgainst: PIN } },
   { hostId: "antigravity-workspace-mcp", entryId: "synthetic-mcp", serverName: "synthetic", declaration: { serverUrl: "https://synthetic.example.invalid/mcp" }, review: { reviewId: "REV-SYN-2", evidenceIds: ["R99"], reviewedAgainst: PIN } },
@@ -243,8 +244,8 @@ describe("a stale preview is withdrawn", () => {
 });
 
 describe("blocked and unsupported states", () => {
-  it("the application's own registry is empty: BLOCKED_INSUFFICIENT_EVIDENCE with the reason, no before/after, no diff", async () => {
-    expect(REVIEWED_DECLARATIONS).toEqual([]);
+  it("an entry the application's own registry does not hold: BLOCKED_INSUFFICIENT_EVIDENCE with the reason, no before/after, no diff", async () => {
+    expect(REVIEWED_DECLARATIONS.map((d) => d.entryId)).toEqual(["exa-mcp-server"]); // CONFIG-02A: the registry holds exactly one real entry, not this synthetic one
     renderPreview({ declarations: undefined });
     await openDetails();
     await userEvent.click(screen.getByRole("radio", { name: /Yeni dosya/ }));
@@ -271,14 +272,28 @@ describe("blocked and unsupported states", () => {
     expect(screen.queryByRole("button", { name: /Uygula|Kopyala/ })).not.toBeInTheDocument();
   });
 
-  it("unknown compatibility for the exact OS + surface is blocked and says so", async () => {
-    renderPreview({ platform: MAC, surface: CC }); // the fixture declares Windows x Claude Code and macOS x Antigravity only
+  it("CONFIG-02A: unknown compatibility for the exact OS + surface no longer blocks the TEXT draft, and says plainly that the draft is not an acceptance", async () => {
+    renderPreview({ platform: MAC, surface: CC }); // the fixture declares Windows x Claude Code and macOS x Antigravity only: macOS x Claude Code is unknown
+    await openDetails();
+    await userEvent.click(screen.getByRole("radio", { name: /Yeni dosya/ }));
+    await userEvent.click(previewButton());
+    const region = within(await screen.findByRole("region", { name: /ÖNİZLEME — UYGULANMADI/ }));
+    expect(region.getByText("PREVIEW_ONLY_NOT_APPLIED")).toBeInTheDocument();
+    expect(region.queryByLabelText("Engeller")).not.toBeInTheDocument();
+    expect(region.getByText(DRAFT_NOTICE)).toBeInTheDocument();
+    expect(screen.getByText(/Bu bir yapılandırma TASLAĞIDIR/)).toBeInTheDocument();
+  });
+
+  it("an explicitly UNSUPPORTED combination still blocks the draft", async () => {
+    const entry = mcp({ record: { category: "mcp-server", sourceSnapshot: { immutableCommit: PIN }, targetEvidence: [ev(MAC, CC, "unsupported")] } });
+    renderPreview({ entry, platform: MAC, surface: CC });
     await openDetails();
     await userEvent.click(screen.getByRole("radio", { name: /Yeni dosya/ }));
     await userEvent.click(previewButton());
     const region = within(await screen.findByRole("region", { name: /ÖNİZLEME — UYGULANMADI/ }));
     expect(region.getByText("BLOCKED_BY_CATALOG")).toBeInTheDocument();
-    expect(region.getByLabelText("Engeller")).toHaveTextContent(/uyumluluk bilinmiyor/);
+    expect(region.getByLabelText("Engeller")).toHaveTextContent(/desteklenmiyor/);
+    expect(region.queryByText(DRAFT_NOTICE)).not.toBeInTheDocument();
   });
 
   it("Claude Desktop (Code) and the generic command line are UNSUPPORTED_SURFACE - no file is guessed", async () => {

@@ -6,7 +6,7 @@ Codex CLI becomes a selectable project target next to Claude Code and Antigravit
 * The install-plan layer, the Tauri capability and the Rust command list gain NOTHING; no catalog data file carries a Codex evidence row.
 * Migration 0010 is a pure table rebuild: every column is copied, only the surface list of one CHECK changes. It is also run here with Python's sqlite3 (foreign keys ON)
   against a real schema built from migrations 1-9, so the row-preservation claim does not rest on the Rust test binary alone.
-* The five documents exist and keep the boundaries; the production registry of reviewed declarations is still empty (C5: NO QUALIFIED DECLARATION).
+* The five documents exist and keep the boundaries; the production registry of reviewed declarations held NO entry at AGENT-01 (C5: NO QUALIFIED DECLARATION); CONFIG-02A (Issue #38) added exactly one, checked in test_config02a_contract.py.
 """
 import json
 import pathlib
@@ -204,8 +204,11 @@ class MigrationTen(unittest.TestCase):
 class RegistryAndDocuments(unittest.TestCase):
     DOCS = ("HOST_PROVIDER_PROTOCOL_MATRIX", "CODEX_SOURCE_AND_SCOPE", "COMMON_AGENT_GUIDE_TR", "IMPLEMENTATION_AND_TESTS", "NEXT_PRODUCT_HANDOFF")
 
-    def test_the_production_registry_of_reviewed_declarations_is_still_empty(self):
-        self.assertRegex(read("src/configDeclarations.ts"), r"export const REVIEWED_DECLARATIONS: readonly ReviewedDeclaration\[\] = \[\];")
+    def test_the_production_registry_has_no_codex_declaration(self):
+        # AGENT-01 (C5): no Codex declaration exists; CONFIG-02A added one Claude Code entry and nothing else
+        src = read("src/configDeclarations.ts")
+        self.assertEqual(re.findall(r'hostId: "([^"]+)"', src), ["claude-code-project-mcp"])
+        self.assertNotIn("codex", src.split("export const REVIEWED_DECLARATIONS")[1].lower())
 
     def test_the_five_documents_exist_and_keep_the_boundaries(self):
         docs = {n: read("docs/agent-01/%s.md" % n) for n in self.DOCS}

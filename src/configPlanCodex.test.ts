@@ -16,7 +16,7 @@ const PIN = "0123456789abcdef0123456789abcdef01234567";
 
 const ev = (platformTarget: string, agentSurface: string, compatibilityState: string) => ({ platformTarget, agentSurface, compatibilityState, limitation: "x" });
 const mcp = (over: Record<string, unknown> = {}) =>
-  makeEntry("synthetic-mcp", { displayName: "Sentetik MCP", kind: "agent_plugin", record: { category: "mcp-server", targetEvidence: [ev(WIN, CC, "vendor-declared"), ev(MAC, CC, "vendor-declared")] }, ...over });
+  makeEntry("synthetic-mcp", { displayName: "Sentetik MCP", kind: "agent_plugin", record: { category: "mcp-server", sourceSnapshot: { immutableCommit: PIN }, targetEvidence: [ev(WIN, CC, "vendor-declared"), ev(MAC, CC, "vendor-declared")] }, ...over });
 /** Even a perfectly valid JSON declaration for BOTH JSON hosts must never be turned into a Codex file. */
 const DECLS: ReviewedDeclaration[] = [
   { hostId: "claude-code-project-mcp", entryId: "synthetic-mcp", serverName: "synthetic", declaration: { command: "npx", args: ["-y", "@example/synthetic-mcp@1.2.3"] }, review: { reviewId: "REV-SYN-1", evidenceIds: ["R99"], reviewedAgainst: PIN } },
@@ -101,7 +101,7 @@ describe("Codex CLI: TOML_PREVIEW_NOT_IMPLEMENTED with truthful scope and static
     // every one of them still ends in the TOML status, never in a preview
     for (const e of [mcp({ reviewState: "quarantined" }), mcp({ enabled: false }), makeEntry("plain", { record: { category: "python-cli" } })]) expect(plan({ entry: e }).status).toBe("TOML_PREVIEW_NOT_IMPLEMENTED");
     // an explicit Codex vendor-declared row is a catalog fact, not a license: still no preview
-    const declared = mcp({ record: { category: "mcp-server", targetEvidence: [ev(WIN, CODEX, "vendor-declared")] } });
+    const declared = mcp({ record: { category: "mcp-server", sourceSnapshot: { immutableCommit: PIN }, targetEvidence: [ev(WIN, CODEX, "vendor-declared")] } });
     const p = plan({ entry: declared });
     expect(p.status).toBe("TOML_PREVIEW_NOT_IMPLEMENTED");
     expect(p.diff).toBeNull();
