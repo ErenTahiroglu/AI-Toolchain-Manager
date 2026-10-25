@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { ErrorBoundary, ErrorNotice, useLoad } from "./components/common";
 import { ActivityPage } from "./pages/Activity";
+import { CheckpointsPage } from "./pages/Checkpoints";
 import { DashboardPage } from "./pages/Dashboard";
 import { ProjectsPage } from "./pages/Projects";
 import { PromptsPage } from "./pages/Prompts";
@@ -22,6 +23,7 @@ const PAGES = [
   { id: "plan", label: "Kurulum Planı" },
   { id: "prompts", label: "İstem Kütüphanesi" },
   { id: "activity", label: "Etkinlik ve Denetim" },
+  { id: "checkpoints", label: "Checkpoint Merkezi" },
   { id: "settings", label: "Ayarlar" },
 ] as const;
 
@@ -91,6 +93,7 @@ export default function App() {
           {page === "plan" && <PlanPage />}
           {page === "prompts" && <PromptsPage />}
           {page === "activity" && <ActivityPage />}
+          {page === "checkpoints" && <CheckpointsPage />}
           {page === "settings" && <SettingsPage />}
         </ErrorBoundary>
       </main>
