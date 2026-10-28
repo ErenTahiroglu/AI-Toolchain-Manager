@@ -26,6 +26,8 @@ mod closure_tests;
 #[cfg(windows)]
 mod cng_verify;
 mod commands;
+#[cfg(test)]
+mod config_txn;
 mod consent;
 mod crash;
 mod db;

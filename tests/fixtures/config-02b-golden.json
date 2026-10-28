@@ -1,0 +1,30 @@
+{
+  "_comment": "CONFIG-02B golden cases: read by BOTH src/configPlanGolden.test.ts (the TypeScript preview) and src-tauri/src/config_txn_tests.rs (the Rust prototype). Fake values only; numbers are kept simple because JavaScript re-prints them.",
+  "cases": [
+    {
+      "name": "new file (absent)",
+      "input": null,
+      "expectedAfter": "{\n  \"mcpServers\": {\n    \"exa\": {\n      \"type\": \"http\",\n      \"url\": \"https://mcp.exa.ai/mcp\"\n    }\n  }\n}\n"
+    },
+    {
+      "name": "existing file with another server and unrelated keys",
+      "input": "{\n  \"mcpServers\": {\n    \"other\": {\n      \"type\": \"http\",\n      \"url\": \"https://example.invalid/mcp\"\n    }\n  },\n  \"note\": \"ğüş \\\"q\\\" \\\\ done\",\n  \"n\": [1, -2, 0.5, true, null]\n}\n",
+      "expectedAfter": "{\n  \"mcpServers\": {\n    \"other\": {\n      \"type\": \"http\",\n      \"url\": \"https://example.invalid/mcp\"\n    },\n    \"exa\": {\n      \"type\": \"http\",\n      \"url\": \"https://mcp.exa.ai/mcp\"\n    }\n  },\n  \"note\": \"ğüş \\\"q\\\" \\\\ done\",\n  \"n\": [\n    1,\n    -2,\n    0.5,\n    true,\n    null\n  ]\n}\n"
+    },
+    {
+      "name": "existing file without mcpServers; empty containers; compact layout",
+      "input": "{\"theme\":\"dark\",\"list\":[1,2,{\"a\":null}],\"empty\":{},\"emptyArr\":[]}",
+      "expectedAfter": "{\n  \"theme\": \"dark\",\n  \"list\": [\n    1,\n    2,\n    {\n      \"a\": null\n    }\n  ],\n  \"empty\": {},\n  \"emptyArr\": [],\n  \"mcpServers\": {\n    \"exa\": {\n      \"type\": \"http\",\n      \"url\": \"https://mcp.exa.ai/mcp\"\n    }\n  }\n}\n"
+    },
+    {
+      "name": "escapes are decoded and re-encoded the same way; mcpServers present but empty",
+      "input": "{\"mcpServers\":{},\"s\":\"a\\/b\\u0041\\n\\t\\u001f\\u00e9\"}",
+      "expectedAfter": "{\n  \"mcpServers\": {\n    \"exa\": {\n      \"type\": \"http\",\n      \"url\": \"https://mcp.exa.ai/mcp\"\n    }\n  },\n  \"s\": \"a/bA\\n\\t\\u001fé\"\n}\n"
+    },
+    {
+      "name": "server order is kept and the new one is appended last",
+      "input": "{\"mcpServers\":{\"zeta\":{\"command\":\"x\"},\"alpha\":{\"url\":\"https://example.invalid/a\"}}}",
+      "expectedAfter": "{\n  \"mcpServers\": {\n    \"zeta\": {\n      \"command\": \"x\"\n    },\n    \"alpha\": {\n      \"url\": \"https://example.invalid/a\"\n    },\n    \"exa\": {\n      \"type\": \"http\",\n      \"url\": \"https://mcp.exa.ai/mcp\"\n    }\n  }\n}\n"
+    }
+  ]
+}

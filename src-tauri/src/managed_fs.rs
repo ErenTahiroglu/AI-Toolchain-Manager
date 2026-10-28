@@ -515,3 +515,9 @@ compile_error!("managed_fs supports Windows and Unix (macOS) only");
 #[cfg(test)]
 #[path = "managed_fs_tests.rs"]
 mod tests;
+
+// CONFIG-02B (Issue #39): a TEST-ONLY prototype of a one-file transaction on synthetic directories. It is a child of this module so that it can use the
+// private handle-relative layer instead of copying it; it is not compiled in any shipping build and nothing can call it.
+#[cfg(test)]
+#[path = "managed_fs_mcp.rs"]
+mod mcp_file;
