@@ -768,6 +768,14 @@ fn the_backup_folder_must_be_private_and_must_not_be_the_project() {
     fs::write(target(&b), ORIGINAL).unwrap();
     let p = plan(&b);
     let plain = b.anchor.create_child("plain").unwrap();
+    // `create_child` makes a 0700 folder on macOS (and an inherited DACL on Windows). Make the synthetic folder demonstrably NOT owner-only
+    // before relying on it, so the test checks the rejection and not the platform's default.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(b.base.join("appdata").join("plain"), fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    assert!(!plain.is_owner_only(), "the fixture folder must not be owner-only for this case to mean anything");
     let a = test_grant(&p, 1);
     let f = b.root.commit(&p, ALIAS, Some(&a), &mut Ledger::default(), &plain, NOW).err().unwrap();
     assert_eq!(f.refusal, Refusal::BackupNotPrivate);
