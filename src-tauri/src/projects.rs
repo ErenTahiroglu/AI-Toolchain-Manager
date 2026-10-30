@@ -179,6 +179,11 @@ pub fn is_registered(conn: &Connection, alias: &str) -> bool {
     live_project(conn, alias).is_ok()
 }
 
+/// Is this alias a registered, not removed *reference* project (not the built-in sample, which has no folder)?
+pub fn is_registered_reference(conn: &Connection, alias: &str) -> bool {
+    live_project(conn, alias).is_ok_and(|p| p.kind == "reference")
+}
+
 fn clean_text(raw: &str, max: usize) -> String {
     let cleaned: String = raw.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
     cleaned.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(max).collect()

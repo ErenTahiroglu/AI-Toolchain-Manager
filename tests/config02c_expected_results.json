@@ -1,0 +1,495 @@
+{
+  "version": 1,
+  "note": "Every id below must have exactly one CONFIG02C_RESULT line per operating system. A missing line is NOT RUN and fails the gate. A SKIPPED line passes the gate only with a listed reason and is never counted as PASS.",
+  "ids": {
+    "A1": {
+      "suite": "rust",
+      "title": "blank folder refused before anything is opened",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "A2": {
+      "suite": "rust",
+      "title": "unknown / removed / invalid / sample alias refused, nothing opened",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "A3": {
+      "suite": "rust",
+      "title": "request naming a file, path or surface does not parse",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "A4": {
+      "suite": "rust",
+      "title": "traversal, device, root and unusable spellings refused, nothing opened",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "A5": {
+      "suite": "rust",
+      "title": "missing or different consent refused, nothing opened",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "A6": {
+      "suite": "rust",
+      "title": "user-asserted alias/folder pairing: read succeeds, nothing persisted",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "B1": {
+      "suite": "rust",
+      "title": "root is a link",
+      "skip_allowed": {
+        "windows": [
+          "cannot_create_directory_link"
+        ],
+        "macos": [
+          "cannot_create_directory_link"
+        ]
+      },
+      "expected_skip": {}
+    },
+    "B2": {
+      "suite": "rust",
+      "title": "ancestor is a link",
+      "skip_allowed": {
+        "windows": [
+          "cannot_create_directory_link"
+        ],
+        "macos": [
+          "cannot_create_directory_link"
+        ]
+      },
+      "expected_skip": {}
+    },
+    "B3": {
+      "suite": "rust",
+      "title": "file symlink at the name; outside file never read",
+      "skip_allowed": {
+        "windows": [
+          "cannot_create_file_symlink"
+        ],
+        "macos": [
+          "cannot_create_file_symlink"
+        ]
+      },
+      "expected_skip": {}
+    },
+    "B4": {
+      "suite": "rust",
+      "title": "directory / directory link at the name",
+      "skip_allowed": {
+        "windows": [
+          "cannot_create_directory_link"
+        ],
+        "macos": [
+          "cannot_create_directory_link"
+        ]
+      },
+      "expected_skip": {}
+    },
+    "B5": {
+      "suite": "rust",
+      "title": "hard-linked target",
+      "skip_allowed": {
+        "windows": [
+          "cannot_create_hard_link"
+        ],
+        "macos": [
+          "cannot_create_hard_link"
+        ]
+      },
+      "expected_skip": {}
+    },
+    "B6a": {
+      "suite": "rust",
+      "title": "case-variant name alone refused as an alias",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "B6b": {
+      "suite": "rust",
+      "title": "case-variant next to the exact name refused",
+      "skip_allowed": {
+        "windows": [
+          "case_insensitive_volume_cannot_hold_both"
+        ],
+        "macos": [
+          "case_insensitive_volume_cannot_hold_both"
+        ]
+      },
+      "expected_skip": {
+        "windows": "case_insensitive_volume_cannot_hold_both",
+        "macos": "case_insensitive_volume_cannot_hold_both"
+      }
+    },
+    "B7a": {
+      "suite": "rust",
+      "title": "UNC / device spelling refused before anything is opened",
+      "skip_allowed": {
+        "macos": [
+          "no_unc_or_device_spelling_on_this_platform"
+        ]
+      },
+      "expected_skip": {
+        "macos": "no_unc_or_device_spelling_on_this_platform"
+      }
+    },
+    "B7b": {
+      "suite": "rust",
+      "title": "real network mount",
+      "skip_allowed": {
+        "windows": [
+          "no_network_volume_available_on_the_runner"
+        ],
+        "macos": [
+          "no_network_volume_available_on_the_runner"
+        ]
+      },
+      "expected_skip": {
+        "windows": "no_network_volume_available_on_the_runner",
+        "macos": "no_network_volume_available_on_the_runner"
+      }
+    },
+    "B8": {
+      "suite": "rust",
+      "title": "FIFO at the name refused without hanging",
+      "skip_allowed": {
+        "windows": [
+          "fifo_is_a_unix_case"
+        ],
+        "macos": [
+          "cannot_create_fifo"
+        ]
+      },
+      "expected_skip": {
+        "windows": "fifo_is_a_unix_case"
+      }
+    },
+    "B9a": {
+      "suite": "rust",
+      "title": "unreadable target is denied, never absent",
+      "skip_allowed": {
+        "windows": [
+          "cannot_set_a_deny_entry"
+        ],
+        "macos": [
+          "running_as_root_ignores_permissions"
+        ]
+      },
+      "expected_skip": {}
+    },
+    "B9b": {
+      "suite": "rust",
+      "title": "target held without sharing is denied as locked",
+      "skip_allowed": {
+        "macos": [
+          "mandatory_sharing_locks_are_a_windows_case"
+        ]
+      },
+      "expected_skip": {
+        "macos": "mandatory_sharing_locks_are_a_windows_case"
+      }
+    },
+    "B11": {
+      "suite": "rust",
+      "title": "missing root vs missing file vs file-as-folder",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "C1": {
+      "suite": "rust",
+      "title": "empty file",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "C2": {
+      "suite": "rust",
+      "title": "cap is exact, larger yields no digest",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "C3": {
+      "suite": "rust",
+      "title": "byte order mark",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "C4": {
+      "suite": "rust",
+      "title": "invalid UTF-8 / UTF-16",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "C5": {
+      "suite": "rust",
+      "title": "duplicate keys at any depth",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "C6": {
+      "suite": "rust",
+      "title": "structure limits and JSON errors",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "C7": {
+      "suite": "rust",
+      "title": "lone surrogate",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "C8": {
+      "suite": "rust",
+      "title": "active content never reaches the result",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "C9": {
+      "suite": "rust",
+      "title": "reviewed-declaration states",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "C9b": {
+      "suite": "rust",
+      "title": "URL rule agrees with the 02B prototype",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "D1": {
+      "suite": "rust",
+      "title": "append after first read: changed_during_read, no data",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "D1b": {
+      "suite": "rust",
+      "title": "equal-length overwrite caught by the second read",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "D1c": {
+      "suite": "rust",
+      "title": "same-size edit with time restored before the second read: caught by comparing the two reads",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "D1d": {
+      "suite": "rust",
+      "title": "equal-length edit after the second read: caught by the last-write time",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "D2": {
+      "suite": "rust",
+      "title": "file replaced between stat and open",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "D2b": {
+      "suite": "rust",
+      "title": "file replaced after both reads: caught by the last look at the name",
+      "skip_allowed": {
+        "windows": [
+          "cannot_replace_an_open_file"
+        ],
+        "macos": [
+          "cannot_replace_an_open_file"
+        ]
+      },
+      "expected_skip": {}
+    },
+    "D3": {
+      "suite": "rust",
+      "title": "link swapped in between stat and open",
+      "skip_allowed": {
+        "windows": [
+          "cannot_create_file_symlink"
+        ],
+        "macos": [
+          "cannot_create_file_symlink"
+        ]
+      },
+      "expected_skip": {}
+    },
+    "D4": {
+      "suite": "rust",
+      "title": "file deleted after open: no mixed result",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "D5": {
+      "suite": "rust",
+      "title": "folder renamed while open: only the walked folder's bytes",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "D6": {
+      "suite": "rust",
+      "title": "no value survives into the next call",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "D7": {
+      "suite": "rust",
+      "title": "every call opens the root afresh",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "D8": {
+      "suite": "rust",
+      "title": "same-size edit with time restored: documented residual, digest is of bytes read",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "D9": {
+      "suite": "rust",
+      "title": "the reader leaves the folder as it found it",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "E1": {
+      "suite": "rust",
+      "title": "no secret in env/header/args/url/command crosses",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "E2": {
+      "suite": "rust",
+      "title": "heuristic-evading secret crosses nothing",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "E3": {
+      "suite": "rust",
+      "title": "no other server name returned",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "E4": {
+      "suite": "rust",
+      "title": "unknown keys and comment-like strings not returned",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "E5": {
+      "suite": "rust",
+      "title": "typed folder text appears nowhere",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "E6": {
+      "suite": "rust",
+      "title": "parse errors carry a code and no text",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "E7": {
+      "suite": "rust",
+      "title": "serialised result has only the contract's fields and closed strings",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "E8": {
+      "suite": "rust",
+      "title": "metadata-only fallback, not a redacted dump",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "F1": {
+      "suite": "rust",
+      "title": "no table changes after any outcome",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "F2": {
+      "suite": "rust",
+      "title": "no new table, no migration, no persistence",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "F6": {
+      "suite": "rust",
+      "title": "no status can carry a not-configured / verified value",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "G2": {
+      "suite": "rust",
+      "title": "read-only module contains none of the forbidden calls",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "F3": {
+      "suite": "vitest",
+      "title": "pasted-text preview still works (never opened, declined, failed, succeeded)",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "F4": {
+      "suite": "vitest",
+      "title": "Temizle / new read / context change / unmount / 5-minute timer clear the result",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "F5": {
+      "suite": "vitest",
+      "title": "no forbidden claim in any fixed text or status",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "F6ui": {
+      "suite": "vitest",
+      "title": "no verified badge or not-configured value for absent/denied/unsafe/root_not_found",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "G4": {
+      "suite": "vitest",
+      "title": "component has no console/storage/clipboard/network/link/apply",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "U1": {
+      "suite": "vitest",
+      "title": "collapsed by default; one click = one call; decline = zero calls",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "U2": {
+      "suite": "vitest",
+      "title": "closed answer accepted only in its exact shape",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "U2b": {
+      "suite": "vitest",
+      "title": "hostile answer shows only the fixed unexpected sentence",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "U3": {
+      "suite": "vitest",
+      "title": "digest comparison wording",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "U4": {
+      "suite": "vitest",
+      "title": "every fixed sentence of the panel appears verbatim in the reviewed request",
+      "skip_allowed": {},
+      "expected_skip": {}
+    }
+  },
+  "not_collected": {
+    "B10": "cannot be requested: no part of the file name comes from input (contract section 4); no test",
+    "G1": "tests/test_config02c_contract.py (exactly one command, one permission, no dependency, no migration)",
+    "G3": "tests/test_config02c_contract.py (the set of production files that name the target)",
+    "G5": "tools/config02c_results_check.py and tests/test_config02c_results_check.py",
+    "F7": "the existing discovery tests, unchanged",
+    "GUI": "NOT RUN: real window, focus order, screen reader, WebView2 egress (#25)"
+  }
+}

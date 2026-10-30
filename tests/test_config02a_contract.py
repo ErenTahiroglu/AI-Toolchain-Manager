@@ -68,7 +68,8 @@ class Reach(unittest.TestCase):
         self.assertEqual(len(migrations), 10)
         self.assertEqual(migrations[-1], "0010_codex_cli_surface.sql")
         for rel in ("src-tauri/src/commands.rs", "src-tauri/src/lib.rs"):
-            self.assertNotRegex(read(rel), r"(?i)fn\s+\w*(mcp_config|config_preview|config_plan|write_config|apply_config|exa)\w*")
+            # CONFIG-02C (Issue #40, owner-authorized): exactly one command, `read_project_mcp_config`, and its single permission are allowed; tests/test_config02c_contract.py pins that they are the only ones.
+            self.assertNotRegex(read(rel).replace("read_project_mcp_config", ""), r"(?i)fn\s+\w*(mcp_config|config_preview|config_plan|write_config|apply_config|exa)\w*")
 
 
 class Documents(unittest.TestCase):

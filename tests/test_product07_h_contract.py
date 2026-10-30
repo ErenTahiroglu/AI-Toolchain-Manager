@@ -125,7 +125,8 @@ class NothingNewIsGranted(unittest.TestCase):
         for rel in ("src-tauri/src/commands.rs", "src-tauri/src/lib.rs"):
             self.assertNotRegex(read(rel), r"(?i)fn\s+\w*(declar|scoped|origin_method)\w*")
         perms = json.loads(read("src-tauri/capabilities/default.json"))["permissions"]
-        for p in perms:
+        # CONFIG-02C (Issue #40, owner-authorized): exactly one command, `read_project_mcp_config`, and its single permission are allowed; tests/test_config02c_contract.py pins that they are the only ones.
+        for p in [x for x in perms if x != "allow-read-project-mcp-config"]:
             self.assertIsNone(re.search(r"fs|shell|http|opener|dialog|clipboard|process|os:|path|window|declar|mcp", p, re.I), p)
         pkg = json.loads(read("package.json"))
         self.assertFalse([n for n in {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})} if re.search(r"toml|yaml|jsonc|json5", n)])

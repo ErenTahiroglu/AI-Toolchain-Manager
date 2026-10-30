@@ -32,7 +32,8 @@ class Isolation(unittest.TestCase):
         self.assertRegex(read("src-tauri/src/config_txn.rs"), r'#\[cfg\(test\)\]\r?\n#\[path = "config_txn_tests\.rs"\]\r?\nmod tests;')
 
     def test_nothing_else_refers_to_them(self):
-        own = {"config_txn.rs", "config_txn_tests.rs", "managed_fs_mcp.rs", "managed_fs_mcp_tests.rs", "lib.rs", "managed_fs.rs"}
+        # mcp_read_tests.rs (test-compiled only) compares the CONFIG-02C URL rule with the prototype's `url_identity`; no production file may refer to the prototype
+        own = {"config_txn.rs", "config_txn_tests.rs", "managed_fs_mcp.rs", "managed_fs_mcp_tests.rs", "lib.rs", "managed_fs.rs", "mcp_read_tests.rs"}
         for path in SRC.rglob("*.rs"):
             if path.name in own:
                 continue
@@ -40,8 +41,9 @@ class Isolation(unittest.TestCase):
             self.assertIsNone(re.search(r"\bconfig_txn\b|\bmcp_file\b|managed_fs_mcp|ProjectRoot", text), str(path))
 
     def test_no_command_capability_migration_or_dependency_was_added(self):
-        self.assertEqual(len(re.findall(r"#\[tauri::command\]", read("src-tauri/src/commands.rs"))), 36)
-        for p in json.loads(read("src-tauri/capabilities/default.json"))["permissions"]:
+        # CONFIG-02C (Issue #40, owner-authorized): exactly one command, `read_project_mcp_config`, and its single permission are allowed; tests/test_config02c_contract.py pins that they are the only ones.
+        self.assertEqual(len(re.findall(r"#\[tauri::command\]", read("src-tauri/src/commands.rs"))), 37)
+        for p in [x for x in json.loads(read("src-tauri/capabilities/default.json"))["permissions"] if x != "allow-read-project-mcp-config"]:
             self.assertIsNone(re.search(r"fs|shell|http|opener|dialog|clipboard|process|os:|path", p, re.I), p)
         migrations = sorted(p.name for p in (ROOT / "src-tauri" / "migrations").glob("*.sql"))
         self.assertEqual((len(migrations), migrations[-1]), (10, "0010_codex_cli_surface.sql"))

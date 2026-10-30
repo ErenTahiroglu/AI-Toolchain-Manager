@@ -1,6 +1,6 @@
 # CONFIG-02C — threat model, privacy rules and the test plan for the one-file read (design only)
 
-Issue #40, revision **R1** (after the independent decision `CONFIG_02C_DESIGN_ACCEPTED_WITH_REVISIONS`; see the contract's §11). Companion to `READ_ONLY_CONTRACT.md` (section numbers `§` refer to it). **No test in §3 exists yet and none has been run: there is no implementation to test.** Green CI runs of this design (41018361348 at `75fc20e`, and any run of this revision) check documents, text guards and unchanged regressions; they are **not evidence of a reader**. This document says what an implementation must be tested against before it may be approved; it is not evidence of anything except what §1 states. `READ_NOT_GRANTED`.
+Issue #40, revision **R2** (the implementation the owner authorized; flags `READ_IMPLEMENTATION_AUTHORIZED` · `REAL_USER_PROJECT_NOT_READ` · `FEATURE_NOT_INDEPENDENTLY_ACCEPTED`, see `REAL_READ_AUTHORIZATION_REQUEST.md` §8). Companion to `READ_ONLY_CONTRACT.md` (section numbers `§` refer to it). **The cases of §3 are implemented as Rust and vitest tests (map in §3a); this document does not say they passed.** What passed, on which operating system, at which commit, is stated only in the Issue after the exact-SHA CI run, from the `CONFIG02C_RESULT` lines of §0 — a green CI run is supporting evidence, never acceptance. Developer and CI read only synthetic fixtures made under a temporary directory; **no real project file was read** (`REAL_USER_PROJECT_NOT_READ`).
 
 ## 0. Evidence vocabulary (used in every table)
 
@@ -12,7 +12,7 @@ Issue #40, revision **R1** (after the independent decision `CONFIG_02C_DESIGN_AC
 | **BLOCKED** | The environment prevented execution (for example Windows Smart App Control blocked the freshly built binary). Not a failure of the code and not a pass |
 | **NOT RUN** | Nothing was executed — the implementation does not exist, or it was not attempted |
 
-**Design condition for the future test code (closes finding F8; R1 reviewer decision O5).** Every test case writes **exactly one result line** to a results file whose path comes from the environment variable `CONFIG02C_RESULTS` (default: a file in the test's own temporary area): `CONFIG02C_RESULT <test-id> <os> <PASS|FAIL|SKIPPED|BLOCKED> [reason-code]`. A case that cannot be built (no symlink privilege, no junction, no `subst`, no mount, no permission to deny) writes `SKIPPED` with a reason and returns; it never `eprintln!`s and returns silently. The CI step for this module must (a) run `cargo test config02c -- --nocapture --test-threads=1`, (b) print the results file, (c) **fail if any ID listed in this plan has no result line for that OS** (such an ID is `NOT RUN`, never PASS), (d) upload the results file as a CI artifact next to the log, and (e) produce an ID × OS summary table. A report may say "PASS on both OSs" only for IDs with an explicit `PASS` line on **each** OS; a `SKIPPED` line is never counted as PASS, even when the surrounding test function reports `ok`. 02B's tests are **not** retrofitted by this change; their file-symlink case therefore remains unverifiable from CI output.
+**Result lines (implemented; closes finding F8; R1 reviewer decision O5, revised in R2).** Every case ends in exactly **one** line on standard output, and — when the environment variable `CONFIG02C_RESULTS` names a file — appended to that file: `CONFIG02C_RESULT|<id>|<os>|<status>|<reason>` with `<os>` ∈ {`windows`, `macos`}, `<status>` ∈ {`PASS`, `FAIL`, `SKIPPED`, `BLOCKED`} and `<reason>` a fixed short code (empty for PASS/FAIL; never a path). R1 sketched a space-delimited form; R2 uses pipes so that a reason can never be mistaken for a field. A case that cannot be built (no privilege for a symlink, no junction, no mount, no way to deny access) writes `SKIPPED` with its reason and returns; it never prints to standard error and returns silently. A case that panics writes `FAIL` and still fails the test. **An id with no line for an operating system is `NOT RUN`.** The CI step `CONFIG-02C evidence` (a) runs `cargo test config02c -- --nocapture --test-threads=1` and the vitest file of the panel with the verbose reporter, (b) collects the lines, (c) runs `tools/config02c_results_check.py` against `tests/config02c_expected_results.json`, which **fails the job** if any id has no line, has `FAIL`/`BLOCKED`, has two different lines, or is `SKIPPED` with a reason the manifest does not list for that operating system, (d) uploads the lines and the table as an artifact, and (e) prints the id × status table and one `CONFIG02C_RESULTS|<os>|PASS=n|SKIPPED=n|FAIL=n|BLOCKED=n|NOT_RUN=n` line. A report may say "PASS on both OSs" only for ids with an explicit `PASS` line on **each** OS; a `SKIPPED` line is never counted as PASS, even when the surrounding test function reports `ok`. `tests/test_config02c_results_check.py` runs that gate on synthetic lines (missing id, skip, fail, duplicate, foreign line). 02B's tests are **not** retrofitted by this change; their file-symlink case therefore remains unverifiable from CI output.
 
 **Independence (R1, decision O2).** The reader's tests have their **own fixtures, own IDs and own result lines**. They are not 02B tests renamed or re-run, and a 02B pass or skip never counts toward them. Their negative cases (links, hard link, case alias, race, privacy canaries) must run against the *read-only module*, not against the 02B writer.
 
@@ -22,7 +22,7 @@ Fixtures are created by the test under the runner's temporary directory (canonic
 
 ## 1. Evidence that exists today
 
-All of it concerns **existing** code at `7fde8384733ac5b577835560f69438de40bb94a1`; none of it exercises the proposed read.
+This table is the R1 record about **existing** code at `7fde8384733ac5b577835560f69438de40bb94a1` and is kept for provenance; none of it exercises the reader. The evidence for the reader (R2) is the CI run named in the Issue and its uploaded result lines, not this table.
 
 | Item | Platform | Status | Notes |
 |---|---|---|---|
@@ -36,7 +36,7 @@ All of it concerns **existing** code at `7fde8384733ac5b577835560f69438de40bb94a
 
 ## 2. What the committed guard test checks (and why it is only that)
 
-`tests/test_config02c_contract.py` is a documentation-and-reach guard, in the style of the existing per-phase contract tests. It checks: the three documents exist and state `READ_NOT_GRANTED`, and the contract states revision `CONFIG_02C_DESIGN_R1` and the reviewer decision; the status vocabulary is the same closed list in all three; every `FsError::code()` string in `managed_fs.rs` has a row in the mapping table; **the set of production source files that name `.mcp.json` is exactly the set found in the F1/F2 inspection** (so a new reader cannot be added silently); the command count, capability file, Cargo dependencies, migrations and the absence of any dialog/fs plugin are unchanged; no file under `src/` imports a Tauri dialog/fs plugin; the O1 labels, the O4 decision (D4a recommended, D4b NO/deferred), the no-secure-erase / WebView-exposure statement, the disclosure of ancestor metadata and root entry-name inspection, the result-line format of §0 and the unchecked owner boxes are all present; and none of the overclaims the review withdrew ("nothing outside the file is read", "erased when the call ends") appears. It checks wording and structure only. It deliberately has no Rust counterpart: a Rust "contract test" would need production types that must not exist yet, and the one empirical question a Rust test could answer (how the existing `fsx` reader treats a hard-linked or case-variant `.mcp.json`) is answered by reading `fsx.rs` and is labelled *source-inspected* in the contract (F4).
+`tests/test_config02c_contract.py` is a documentation-and-reach guard, in the style of the existing per-phase contract tests, **updated deliberately for the owner-authorized implementation** (it was not disabled). It checks: the three documents exist and carry the three status flags; the owner's response block is exactly the transcribed authorization record (the ticked boxes are the recorded answers and nothing else, with the provenance link and the sentence that it is not a direct owner comment); the status vocabulary is the same closed list in the contract, the request, the Rust `Status` enum and the TypeScript table; every `FsError::code()` string has a row in the mapping table; **exactly one** new command (`read_project_mcp_config`, 37 in total) and **exactly one** new permission exist and are registered in `build.rs`, `lib.rs`, `capabilities/default.json` and `health.rs`; the set of production files that name `.mcp.json` is exactly the known set; `pub directory: String` appears only in the old scan's request and the new request; the new request type has `deny_unknown_fields` and no `Debug`; the response struct's fields equal the contract's list; the read-only module and the typed-result module contain none of the forbidden calls (G2) and no production file refers to the 02B prototype; the panel component is mounted only by `ConfigPreview` and `api.ts`/the component are the only frontend files that name the command; Cargo dependencies, plugins and migrations are unchanged; the wording the reviewer required (O1–O5), the disclosures and the absence of the withdrawn overclaims are present; every id of the manifest has a case in the Rust or vitest sources and vice versa; and the CI workflow runs the result gate on both operating systems and uploads its output. It checks wording, structure and reach only. Behaviour is what the Rust and vitest cases show, per operating system, through the result lines.
 
 ## 3. Threat → test table (for the implementation phase)
 
@@ -133,6 +133,31 @@ For every position below, the fixture file contains a unique sentinel; the test 
 | G4 | No `console.*`, `localStorage`, `sessionStorage`, `navigator.clipboard`, `fetch`, `XMLHttpRequest`, `window.open` in the new component |
 | G5 | The CI step for the module prints and uploads its `CONFIG02C_RESULT` lines, fails on a missing ID × OS line, and a `SKIPPED` line is never summarised as PASS (§0) |
 
+## 3a. Implementation map (R2)
+
+Where each id lives and what the manifest (`tests/config02c_expected_results.json`) allows per operating system. Rust cases: `src-tauri/src/mcp_read_tests.rs` (A, C, E, F, mapping) and `src-tauri/src/managed_fs_read_tests.rs` (B, D, G2); support in `config02c_support.rs`. Vitest cases: `src/FileSnapshot.test.tsx` (F3–F6, G4, U1–U3).
+
+| Id | Rows of §3 it covers | Notes |
+|---|---|---|
+| A1–A6 | A | A1/A2/A4/A5 assert, through a call counter on the root-open seam, that nothing was opened. A6 pins that nothing is persisted |
+| B1–B5, B6a, B6b, B11 | B | link, hard link and case-alias cases; **B6b is SKIPPED on a case-insensitive volume** (Windows NTFS and default APFS cannot hold both names) with the reason `case_insensitive_volume_cannot_hold_both`; B6a (a variant name alone) runs everywhere |
+| B7a, B7b | B7 | B7a: UNC/device spellings refused before anything is opened (Windows; SKIPPED on macOS, which has no such spelling). B7b: a real network mount cannot be provided on a runner → **SKIPPED by design on both**, never PASS |
+| B8 | B8 | FIFO at the name (macOS; SKIPPED on Windows) |
+| B9a, B9b | B9 | B9a: unreadable target (`icacls /deny` / `chmod 000`, skipped as root); B9b: a target held without sharing (Windows only; SKIPPED on macOS). Unreadable *root* is not tested |
+| B10 | B10 | no test: no part of the name comes from input |
+| C1–C9 (+C9b) | C | C9b compares the URL rule with the 02B prototype's `url_identity` on shared inputs |
+| D1–D8 (+D1b, D9) | D | D4/D5 record the observed outcome (Windows may refuse the folder rename while the root handle is held); D8 asserts only what the digest is of; D9 asserts the reader leaves content, last-write time and entry count unchanged |
+| E1–E8 | E | one unique sentinel per position, searched for in the response (JSON and Debug), the error text and a dump of every table of an in-memory database |
+| F1, F2, F6 | F | table dump before/after, no new table or migration, no status that can carry a not-configured or verified value |
+| F3, F4, F5, F6ui | F | vitest: the paste preview, clearing (button, new read, context change, close, unmount, 5-minute timer), forbidden wording, no badge |
+| G1, G3 | G | `tests/test_config02c_contract.py` |
+| G2 | G | the read-only module and the typed-result module contain none of the forbidden calls |
+| G4 | G | vitest: the component source |
+| G5 | G | `tools/config02c_results_check.py` + `tests/test_config02c_results_check.py` + the CI step |
+| U1–U3 | (added) | one click = one call with exactly `{alias, directory, consent}`, declining = zero calls, strict acceptance of the answer, the digest comparison wording |
+
+Not run and not claimed: real GUI, keyboard focus order, screen-reader output, WebView2 runtime egress and profile state (#25); real network mounts; an unreadable root; macOS behaviour until the macOS run's lines are in the artifact.
+
 ## 4. Residual risks that tests cannot remove
 
 * The pairing alias ↔ folder is a user assertion (A6).
@@ -143,7 +168,7 @@ For every position below, the fixture file contains a unique sentinel; the test 
 * The reader's strictness differs from Claude Code's parser; `present_metadata_only` is not "invalid".
 * The typed path exists in the WebView's JavaScript memory and input element, crosses IPC into Rust as request input, and may persist in memory the application does not control (JS string/GC behaviour, the WebView2 runtime, OS memory). Removing it from component state after the call is hygiene, **not** a secure erase, and nothing here hides it from the renderer. #25 (WebView2 runtime egress/profile state) is unresolved and unmeasured by this plan. A picker would keep the path in Rust but adds a dependency and a capability, and is a separate decision.
 * Screen sharing: a displayed digest or `serverCount` is visible to anyone who can see the screen. No file text is.
-* macOS behaviour is design-only until a macOS CI run executes the above; Windows local Rust execution is currently BLOCKED (§1).
+* macOS behaviour is evidenced only by the macOS lines of the CI artifact; Windows local Rust execution has at times been BLOCKED by Smart App Control (never worked around).
 
 ## 5. Questions for the independent Red Team
 

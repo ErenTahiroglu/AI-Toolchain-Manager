@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppError, AppInfo, AuditEvent, CatalogEntry, ChainReport, Dashboard, DiagnosticRow, Evaluation, ExecutionBlock, HealthReport,
   CleanupPlan, InstallAction, InstalledDetails, InstallPlan, InstallPreview, InstallResult, Inventory, PlanRequest, PreferenceView, ProjectView,
-  PromptSourceRow, RecoverySummary, ScanRequest, ScanSummary, Scenario, Settings, StartupState, TaskInput, ToolState, UrlPreview,
+  PromptSourceRow, ReadMcpConfigRequest, ReadMcpConfigResult, RecoverySummary, ScanRequest, ScanSummary, Scenario, Settings, StartupState, TaskInput, ToolState, UrlPreview,
 } from "./types";
 
 /** Normalises whatever the IPC layer throws into the AppError shape the UI renders. */
@@ -72,6 +72,8 @@ export const api = {
 
   // Read-only discovery. Never installs, runs or verifies anything.
   runDiscoveryScan: (request: ScanRequest) => call<ScanSummary>("run_discovery_scan", { request }),
+  // CONFIG-02C: one explicit, user-confirmed, read-only look at .mcp.json in one typed folder. Returns a closed typed answer; nothing is stored.
+  readProjectMcpConfig: (request: ReadMcpConfigRequest) => call<ReadMcpConfigResult>("read_project_mcp_config", { request }),
   listInventory: () => call<Inventory>("list_inventory"),
   // Read-only preview of old database backups; it cannot delete anything.
   previewBackupCleanup: () => call<CleanupPlan>("preview_backup_cleanup"),

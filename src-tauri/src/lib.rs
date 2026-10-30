@@ -27,6 +27,8 @@ mod closure_tests;
 mod cng_verify;
 mod commands;
 #[cfg(test)]
+mod config02c_support;
+#[cfg(test)]
 mod config_txn;
 mod consent;
 mod crash;
@@ -44,6 +46,7 @@ mod lifecycle;
 mod managed_fs;
 mod managed_fs_probe;
 mod managed_root;
+mod mcp_read;
 mod os_approval;
 mod os_hello;
 mod pilot_allowance;
@@ -250,6 +253,7 @@ pub fn run() {
             commands::evaluate_task,
             commands::run_discovery_scan,
             commands::list_inventory,
+            commands::read_project_mcp_config,
             commands::preview_backup_cleanup,
             commands::plan_install,
             commands::list_install_states,

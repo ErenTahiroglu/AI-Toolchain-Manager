@@ -326,6 +326,7 @@ pub const ALLOWED_PERMISSIONS: &[&str] = &[
     "allow-evaluate-task",
     "allow-run-discovery-scan",
     "allow-list-inventory",
+    "allow-read-project-mcp-config",
     "allow-preview-backup-cleanup",
     "allow-plan-install",
     "allow-list-install-states",

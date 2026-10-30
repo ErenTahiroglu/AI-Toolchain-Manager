@@ -349,7 +349,9 @@ describe("no new privilege, no new I/O", () => {
   it("the Tauri capability still grants no filesystem, shell, HTTP, dialog, clipboard or configuration permission", () => {
     const permissions = (JSON.parse(capabilitySource) as { permissions: string[] }).permissions;
     expect(permissions.length).toBeGreaterThan(20);
-    for (const p of permissions) {
+    // CONFIG-02C (Issue #40, owner-authorized): exactly ONE permission names the one-file read command; nothing else may name a configuration, MCP or Codex command.
+    expect(permissions.filter((p) => p === "allow-read-project-mcp-config")).toHaveLength(1);
+    for (const p of permissions.filter((x) => x !== "allow-read-project-mcp-config")) {
       expect(p, p).not.toMatch(/fs|shell|http|opener|dialog|clipboard|process|os:|path|window/i);
       expect(p, p).not.toMatch(/config|mcp|codex|write-file|apply/i);
     }

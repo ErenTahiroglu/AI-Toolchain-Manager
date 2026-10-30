@@ -72,13 +72,16 @@ class CapabilityAndCommandsUnchanged(unittest.TestCase):
     def test_the_capability_grants_no_filesystem_shell_network_or_codex_permission(self):
         permissions = json.loads(read("src-tauri/capabilities/default.json"))["permissions"]
         self.assertGreater(len(permissions), 20)
-        for p in permissions:
+        # CONFIG-02C (Issue #40, owner-authorized): exactly one command, `read_project_mcp_config`, and its single permission are allowed; tests/test_config02c_contract.py pins that they are the only ones.
+        self.assertEqual(permissions.count("allow-read-project-mcp-config"), 1)
+        for p in [x for x in permissions if x != "allow-read-project-mcp-config"]:
             self.assertIsNone(re.search(r"fs|shell|http|opener|dialog|clipboard|process|os:|path|window", p, re.I), p)
             self.assertIsNone(re.search(r"config|mcp|codex|write-file|apply", p, re.I), p)
 
     def test_no_rust_command_for_codex_or_configuration_was_added(self):
         for rel in ("src-tauri/src/commands.rs", "src-tauri/src/lib.rs"):
-            self.assertNotRegex(read(rel), r"(?i)fn\s+\w*(codex|mcp_config|config_preview|config_plan|write_config|apply_config|toml)\w*")
+            # CONFIG-02C (Issue #40, owner-authorized): exactly one command, `read_project_mcp_config`, and its single permission are allowed; tests/test_config02c_contract.py pins that they are the only ones.
+            self.assertNotRegex(read(rel).replace("read_project_mcp_config", ""), r"(?i)fn\s+\w*(codex|mcp_config|config_preview|config_plan|write_config|apply_config|toml)\w*")
 
     def test_no_dependency_was_added(self):
         pkg = json.loads(read("package.json"))

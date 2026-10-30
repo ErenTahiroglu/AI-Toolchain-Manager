@@ -226,6 +226,19 @@ pub fn run_discovery_scan(state: State<'_, AppState>, request: ScanRequest) -> A
     })
 }
 
+/// CONFIG-02C (Issue #40): one explicit, user-confirmed, read-only look at `.mcp.json` directly inside ONE project folder the user typed for this call.
+/// The request names no file; the response is a closed, typed value (statuses, a size, a SHA-256, a count, two closed enums about one reviewed
+/// declaration) and contains no file text, no path and no name from the file. Nothing is stored, logged or written; no process, no network.
+/// It does not call, change or merge with `run_discovery_scan`. The database is consulted only to confirm the alias, and its lock is released
+/// before any file is touched.
+#[tauri::command]
+pub fn read_project_mcp_config(
+    state: State<'_, AppState>,
+    request: crate::mcp_read::ReadMcpConfigRequest,
+) -> AppResult<crate::mcp_read::ReadMcpConfigResult> {
+    crate::mcp_read::handle(&request, |alias| state.with_db(|c| Ok(projects::is_registered_reference(c, alias))).unwrap_or(false))
+}
+
 /// Read-only preview of old pre-migration backups. It never deletes, moves or rewrites a backup.
 #[tauri::command]
 pub fn preview_backup_cleanup(state: State<'_, AppState>) -> AppResult<crate::backups::CleanupPlan> {

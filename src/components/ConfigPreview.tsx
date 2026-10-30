@@ -1,13 +1,16 @@
 // CONFIG-01 - "Yapılandırma önizlemesi": a read-only preview of what a project's MCP configuration FILE would look like if one reviewed declaration were added.
 // It lives inside one matrix row, so the project, operating system, agent surface and catalog entry are exactly the row's - nothing is chosen for the user and
-// nothing is defaulted. It reads no file (the user pastes text or picks "new file"), writes no file, calls no IPC command, uses no clipboard, no network and no
-// storage, and offers no "apply". The decision itself stays in the matrix; this is not a preference-writing surface. All logic is in src/configPlan.ts.
+// nothing is defaulted. The PREVIEW itself reads no file (the user pastes text or picks "new file"), writes no file, calls no IPC command, uses no clipboard, no network
+// and no storage, and offers no "apply". The decision itself stays in the matrix; this is not a preference-writing surface. All logic is in src/configPlan.ts.
+// CONFIG-02C: for Claude Code (terminal) rows a SEPARATE, collapsed, opt-in section (components/FileSnapshot.tsx) can take one explicit read of .mcp.json; it is a
+// sibling of the preview, not a part of it, and the preview behaves exactly the same whether that section is never opened, declined, fails or succeeds.
 import { useEffect, useId, useRef, useState } from "react";
 import { agentHostFor } from "../agentHosts";
 import { platformLabel, surfaceLabel } from "../labels";
 import { REVIEWED_DECLARATIONS, type ReviewedDeclaration } from "../configDeclarations";
 import { isMcpEntry, isPlanStale, planConfigPreview, type PlanRequest, type PreviewPlan } from "../configPlan";
 import type { CatalogEntry } from "../types";
+import { FileSnapshot } from "./FileSnapshot";
 
 type Mode = "" | "new" | "text";
 
@@ -127,8 +130,9 @@ export function ConfigPreview({ entry, alias, projectName, platform, surface, de
     <details className="cfg-preview">
       <summary>Yapılandırma önizlemesi — salt okunur, hiçbir dosyaya yazmaz</summary>
       <p className="small">
-        Bu bölüm bir dosyayı <strong>okumaz ve yazmaz</strong>, bir şey kurmaz, çalıştırmaz, ağa bağlanmaz ve tercihinizi değiştirmez. Yalnızca, onaylı bir bildirim varsa, bu projenin
+        Bu önizleme bir dosyayı <strong>okumaz ve yazmaz</strong>, bir şey kurmaz, çalıştırmaz, ağa bağlanmaz ve tercihinizi değiştirmez. Yalnızca, onaylı bir bildirim varsa, bu projenin
         MCP yapılandırma dosyasının nasıl değişeceğini sizin verdiğiniz metin üzerinden gösterir. Karar yine yalnızca yukarıdaki alanlardan, sizin açık eyleminizle kaydedilir.
+        {surface === "claude-code-terminal" && " Aşağıdaki “Dosyadan oku” bölümü bundan ayrıdır: varsayılan olarak kapalıdır ve yalnızca siz onaylarsanız tek bir dosyayı okur; hiçbir şeye yazmaz."}
       </p>
       {tomlTarget && (
         <p className="small" role="note">
@@ -164,6 +168,9 @@ export function ConfigPreview({ entry, alias, projectName, platform, surface, de
       {message && <p role="status" className="bad-text">{message}</p>}
       {stale && <p role="status" className="bad-text">Girdi değişti (metin, seçim veya katalog kaydı); önceki önizleme eskidi ve gizlendi. Yeniden “Değişiklik önizle” deyin.</p>}
       {plan && !stale && <PlanView plan={plan} projectName={projectName} entryName={entry.displayName} />}
+      {surface === "claude-code-terminal" && (
+        <FileSnapshot alias={alias} projectName={projectName} platform={platform} surface={surface} entryId={entry.entryId} pastedText={!tomlTarget && mode === "text" && text !== "" ? text : null} />
+      )}
     </details>
   );
 }

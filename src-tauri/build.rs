@@ -19,6 +19,7 @@ const COMMANDS: &[&str] = &[
     "evaluate_task",
     "run_discovery_scan",
     "list_inventory",
+    "read_project_mcp_config",
     "preview_backup_cleanup",
     "plan_install",
     "list_install_states",

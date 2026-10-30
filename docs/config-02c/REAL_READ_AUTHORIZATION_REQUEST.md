@@ -1,6 +1,12 @@
-# CONFIG-02C — request for the owner's decision on ONE real read operation
+# CONFIG-02C — the owner's decision on ONE real read operation (request R1, authorization recorded, implementation R2)
 
-Issue #40, revision **R1** (after the independent decision `CONFIG_02C_DESIGN_ACCEPTED_WITH_REVISIONS`, [comment](https://github.com/ErenTahiroglu/AI-Toolchain-Manager/issues/40#issuecomment-6518093495)). **This is a request, not a grant. `READ_NOT_GRANTED`.** The reviewer's technical recommendations (§7a) are **not** the owner's approval of D1–D9. Reading this document, merging it, or a green CI run authorises nothing. Every box in §8 is unchecked; the default answer to every question is **NO**. Approval, if given, must be recorded by the owner in Issue #40 in their own words, naming the decisions below, and applies **only** to what it names (approval in one context does not extend to another).
+Issue #40. **Status flags (R2): `READ_IMPLEMENTATION_AUTHORIZED` · `REAL_USER_PROJECT_NOT_READ` · `FEATURE_NOT_INDEPENDENTLY_ACCEPTED`.** Three different things are kept apart on purpose:
+
+1. **The owner approved building it — recorded, not signed here.** In a chat the owner answered "İkisine de EVET" to `CONFIG02C_READ_IMPLEMENTATION: EVET/HAYIR`. The independent reviewer recorded that in [Issue #40 comment 6519548226](https://github.com/ErenTahiroglu/AI-Toolchain-Manager/issues/40#issuecomment-6519548226), posted through the GitHub integration. That comment is a *record of a chat instruction*; it is **not** a comment the owner wrote directly on GitHub, **not** an owner signature, and **not** an independent acceptance. §8 transcribes it and signs nothing.
+2. **No end user has consented to any read yet.** The application asks for a fresh confirmation (§4) every time; nobody has exercised it. Developer and CI read only synthetic fixtures made under a temporary directory. No real project file has been read (`REAL_USER_PROJECT_NOT_READ`). The approval of (1) is **not** permission for the author, for CI or for a reviewer to open any personal or project file.
+3. **The implementation is not accepted.** It needs exact-SHA Windows x64 + macOS arm64 CI (with every `CONFIG02C_RESULT` line present) and an independent Red Team review (`FEATURE_NOT_INDEPENDENTLY_ACCEPTED`).
+
+History: R1 of this document was a request (`READ_NOT_GRANTED`, every box blank, [reviewer decision](https://github.com/ErenTahiroglu/AI-Toolchain-Manager/issues/40#issuecomment-6518093495) `CONFIG_02C_DESIGN_ACCEPTED_WITH_REVISIONS`). The reviewer's technical recommendations (§7a) are **not** the owner's approval; the owner's answer is the record in §8. The approval applies **only** to what it names (approval in one context does not extend to another): the decisions D1–D9 below, nothing else.
 
 Technical basis: `READ_ONLY_CONTRACT.md` (§-numbers refer to it) and `THREAT_AND_PRIVACY_TEST_PLAN.md`. Not in scope and not requested: any write, Apply control, installation, ECE verification (#34), GitHub publication (#35), jq pilot, GUI/WebView2 pilot (#25), or resolution of #14.
 
@@ -15,7 +21,7 @@ The application **already** has a path-accepting command, `run_discovery_scan`, 
 ## 3. The decisions (each is independent; answer YES or NO to each)
 
 ### D1 — Add one typed read command?
-Name (tentative): `read_project_mcp_config`; one new permission `allow-read-project-mcp-config` in `capabilities/default.json`. **No other capability, no plugin permission, no new dependency, no migration.** The command is registered in the same allow-list as the other 36.
+Name: `read_project_mcp_config` (implemented); one new permission `allow-read-project-mcp-config` in `capabilities/default.json`. **No other capability, no plugin permission, no new dependency, no migration.** The command is registered in the same allow-list as the other 36.
 
 ### D2 — How the project root is chosen
 
@@ -67,7 +73,7 @@ All of: the tests of `THREAT_AND_PRIVACY_TEST_PLAN.md` §3 implemented, with `SK
 * **YES to D1 but the user declines at the gate**: the button *Hayır, metni yapıştırarak devam edeceğim* closes the section; no read occurs; no state is kept; the preview is unaffected.
 * A user who never opens the section is never asked anything.
 
-## 4. User-visible Turkish wording (proposed; subject to review — it must never promise more than the implementation does)
+## 4. User-visible Turkish wording (the reviewed text; implemented as constants in `src/fileSnapshot.ts`, and a test compares them with this file — it must never promise more than the implementation does)
 
 **Section title (inside "Yapılandırma önizlemesi", collapsed by default):**
 `Dosyadan oku (isteğe bağlı) — yalnızca .mcp.json, bir kez, salt okunur`
@@ -119,8 +125,40 @@ Example placeholder: `C:\Projeler\sitem veya /Users/ad/sitem`
 | `nameState` `present` | `“exa” adlı bir sunucu tanımı var (yalnızca sözdizimi karşılaştırması; çalıştığı doğrulanmadı).` |
 | `nameState` `present_other_letter_case` | `Harf büyüklüğü farklı bir “exa” adı var (yalnızca sözdizimi karşılaştırması).` |
 | `nameState` `absent` | `“exa” adlı bir sunucu tanımı görülmedi.` |
-| `endpointState` `present_under_this_name` / `present_under_other_name` | `Onaylı uç nokta adresi dosyada bu adla / başka bir adla görüldü (yalnızca karşılaştırma; erişilebilirlik denenmedi).` |
+| `endpointState` `present_under_this_name` | `Onaylı uç nokta adresi dosyada bu adla görüldü (yalnızca karşılaştırma; erişilebilirlik denenmedi).` |
+| `endpointState` `present_under_other_name` | `Onaylı uç nokta adresi dosyada başka bir adla görüldü (yalnızca karşılaştırma; erişilebilirlik denenmedi).` |
 | `endpointState` `absent` / `not_evaluable` | `Onaylı uç nokta adresi görülmedi.` / `Uç nokta karşılaştırılamadı.` |
+
+**Reason lines (the second line of a `present_metadata_only`, `malformed`, `denied` or `unsafe_path` result; added in R2):**
+
+| Reason | Text |
+|---|---|
+| `duplicate_key` | `Neden: aynı anahtar bir nesnede birden fazla kez geçiyor.` |
+| `byte_order_mark` | `Neden: dosya bir bayt sırası işaretiyle (BOM) başlıyor.` |
+| `root_not_object` | `Neden: en üst düzey değer bir JSON nesnesi değil.` |
+| `servers_not_object` | `Neden: “mcpServers” bir nesne değil.` |
+| `too_deep` | `Neden: iç içe yapı bu uygulamanın sınırından (64 düzey) derin.` |
+| `too_many_servers` | `Neden: sunucu sayısı bu uygulamanın sınırından (256) fazla.` |
+| `invalid_utf8` | `Neden: dosya geçerli UTF-8 değil.` |
+| `invalid_json` | `Neden: JSON söz dizimi geçersiz.` |
+| `lone_surrogate` | `Neden: eşlenmemiş bir vekil (surrogate) karakter var.` |
+| `empty_file` | `Neden: dosya boş.` |
+| `access_denied` | `Neden: erişim reddedildi.` |
+| `locked` | `Neden: dosya başka bir program tarafından kilitli.` |
+| `link` | `Neden: bir sembolik bağlantı veya junction bulundu.` |
+| `not_a_directory` | `Neden: yazdığınız yol bir klasör değil.` |
+| `not_regular_file` | `Neden: .mcp.json normal bir dosya değil.` |
+| `hard_linked` | `Neden: .mcp.json birden fazla sabit bağlantıya sahip.` |
+| `case_alias` | `Neden: klasörde .mcp.json adının harf büyüklüğü farklı bir kopyası var.` |
+| `invalid_root_text` | `Neden: klasör yolu geçersiz (tam yol olmalı; boş, çok uzun olamaz; “.” ve “..” içeremez).` |
+| `root_too_broad` | `Neden: bir sürücünün veya dosya sisteminin kökü seçilemez.` |
+
+**Other fixed texts (R2):**
+
+* Busy: `Okunuyor…` · declined: `Dosya okunmadı. Yapıştırma önizlemesi her zamanki gibi kullanılabilir.`
+* The application answered with something outside the closed shape: `Uygulamadan beklenmeyen bir yanıt geldi; hiçbir şey gösterilmedi.`
+* Host note under the gate: `Okuma, bu bilgisayardaki klasörü okur; satırın işletim sistemi seçiminden bağımsızdır.`
+* Errors are chosen by their code only, never by the backend's message: `PROJECT_NOT_FOUND` → `Bu proje kaydı bulunamadı; dosyaya bakılmadı.` · `READ_NOT_AUTHORIZED` → `Onay iletilemedi; hiçbir şey okunmadı.` · anything else → `Okuma başlatılamadı; hiçbir şey okunmadı.`
 
 **Paste bridge (only if the user also pasted text):**
 equal → `Yapıştırdığınız metin bu dosyayla bayt bayt aynı.` · different → `Özetler farklı; yapıştırdığınız metnin bu dosyayla aynı olduğu kanıtlanamadı (satır sonu veya kodlama farkı olabilir).`
@@ -146,7 +184,7 @@ equal → `Yapıştırdığınız metin bu dosyayla bayt bayt aynı.` · differe
 
 ## 7. Residual blockers regardless of the answer
 
-#14 and #25 are open. #39's Windows lost-update is a hard NO-GO for writing. The independent reviewer decided O1–O5 on 2026-10-30 as technical decisions (contract §11); that is not owner approval. The local Windows Rust test binary is blocked by Smart App Control, so Rust behaviour here is evidenced by CI only.
+#14 and #25 are open. #39's Windows lost-update is a hard NO-GO for writing. The independent reviewer decided O1–O5 on 2026-10-30 as technical decisions (contract §11); that is not owner approval. The first real end-user read, real GUI/screen-reader behaviour and WebView2 egress are `NOT RUN`. The local Windows Rust test binary has at times been blocked by Smart App Control (recorded as BLOCKED, never worked around); CI is the platform evidence.
 
 ## 7a. Independent reviewer's technical recommendations (2026-10-30) — NOT owner approval
 
@@ -162,21 +200,26 @@ equal → `Yapıştırdığınız metin bu dosyayla bayt bayt aynı.` · differe
 | D8 | all forbidden actions retained |
 | D9 | NO leaves the existing paste preview intact |
 
-The owner's decisions are made only in §8 and in Issue #40, in the owner's own words. They are blank.
+The owner's decisions are those recorded in §8 (transcribed from the Issue #40 record of the owner's chat reply). This table is the reviewer's earlier technical recommendation and is not the owner's approval.
 
-## 8. Owner response (to be completed by the owner; nothing is pre-filled)
+## 8. Owner response — the recorded authorization, transcribed (R2)
+
+Provenance: the owner's chat reply "İkisine de EVET" (2026-10-30), recorded by the independent reviewer in [Issue #40 comment 6519548226](https://github.com/ErenTahiroglu/AI-Toolchain-Manager/issues/40#issuecomment-6519548226). This block was **transcribed by the author** from that record, as the record asks ("Update the blank D1–D9 response block in source to reflect this ChatGPT-mediated authorization and link this issue comment"). It is **not** a direct GitHub comment by the owner, it carries **no owner signature**, and it is **not** an independent acceptance. The author did not choose any answer: each mark below is the value named in the record.
 
 ```
-Date: ____________            Reviewed SHA: ____________________________________________
+Date: 2026-10-30              Reviewed SHA: 34fc923eba5304535eb91d141d5d60d4169001c1
 
-D1  [ ] YES   [ ] NO          D2  [ ] A   [ ] B   [ ] NO read at all
-D3  [ ] YES   [ ] NO          D4a [ ] YES [ ] NO    D4b [ ] NO (default)  [ ] YES (separate phase)
-D5  [ ] YES   [ ] NO          D5a [ ] NO (default)  [ ] YES
-D6  [ ] managed_fs read half  [ ] extend fsx        D7  [ ] YES   [ ] NO
-D8  [ ] confirmed in full     D9  [ ] confirmed
+D1  [x] YES   [ ] NO          D2  [x] A   [ ] B   [ ] NO read at all
+D3  [x] YES   [ ] NO          D4a [x] YES [ ] NO    D4b [x] NO (default)  [ ] YES (separate phase)
+D5  [x] YES   [ ] NO          D5a [x] NO (default)  [ ] YES
+D6  [x] managed_fs read half  [ ] extend fsx        D7  [x] YES   [ ] NO
+D8  [x] confirmed in full     D9  [x] confirmed
 
-Conditions / changes to the wording above: __________________________________________
+Conditions / changes to the wording above: none stated beyond the record (the record asks to correct any wording
+that implies the file was copied, read elsewhere, securely erased or verified; the text above says none of that)
 
-Owner decision recorded in Issue #40 as: [ ] comment link ____________________
-Status: READ_NOT_GRANTED   (changes only by a new commit that edits this line and the guard test)
+Owner decision recorded in Issue #40 as: [x] comment link https://github.com/ErenTahiroglu/AI-Toolchain-Manager/issues/40#issuecomment-6519548226
+Status: READ_IMPLEMENTATION_AUTHORIZED | REAL_USER_PROJECT_NOT_READ | FEATURE_NOT_INDEPENDENTLY_ACCEPTED
 ```
+
+What this does **not** say: that any real file was read; that an end user consented (each read asks again); that the feature works on either operating system (CI evidence is stated in the Issue); that any write is closer (`REAL_CONFIG_WRITE_NO_GO`, `REAL_INSTALLATION_NO_GO`); that #14 or #25 are resolved.

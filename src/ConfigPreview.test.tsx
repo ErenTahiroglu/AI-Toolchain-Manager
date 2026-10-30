@@ -350,7 +350,9 @@ describe("no side effects: no IPC, clipboard, network, storage or timers", () =>
   it("the Tauri capability file still grants no filesystem, shell, HTTP, opener, dialog or clipboard permission, and no configuration command exists", () => {
     const permissions: string[] = JSON.parse(capabilitySource).permissions;
     expect(permissions.length).toBeGreaterThan(20);
-    for (const p of permissions) {
+    // CONFIG-02C (Issue #40, owner-authorized): exactly ONE permission names the one-file read command; it grants no filesystem, dialog or other plugin permission.
+    expect(permissions.filter((p) => p === "allow-read-project-mcp-config")).toHaveLength(1);
+    for (const p of permissions.filter((x) => x !== "allow-read-project-mcp-config")) {
       expect(p, p).not.toMatch(/fs|shell|http|opener|dialog|clipboard|process|os:|path|window/i);
       expect(p, p).not.toMatch(/config|mcp|write-file|apply/i);
     }

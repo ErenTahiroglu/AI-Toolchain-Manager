@@ -89,6 +89,29 @@ jobs:
           cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings
           cargo test --target ${{ matrix.target }}
 
+      # CONFIG-02C (Issue #40): machine-visible evidence per case and per operating system. Every Rust and vitest case prints one
+      # `CONFIG02C_RESULT|<id>|<os>|<status>|<reason>` line; tools/config02c_results_check.py fails this step when an id has no line (NOT RUN),
+      # has FAIL/BLOCKED, or is SKIPPED for a reason the manifest does not allow. A skipped case is listed as SKIPPED and is never counted as a pass.
+      # Fixtures are made by the tests under the runner's temporary directory; no real project file is read.
+      - name: CONFIG-02C evidence (result lines per case; the gate fails on a missing id)
+        run: |
+          OUT="${{ runner.temp }}/config02c-${{ matrix.name }}"
+          mkdir -p "$OUT"
+          OSNAME=windows
+          if [ "${{ matrix.name }}" = "macos-arm64" ]; then OSNAME=macos; fi
+          RC=0
+          (cd src-tauri && CONFIG02C_RESULTS="$OUT/rust-results.txt" cargo test --target ${{ matrix.target }} config02c -- --nocapture --test-threads=1) 2>&1 | tee "$OUT/rust.log" || RC=1
+          npx vitest run src/FileSnapshot.test.tsx --reporter=verbose 2>&1 | tee "$OUT/vitest.log" || RC=1
+          python tools/config02c_results_check.py --os "$OSNAME" --manifest tests/config02c_expected_results.json --results "$OUT/rust-results.txt" "$OUT/vitest.log" --summary "$OUT/summary.txt" || RC=1
+          exit $RC
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: config02c-results-${{ matrix.name }}
+          path: ${{ runner.temp }}/config02c-${{ matrix.name }}
+          if-no-files-found: error
+
       # Phase 3D-2: the SYNTHETIC pilot supply (made-up tools and bytes, acting adapter constructor) is compiled only with this non-default
       # feature. This step lints and tests that configuration; the release build below never enables it.
       - name: Synthetic-pilot feature configuration (lint and tests; never part of the release build)

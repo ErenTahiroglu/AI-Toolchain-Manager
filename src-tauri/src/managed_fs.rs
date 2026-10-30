@@ -244,6 +244,11 @@ impl FileH {
         self.file.write_all(bytes).map_err(|e| imp::map_io(&e))
     }
 
+    /// The last-write time the operating system reports for this open handle. Only ever compared with a later reading of the same handle.
+    pub fn modified(&self) -> Result<std::time::SystemTime, FsError> {
+        self.file.metadata().and_then(|m| m.modified()).map_err(|e| imp::map_io(&e))
+    }
+
     /// Full flush to stable storage (`FlushFileBuffers` / `F_FULLFSYNC`).
     pub fn sync_all(&self) -> Result<(), FsError> {
         imp::sync_file(&self.file)
@@ -515,6 +520,11 @@ compile_error!("managed_fs supports Windows and Unix (macOS) only");
 #[cfg(test)]
 #[path = "managed_fs_tests.rs"]
 mod tests;
+
+// CONFIG-02C (Issue #40): the READ-ONLY half, compiled in every build. A child of this module for the same reason as the 02B prototype below (it needs
+// the private handle-relative layer and the exact name `.mcp.json`, which `valid_name` refuses), but it contains no write, create, remove or move call.
+#[path = "managed_fs_read.rs"]
+pub(crate) mod read_mcp;
 
 // CONFIG-02B (Issue #39): a TEST-ONLY prototype of a one-file transaction on synthetic directories. It is a child of this module so that it can use the
 // private handle-relative layer instead of copying it; it is not compiled in any shipping build and nothing can call it.

@@ -249,6 +249,30 @@ export interface ScanRequest {
   fingerprintArtifacts: boolean;
 }
 
+/** CONFIG-02C: the request of the one-file read. `consent` is a coherence constant, not a security boundary. */
+export interface ReadMcpConfigRequest {
+  alias: string;
+  directory: string;
+  consent: string;
+}
+
+/** CONFIG-02C: the raw answer. It is NEVER rendered as it is: `describeResult` (fileSnapshot.ts) accepts only the exact closed shape. */
+export interface ReadMcpConfigResult {
+  schema: string;
+  status: string;
+  reason: string | null;
+  alias: string;
+  file: string;
+  scope: string;
+  surface: string;
+  maxBytes: number;
+  sizeBytes: number | null;
+  sha256: string | null;
+  serverCount: number | null;
+  reviewedDeclarations: { id: string; nameState: string; endpointState: string }[] | null;
+  notClaims: string[];
+}
+
 export interface ScanSummary {
   scanId: string;
   startedAt: string;

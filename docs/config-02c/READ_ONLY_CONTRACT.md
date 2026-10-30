@@ -1,6 +1,12 @@
-# CONFIG-02C — read-only acquisition contract for ONE project `.mcp.json` (design only)
+# CONFIG-02C — read-only acquisition contract for ONE project `.mcp.json`
 
-Issue #40. **Status: `CONFIG_02C_DESIGN_R1` — the author's revision after the independent decision `CONFIG_02C_DESIGN_ACCEPTED_WITH_REVISIONS` ([Issue #40 comment](https://github.com/ErenTahiroglu/AI-Toolchain-Manager/issues/40#issuecomment-6518093495)). `READ_NOT_GRANTED`. Nothing in this document is implemented, and nothing here is a permission.** Whether R1 is ready for independent review is stated in Issue #40 after exact-SHA CI, not in this file. R1 changes wording and structure only (§11 lists what the reviewer decided and where it is applied); the design scope, the 11-value status list and the owner's blank decision block are unchanged. No IPC command, Tauri capability, file picker, dependency, migration, GUI control or production file-reading code was added. `REAL_CONFIG_WRITE_NO_GO` and `REAL_INSTALLATION_NO_GO` stand. Issues #14 and #25 stay open; #34 and #35 are out of scope. The synthetic `#[cfg(test)]` code of CONFIG-02B (`config_txn.rs`, `managed_fs_mcp.rs`) is **not** promoted and is **not** production code.
+Issue #40. **Status: `CONFIG_02C_DESIGN_R1` accepted as documentation (`CONFIG_02C_DESIGN_ACCEPTED_WITH_REVISIONS`, [Issue #40 comment](https://github.com/ErenTahiroglu/AI-Toolchain-Manager/issues/40#issuecomment-6518093495)); R2 (this revision) records the implementation the owner authorized.** Flags: `READ_IMPLEMENTATION_AUTHORIZED` · `REAL_USER_PROJECT_NOT_READ` · `FEATURE_NOT_INDEPENDENTLY_ACCEPTED`.
+
+* `READ_IMPLEMENTATION_AUTHORIZED` — the owner answered "İkisine de EVET" in a chat; the independent reviewer recorded it in [Issue #40 comment 6519548226](https://github.com/ErenTahiroglu/AI-Toolchain-Manager/issues/40#issuecomment-6519548226) (a record posted through the GitHub integration — **not** a comment the owner wrote directly, and not an independent acceptance). It authorizes *building* the narrowly defined, consent-gated, read-only feature (D1–D9 of `REAL_READ_AUTHORIZATION_REQUEST.md`). It does **not** authorize the author, CI or any reviewer to open a real project file.
+* `REAL_USER_PROJECT_NOT_READ` — no real project file has been read by the author, by CI or by a test. Developer and CI read only synthetic fixtures created under the runner's temporary directory. The per-read consent of an end user (the confirmation in the application) has not been exercised by anyone.
+* `FEATURE_NOT_INDEPENDENTLY_ACCEPTED` — the implementation awaits exact-SHA Windows x64 + macOS arm64 CI and an independent Red Team review. Whether the author's evidence is complete is stated in Issue #40 after the CI run, never in this file.
+
+R2 adds exactly: one typed command `read_project_mcp_config` and its one permission `allow-read-project-mcp-config`; a read-only child module of `managed_fs` (`managed_fs_read.rs`); the typed result and strict local parse (`mcp_read.rs`); a collapsed, opt-in React section; and the tests of `THREAT_AND_PRIVACY_TEST_PLAN.md`. No dialog or fs plugin, dependency, migration, writer, process, network, persistence, diagnostics or audit event was added. `REAL_CONFIG_WRITE_NO_GO` and `REAL_INSTALLATION_NO_GO` stand. Issues #14 and #25 stay open; #34, #35 and #42 are out of scope. The synthetic `#[cfg(test)]` code of CONFIG-02B (`config_txn.rs`, `managed_fs_mcp.rs`) is **not** promoted and is **not** production code. The existing inventory scan (`run_discovery_scan`) is not called, changed or merged with this reader.
 
 Wording: *exists today* = found by reading the source at the SHA in §0; *design condition* = something a separately approved implementation must do; *not run* = no executable evidence exists yet. The three are never mixed.
 
@@ -104,6 +110,7 @@ The mapping from the existing `FsError` vocabulary must stay **total**; `tests/t
 |---|---|---|
 | `not_found` | opening the root | `root_not_found` |
 | `not_found` | the entry `.mcp.json` (stat returns nothing) | `absent` |
+| `not_found` | after the root or the file had been seen (listing, open, read) | `changed_during_read` |
 | `exists` | creation only — unreachable in a read | `io_error` |
 | `link_refused` | any | `unsafe_path` / `link` |
 | `not_a_directory` | root | `unsafe_path` / `not_a_directory` |
@@ -112,8 +119,10 @@ The mapping from the existing `FsError` vocabulary must stay **total**; `tests/t
 | `network_or_unknown_filesystem` | root | `unsupported_fs` |
 | `access_denied` | any | `denied` / `access_denied` |
 | `locked_by_another_process` | any | `denied` / `locked` |
-| `too_large` | target | `too_large` |
-| `invalid_name` | unreachable — the name is a constant | `io_error` |
+| `too_large` | target (reading) | `too_large` |
+| `too_large` | root listing exceeds `MAX_LIST_ENTRIES` (the case-alias check cannot be made) | `io_error` |
+| `invalid_name` | root (an unusable path spelling that passed the text checks) | `unsafe_path` / `invalid_root_text` |
+| `invalid_name` | any later stage — unreachable, the name is a constant | `io_error` |
 | `not_empty` | removal only — unreachable in a read | `io_error` |
 | `changed` | any | `changed_during_read` |
 | `unsupported` | any | `unsupported_fs` |
@@ -127,6 +136,8 @@ Summarise (`present_summarized`) only when **all** hold: strict parse succeeded 
 
 * An **absent `mcpServers`** is `present_summarized` with `serverCount = 0` — the file exists and declares no server.
 * Computing `endpointState` reads a server's `url` string **only to compare it, inside Rust**, with the reviewed endpoint identity (scheme + host + path, case/port/query/fragment/userinfo/trailing-slash normalised — the rule of the 02B `url_identity`, to be re-implemented and re-reviewed, not imported). The URL is never returned, logged or stored. A value that is not a string, or a server entry that is not an object, is `not_evaluable`, never an error echo.
+* **Declaration states (R2, as implemented).** `nameState`: `present` if a member of `mcpServers` is named exactly `exa`; else `present_other_letter_case` if one equals it ignoring ASCII case; else `absent`. `endpointState`: `present_under_this_name` if the member named exactly `exa` has a string `url` whose identity equals the reviewed endpoint; else `present_under_other_name` if any other member does; else `not_evaluable` if an `exa`-like member (exact or other case) is not an object or has a `url` that is not a string; else `absent` (a member without a `url`, or with another endpoint, is `absent`). A non-object member under another name says nothing. Names and URLs are compared inside the parser and dropped; only booleans survive.
+* Reason priority when several apply (first wins): `duplicate_key`, `byte_order_mark`, `root_not_object`, `servers_not_object`, `too_deep`, `too_many_servers`. A parse that fails is `malformed` (`lone_surrogate` when the parser reports a surrogate or hex-escape fault, else `invalid_json`); a file whose nesting exceeds the parser's own limit is `present_metadata_only` / `too_deep`.
 * Everything else in the file — including unknown top-level keys, other servers' names and values — is neither returned nor used. **If unknown content cannot be summarised without returning user text, the result is metadata-only.** Server names other than the reviewed one are *not* returned in this contract (an optional, separate, later decision; see the authorization request D4).
 
 ## 4. Trust boundaries and exact on-disk origin semantics
@@ -155,6 +166,17 @@ Summarise (`present_summarized`) only when **all** hold: strict parse succeeded 
 6. Read ≤ 1 MiB + 1; over ⇒ `too_large`. Hash. Re-read identity/size/mtime from the handle, read and hash again, compare; mismatch ⇒ `changed_during_read`. Final stat by name; mismatch ⇒ `changed_during_read`.
 7. Strict-parse the bytes; classify (§3.4); build the response from constants and counters only. Drop the bytes.
 8. Close all handles. Nothing is retained: no cache, no memo, no token valid for a later call.
+
+## 5a. As implemented (R2)
+
+The algorithm of §5 is implemented in `src-tauri/src/managed_fs_read.rs` (file-system half, a child module of `managed_fs`) and `src-tauri/src/mcp_read.rs` (request checks, strict parse, typed result, status mapping). Differences from the design text, all stricter or more explicit, none weaker:
+
+* Text checks run before anything is opened: trimmed, ≤ 260 characters, no control characters, absolute, no `.`/`..` segment, not a filesystem root. A UNC, device or `UNC` verbatim spelling is `unsupported_fs`; any other verbatim (`\\?\`) spelling is `unsafe_path`/`invalid_root_text` (the plain drive-letter path must be typed). The path is rebuilt from its components (a forward slash on Windows is accepted and normalised).
+* The same-object check compares kind, identity, link count, size **and last-write time** read from the open handle before and after each of the two reads, compares the two reads **byte for byte**, and finally looks at the name once more. The last-write time comes from `FileH::modified` (a handle metadata read; the only addition to `managed_fs.rs`).
+* If the root has more than `MAX_LIST_ENTRIES` (4096) entries the case-alias check cannot be made and the result is `io_error` (fail closed), not a guess.
+* The command validates the alias (`valid_alias` + registered `reference`) and the consent constant first, releases the database lock, and only then touches the file system. It writes nothing to the database, diagnostics, audit chain or settings.
+* The request type does not implement `Debug`, so the typed folder cannot be printed by accident.
+* The result lines are pipe-delimited (`CONFIG02C_RESULT|<id>|<os>|<status>|<reason>`), a revision of the space-delimited sketch of R1 so that a reason can never be confused with a field.
 
 ## 6. Reuse of existing primitives — what exists and what is missing
 
@@ -236,9 +258,16 @@ D4a is YES as a technical recommendation: only the closed reviewed-declaration s
 
 Per-case, per-OS `PASS` / `FAIL` / `SKIPPED` / `BLOCKED` / `NOT RUN` must be visible in CI artifacts and logs; a permission-dependent symlink/junction/hard-link case that was skipped is never counted as passed; an ID with no result line is `NOT RUN`. A later authorized implementation must verify actual read behaviour on Windows x64 **and** macOS arm64 (race, no-follow, hard link, case alias, duplicate JSON, redaction and privacy canaries). The design-only CI runs (41018361348 and any run of this revision) are **not** evidence of a reader. Real Tauri GUI, screen-reader and WebView-runtime-egress behaviour are `NOT RUN` unless separately authorized; jsdom/vitest results are not proof of them.
 
-## 12. Still open after R1
+## 12. Still open after R2
 
-* Owner decision D1–D9 (not granted).
+* Independent Red Team review of the implementation, and exact-SHA CI on both operating systems with every `CONFIG02C_RESULT` line present (a missing line is `NOT RUN`).
+* The first real end-user read is up to the user's own consent in the application; nothing has been read from a real project.
+* Real GUI, keyboard/focus order, screen-reader output and WebView2 runtime behaviour are `NOT RUN` (#25).
+* Real network-mount and some privilege-dependent cases are `SKIPPED` where the runner cannot build them; they are never counted as passed.
+
+### Carried over from R1
+
+* Owner decision D1–D9 — answered; see the header and `REAL_READ_AUTHORIZATION_REQUEST.md` §8.
 * Whether and when to file the narrow issue about the old scan's missing-file copy (recommended, not filed here).
 * macOS behaviour: design only until a macOS CI run executes the implementation's tests.
 * Local Windows Rust execution is intermittently blocked by Smart App Control (test plan §1); CI is the Rust evidence.
