@@ -1,0 +1,84 @@
+# License integrity only. Reads the committed LICENSE.md and README.md; no dependency installation, no secrets,
+# no network, no writes and no project code is run. This is not the application's CI (main holds Phase 0 documents only).
+name: license-check
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  license:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+          - name: macos-arm64
+            os: macos-14 # Apple Silicon (arm64) runner
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify LICENSE.md and the README license section (read-only, standard library only)
+        shell: bash
+        run: |
+          PY="$(command -v python3 || command -v python)"
+          "$PY" - <<'PYEOF'
+          """License integrity check for the main branch (stdlib only; reads the committed git objects, so a Windows
+          checkout's CRLF conversion cannot change the result). It writes nothing, uses no network and runs no project code.
+
+          Pinned values come from polyformproject/polyform-licenses at commit 76a278c402bc43b8d2b561da140b0f3e17263015,
+          file PolyForm-Noncommercial-1.0.0.md.
+          """
+          import hashlib
+          import re
+          import subprocess
+          import sys
+
+          NOTICE = "Required Notice: Copyright (c) 2026 Eren Tahiroğlu\n\n---\n\n".encode("utf-8")
+          BODY_BYTES = 4563
+          BODY_SHA256 = "c0ea4a896d2c8c394b29f9427589996db826cd501c512279ff0ed3ef48fabbe5"
+          BODY_GIT_BLOB = "5ecc88cfc4b1cff608ed640efe913c9dd97935c3"
+          SPDX = "PolyForm-Noncommercial-1.0.0"
+
+          failures = []
+
+
+          def check(ok, message):
+              print(("PASS " if ok else "FAIL ") + message)
+              if not ok:
+                  failures.append(message)
+
+
+          def committed(path):
+              return subprocess.run(["git", "cat-file", "blob", "HEAD:" + path], check=True, capture_output=True).stdout
+
+
+          lic = committed("LICENSE.md")
+          check(lic.startswith(NOTICE), "LICENSE.md starts with the separate Required Notice, a blank line, '---' and a blank line")
+          body = lic[len(NOTICE):]
+          check(len(body) == BODY_BYTES, "official body is %d bytes (got %d)" % (BODY_BYTES, len(body)))
+          check(b"\r" not in lic, "LICENSE.md has no carriage returns")
+          check(hashlib.sha256(body).hexdigest() == BODY_SHA256, "official body SHA-256 equals the pinned upstream value")
+          check(hashlib.sha1(b"blob %d\0" % len(body) + body).hexdigest() == BODY_GIT_BLOB, "official body git blob id equals the pinned upstream blob")
+          check(body.startswith(b"# PolyForm Noncommercial License 1.0.0\n"), "official body starts with the version title")
+          check(not any(line.startswith(b"Required Notice:") for line in body.split(b"\n")), "no extra Required Notice line inside the official body")
+
+          readme = committed("README.md").decode("utf-8")
+          check(re.search(r"^## Lisans$", readme, re.M) is not None, "README has a 'Lisans' section")
+          check("](LICENSE.md)" in readme, "README links LICENSE.md")
+          check(SPDX in readme, "README names the SPDX identifier")
+          check("source-available" in readme, "README says source-available")
+          check("açık kaynak lisansı değildir" in readme, "README says it is not an OSI open-source license")
+          check("ticari kullanım hakkı vermez" in readme, "README says no commercial-use right is granted")
+          check("lisansları **değişmez**" in readme, "README says third-party licenses are unchanged")
+
+          print("LICENSE_CHECK_RESULT %s" % ("FAIL" if failures else "PASS"))
+          sys.exit(1 if failures else 0)
+          PYEOF

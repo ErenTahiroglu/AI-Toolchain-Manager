@@ -52,3 +52,12 @@ R1 duzeltmeleri yerel dalda ve otomatik kontrat testlerinde hazir; bagimsiz yeni
 ## Kapsam Siniri
 
 Bu dalda yalnizca Phase 0 mimari belgeleri, semalar, seed metadata ve kurcalamaya yonelik fixture testleri bulunur. Arac kurulumu, gelistirme ortami degisikligi, ozel GitHub deposu veya kimlik bilgisi olusturma, commit/push ya da Phase 1 uygulamasi yapilmamistir.
+
+## Lisans
+
+Bu deponun kendi içeriği (Phase 0 belgeleri, şemalar, sahte fixture’lar ve testler) **PolyForm Noncommercial License 1.0.0** altında lisanslanmıştır (SPDX: `PolyForm-Noncommercial-1.0.0`). Tam ve değiştirilmemiş lisans metni ile zorunlu telif bildirimi (`Required Notice`) için bkz. [`LICENSE.md`](LICENSE.md); resmî kaynak: <https://polyformproject.org/licenses/noncommercial/1.0.0>.
+
+- İçerik herkese **görünür**; ancak bu bir **kaynak erişilebilir (source-available)** lisanstır. Açık Kaynak Girişimi (OSI) tarafından onaylı bir **açık kaynak lisansı değildir**.
+- Lisans yalnızca kendi metninde tanımlı **ticari olmayan** amaçlar için hak verir; **ticari kullanım hakkı vermez**. Neye izin verildiğini ve neye verilmediğini yalnızca `LICENSE.md` belirler; bu README onun özeti ya da hukuki yorumu değildir.
+- Bu lisans **yalnızca bu deponun kendi içeriği** içindir. Katalogda veya belgelerde adı geçen üçüncü taraf araçların, kütüphanelerin ve hizmetlerin lisansları **değişmez**; her biri kendi lisansı ve bildirimleri altındadır. Bir aracın adının burada geçmesi onun lisansını değiştirmez veya yeniden lisanslamaz.
+- Bu dal yalnızca Phase 0 belgelerini içerir; uygulama paket bildirimleri (`package.json`, `Cargo.toml`) burada yoktur ve bu değişiklikle eklenmemiştir. Uygulama kodu `development` dalındadır ve orada ayrıca etiketlenmiştir.
