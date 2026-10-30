@@ -1,16 +1,16 @@
 # CONFIG-02C — request for the owner's decision on ONE real read operation
 
-Issue #40. **This is a request, not a grant. `READ_NOT_GRANTED`.** Reading this document, merging it, or a green CI run authorises nothing. Every box in §8 is unchecked; the default answer to every question is **NO**. Approval, if given, must be recorded by the owner in Issue #40 in their own words, naming the decisions below, and applies **only** to what it names (approval in one context does not extend to another).
+Issue #40, revision **R1** (after the independent decision `CONFIG_02C_DESIGN_ACCEPTED_WITH_REVISIONS`, [comment](https://github.com/ErenTahiroglu/AI-Toolchain-Manager/issues/40#issuecomment-6518093495)). **This is a request, not a grant. `READ_NOT_GRANTED`.** The reviewer's technical recommendations (§7a) are **not** the owner's approval of D1–D9. Reading this document, merging it, or a green CI run authorises nothing. Every box in §8 is unchecked; the default answer to every question is **NO**. Approval, if given, must be recorded by the owner in Issue #40 in their own words, naming the decisions below, and applies **only** to what it names (approval in one context does not extend to another).
 
 Technical basis: `READ_ONLY_CONTRACT.md` (§-numbers refer to it) and `THREAT_AND_PRIVACY_TEST_PLAN.md`. Not in scope and not requested: any write, Apply control, installation, ECE verification (#34), GitHub publication (#35), jq pilot, GUI/WebView2 pilot (#25), or resolution of #14.
 
 ## 1. What is being asked, in one paragraph
 
-Whether to allow a later implementation phase to add **one new read-only command** that, **after an explicit click and an explicit confirmation text**, opens **one folder the user typed** and looks **at one file inside it — `.mcp.json`, at most 1 MiB, once** — and returns to the screen only a small **closed** result: whether the file exists, its size, its SHA-256, and — for one catalog declaration (Exa) — whether a server of that name or endpoint is already present, plus the number of servers. It returns **no text from the file**, stores **nothing**, writes **nothing**, and does **not** touch the pasted-text preview. A **NO** leaves the application exactly as it is today.
+Whether to allow a later implementation phase to add **one new read-only command** that, **after an explicit click and an explicit confirmation text**, opens **one folder the user typed** and looks **at one file inside it — `.mcp.json`, at most 1 MiB, once** — and returns to the screen only a small **closed** result: whether the file exists, its size, its SHA-256, and — for one catalog declaration (Exa) — whether a server of that name or endpoint is already present, plus the number of servers. It returns **no text from the file**, stores **nothing**, writes **nothing**, and does **not** touch the pasted-text preview. To reach the folder it inspects the type and link status of the parent folders (not their contents), and it reads the folder's entry *names* into memory only to notice a second, case-differing copy of `.mcp.json`; those names are not shown, returned or stored. The typed path itself is in the application window's memory while it is typed (§3 D2). A **NO** leaves the application exactly as it is today.
 
 ## 2. What already exists (so the decision is not made on a wrong premise)
 
-The application **already** has a path-accepting command, `run_discovery_scan`, which — when the user ticks "Bir proje klasörüne bak" and types a folder — reads `.mcp.json` (and two `.claude/settings*.json` files) and keeps only a count of matches to one catalog entry. That was shipped earlier and is **not** what is being requested here, and this request does **not** rely on it as precedent for the new command. What is new: a dedicated command, a digest, a closed status vocabulary, hard-link/case-alias/identity checks the old reader does not make, no persistence, and the reviewed-declaration summary. See contract §0 (F1–F5), and open item O1 about the two readers' differing verdicts.
+The application **already** has a path-accepting command, `run_discovery_scan`, which — when the user ticks "Bir proje klasörüne bak" and types a folder — reads `.mcp.json` (and two `.claude/settings*.json` files) and keeps only a count of matches to one catalog entry. That was shipped earlier and is **not** what is being requested here, and this request does **not** rely on it as precedent for the new command. What is new: a dedicated command, a digest, a closed status vocabulary, hard-link/case-alias/identity checks the old reader does not make, no persistence, and the reviewed-declaration summary. The old scan's observation **is persisted** and is a lenient, three-file, path-based inventory method; the new read is a strict, one-file, momentary, unstored snapshot. They are labelled differently (`önceki envanter gözlemi (farklı kapsam/yöntem)` versus `dosya anlık görüntüsü (katı JSON sözleşmesi)`), are never merged or ranked, and the old scan is not changed by this request (contract §11, O1). See contract §0 (F1–F5).
 
 ## 3. The decisions (each is independent; answer YES or NO to each)
 
@@ -21,8 +21,8 @@ Name (tentative): `read_project_mcp_config`; one new permission `allow-read-proj
 
 | Option | What it is | New authority | Recommendation |
 |---|---|---|---|
-| **A** | The user **types** the absolute folder path in a text box, per read; used for that call only and cleared when the call returns (same convention as the Inventory scan). | none beyond D1 | **Recommended for the first step** |
-| B | A **Rust-side native folder picker** (new `tauri-plugin-dialog`/`rfd` dependency), the path never reaching the WebView | new dependency + plugin initialisation; cannot be exercised by headless CI; needs a GUI pilot (not authorised, #25) | later, separately |
+| **A** | The user **types** the absolute folder path in a text box, per read; used for that call only and removed from the input state when the call returns (same convention as the Inventory scan). **Not a secure erase and not hidden from the renderer:** the path is in the WebView's memory while typed and enters Rust as request input; #25 (WebView2 runtime egress/profile state) is unresolved. | none beyond D1 | **Recommended for the first step** |
+| B | A **Rust-side native folder picker** (new `tauri-plugin-dialog`/`rfd` dependency), the chosen path stays in Rust instead of being typed into the WebView | new dependency + plugin initialisation; cannot be exercised by headless CI; needs a GUI pilot (not authorised, #25) | later, separately |
 | C | Reuse the Inventory scan (extend it) | none | **Not recommended**: persists the result, bundles three files, wrong place, weaker Windows reader |
 
 Neither A nor B stores a path or a root identity. Storing an identity (registry column, migration) is **not requested** and is a precondition of any future *write* (`FUTURE_WRITE_GATE.md` §2), not of this read.
@@ -41,17 +41,17 @@ Exactly the constant relative name **`.mcp.json`**, directly in the typed folder
 | constants | schema id, file name, scope, surface, byte cap, the six "not claimed" codes |
 | `alias` | the alias the UI already sent |
 
-**D4a — YES/NO: accept that no server name other than the reviewed one is returned.** (Recommended YES.)
-**D4b — YES/NO (later, separate): allow user-chosen server *names* to be shown** under a strict grammar `^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$`, at most 16, ephemeral display only, never logged or stored. Risk: a secret placed in a name would be shown on screen. **Not part of this request**; listed so the question is asked once and answered NO unless the owner says otherwise.
+**D4a — YES/NO: accept that no server name other than the reviewed one is returned.** (Reviewer's technical recommendation: YES; the owner's box is blank.) `reviewedDeclarations` is a comparison with a *source-backed syntax reference*; it does not say a working Exa server exists.
+**D4b — YES/NO (later, separate): allow user-chosen server *names* to be shown** under a strict grammar `^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$`, at most 16, ephemeral display only, never logged or stored. Risk: a secret placed in a name would be shown on screen. **Not part of this request.** Reviewer's technical recommendation: **NO / deferred** — not to be introduced incidentally; it would need its own later decision. Listed so the question is asked once.
 
 ### D5 — How often, how long
 One explicit click = one read. **No** automatic read, scan, timer, file watcher, retry loop, background task, or read on startup/navigation. The result lives in memory while the panel is mounted and is cleared by *Temizle*, navigation, a change of project/OS/surface/entry, a new read, or **5 minutes**. Nothing is written to the database, diagnostics, audit chain, settings, clipboard or disk. (Optional D5a — YES/NO: write a diagnostics line containing only `alias` and `status`. Recommended **NO**.)
 
 ### D6 — Which filesystem primitive
-A new **read-only** child module of `managed_fs` using its handle-relative, no-follow root walk (the read half of the 02B `inspect`, re-implemented and re-reviewed; none of its write, staging, backup or rollback code). This is the layer's first production use. It does not touch the deletion paths of Issue #14, does not resolve #14 and does not remove the `#![allow(dead_code)]` reason for any other function. Alternative: extend `discovery::fsx` (already in production; weaker on Windows — path-based, no link-count, no identity). **Recommended: managed_fs read half.** Open item O2 asks the reviewer to confirm.
+A new **read-only** child module of `managed_fs` using its handle-relative, no-follow root walk (the read half of the 02B `inspect`, re-implemented and re-reviewed; none of its write, staging, backup or rollback code). This is the layer's first production use. It does not touch the deletion paths of Issue #14, does not resolve #14 and does not remove the `#![allow(dead_code)]` reason for any other function. Alternative: extend `discovery::fsx` (already in production; weaker on Windows — path-based, no link-count, no identity). **Recommended: managed_fs read half.** Reviewer's decision O2 (technical, not owner approval): prefer the read-only subset of `managed_fs`; never import the `#[cfg(test)]` 02B writer; #14 stays open and is not resolved by this; the reader's negative tests are independently scoped.
 
 ### D7 — Evidence required before the implementation may be accepted
-All of: the tests of `THREAT_AND_PRIVACY_TEST_PLAN.md` §3 implemented, with `SKIPPED` visible per ID in CI output (§0 of the plan); exact-SHA CI green on **Windows x64 and macOS arm64**; a report that states PASS/SKIPPED/BLOCKED/NOT RUN per ID per OS; an independent Red Team pass using §5 of the plan; no new write-capable call in the module (plan G2). A green CI run is supporting evidence, not acceptance.
+All of: the tests of `THREAT_AND_PRIVACY_TEST_PLAN.md` §3 implemented, with `SKIPPED` visible per ID in CI output (§0 of the plan); exact-SHA CI green on **Windows x64 and macOS arm64**; a report that states PASS/FAIL/SKIPPED/BLOCKED/NOT RUN per ID per OS from `CONFIG02C_RESULT` lines uploaded as a CI artifact (a missing line is NOT RUN; a skipped symlink/junction/hard-link case is never PASS); an independent Red Team pass using §5 of the plan; no new write-capable call in the module (plan G2). A green CI run is supporting evidence, not acceptance.
 
 ### D8 — Explicitly forbidden (in this request and in the implementation)
 * Writing, creating, renaming, deleting, touching timestamps of, or adding a temporary/backup file to the user's project, or anything else.
@@ -72,18 +72,20 @@ All of: the tests of `THREAT_AND_PRIVACY_TEST_PLAN.md` §3 implemented, with `SK
 **Section title (inside "Yapılandırma önizlemesi", collapsed by default):**
 `Dosyadan oku (isteğe bağlı) — yalnızca .mcp.json, bir kez, salt okunur`
 
-**Folder field label:** `Proje klasörünün tam yolu (yalnızca bu okuma için kullanılır, kaydedilmez, okuma biter bitmez silinir)`
+**Folder field label:** `Proje klasörünün tam yolu (uygulama bunu kaydetmez; okuma bitince bu alandan temizlenir)`
+Yardım satırı: `Yazdığınız yol, siz yazarken uygulama penceresinin belleğinde bulunur ve okuma için uygulamanın içine iletilir; bellekten güvenli silinmesi garanti edilmez.`
 Example placeholder: `C:\Projeler\sitem veya /Users/ad/sitem`
 
 **Confirmation text (shown before the button; read verbatim from a constant):**
 
 > **Bu uygulama, yazdığınız klasördeki yalnızca `.mcp.json` dosyasına bir kez bakacak.**
-> - **Okunacak dosya:** `.mcp.json` — klasörün hemen altında. Başka dosya, alt klasör veya üst klasör okunmaz. Kapsam: proje (Claude Code, terminal).
+> - **Okunacak dosya:** `.mcp.json` — klasörün hemen altında. Başka dosyanın içeriği ve alt klasörler okunmaz. Klasöre ulaşmak için üst klasörlerin yalnızca türü ve bağlantı olup olmadığı denetlenir; içerikleri okunmaz. Klasördeki dosya adları, yalnızca `.mcp.json` adının harf büyüklüğü farkıyla ikinci bir kopyası olup olmadığını anlamak için bellekte taranır; gösterilmez ve saklanmaz. Kapsam: proje (Claude Code, terminal).
 > - **Sınır:** en çok 1 MiB (1.048.576 bayt). Daha büyük dosya okunmaz.
 > - **Yerel:** dosya yalnızca bu bilgisayarda işlenir. İnternete bağlanılmaz, hiçbir program çalıştırılmaz, hiçbir dosyaya yazılmaz, hiçbir şey kurulmaz.
-> - **Ekrana yalnızca şunlar gelir:** dosyanın var olup olmadığı, boyutu, SHA-256 özeti, onaylı Exa bildirimiyle ilgili durum ve toplam sunucu sayısı. **Dosyanın metni, anahtarlar, parolalar, URL’ler, ortam değişkenleri, başlıklar ve diğer sunucuların adları ekrana, günlüğe veya veritabanına gelmez.**
+> - **Ekrana yalnızca şunlar gelir:** dosyanın var olup olmadığı, boyutu, SHA-256 özeti, onaylı Exa bildirimiyle ilgili durum ve toplam sunucu sayısı. **Dosyanın metni, anahtarlar, parolalar, URL’ler, ortam değişkenleri, başlıklar ve diğer sunucuların adları ekrana, günlüğe veya veritabanına gelmez.** Exa durumu, kaynağı belgelenmiş bir sözdizimi karşılaştırmasıdır; çalışan bir Exa sunucusu olduğunu göstermez. SHA-256 özeti yalnızca okunan baytları tanımlar; kaynağını veya güvenilirliğini göstermez.
 > - **Saklanmaz:** sonuç yalnızca bu sayfada, bellekte durur; “Temizle”ye bastığınızda, sayfadan ayrıldığınızda veya 5 dakika sonra silinir.
 > - **Ne anlama gelmez:** bu okuma, bir aracın yüklendiğini, güvenilir olduğunu, kurulu veya etkin olduğunu, erişilebildiğini ya da çalıştığını göstermez. Dosya, okuma anındaki bir anlık görüntüdür.
+> - **Önceki taramadan ayrıdır:** Bilgisayar Envanteri’ndeki sonuçlar “önceki envanter gözlemi (farklı kapsam/yöntem)”, bu sonuç “dosya anlık görüntüsü (katı JSON sözleşmesi)” olarak adlandırılır; biri diğerini doğrulamaz veya çürütmez. Uygulamanın katı JSON kuralı yerel bir politikadır; Claude Code’un dosyayı nasıl işleyeceğini göstermez.
 > - Dosya hâlâ kendi düzenleyicinizde görünür; bu uygulama onu değiştirmez.
 
 **Buttons (no default focus on the first):**
@@ -95,7 +97,7 @@ Example placeholder: `C:\Projeler\sitem veya /Users/ad/sitem`
 |---|---|
 | (UI) `not_requested` | `Henüz okunmadı. Hiçbir dosyaya bakılmadı.` |
 | `root_not_found` | `Bu klasör bulunamadı; dosyaya bakılmadı. Bu, dosyanın olmadığı anlamına gelmez.` |
-| `absent` | `Bu klasörde okuma anında .mcp.json adlı bir dosya yoktu. Bu, MCP’nin başka bir yerde (kullanıcı veya yerel kapsam) yapılandırılmadığını göstermez.` |
+| `absent` | `Bu klasörde okuma anında tam olarak .mcp.json adlı bir dosya görülmedi. Bu, MCP’nin başka bir yerde (kullanıcı veya yerel kapsam) yapılandırılmadığını ya da bu klasörün projenizin kökü olduğunu göstermez.` |
 | `present_summarized` | `.mcp.json bulundu ve okundu: {n} sunucu tanımı. Hiçbir sunucu çalıştırılmadı; dosyanın içeriği saklanmadı.` |
 | `present_metadata_only` | `.mcp.json bulundu ancak içeriği güvenle özetlenemedi; yalnızca boyut ve SHA-256 özeti gösteriliyor. Bu, Claude Code’un dosyayı geçersiz bulacağı anlamına gelmez.` + reason line |
 | `malformed` | `.mcp.json geçerli bir JSON metni olarak okunamadı; yalnızca boyut ve SHA-256 özeti gösteriliyor. Claude Code’un dosyayı nasıl yorumlayacağı hakkında bir şey söylenmez.` |
@@ -106,7 +108,19 @@ Example placeholder: `C:\Projeler\sitem veya /Users/ad/sitem`
 | `changed_during_read` | `Dosya okunurken değişti; hiçbir sonuç gösterilmedi. Başka bir program (düzenleyici, git, ajan) dosyaya yazıyor olabilir. İsterseniz yeniden deneyin.` |
 | `io_error` | `Dosya okunamadı (beklenmeyen hata). Hiçbir sonuç gösterilmedi.` |
 
-**Persistent footer under every result:** `Okuma anındaki anlık görüntüdür; dosya şimdi değişmiş olabilir. Bu sonuç yüklendiğini, güvenildiğini, kurulduğunu, etkin olduğunu, erişilebildiğini veya doğrulandığını göstermez. [Temizle]`
+**Persistent footer under every result:** `Okuma anındaki anlık görüntüdür; dosya şimdi değişmiş olabilir. SHA-256 özeti yalnızca okunan baytları tanımlar; kaynağını, güvenilirliğini veya dosyanın şimdiki durumunu göstermez. Bu sonuç yüklendiğini, güvenildiğini, kurulduğunu, etkin olduğunu, erişilebildiğini veya doğrulandığını göstermez. [Temizle]`
+
+**Result heading (fixed text, with the UI clock):** `Dosya anlık görüntüsü (katı JSON sözleşmesi) — {saat}`. The Inventory page keeps its own heading for stored scan results; the two are not shown together and never merged.
+
+**Exa declaration lines (syntax comparison only):**
+
+| State | Text |
+|---|---|
+| `nameState` `present` | `“exa” adlı bir sunucu tanımı var (yalnızca sözdizimi karşılaştırması; çalıştığı doğrulanmadı).` |
+| `nameState` `present_other_letter_case` | `Harf büyüklüğü farklı bir “exa” adı var (yalnızca sözdizimi karşılaştırması).` |
+| `nameState` `absent` | `“exa” adlı bir sunucu tanımı görülmedi.` |
+| `endpointState` `present_under_this_name` / `present_under_other_name` | `Onaylı uç nokta adresi dosyada bu adla / başka bir adla görüldü (yalnızca karşılaştırma; erişilebilirlik denenmedi).` |
+| `endpointState` `absent` / `not_evaluable` | `Onaylı uç nokta adresi görülmedi.` / `Uç nokta karşılaştırılamadı.` |
 
 **Paste bridge (only if the user also pasted text):**
 equal → `Yapıştırdığınız metin bu dosyayla bayt bayt aynı.` · different → `Özetler farklı; yapıştırdığınız metnin bu dosyayla aynı olduğu kanıtlanamadı (satır sonu veya kodlama farkı olabilir).`
@@ -114,7 +128,9 @@ equal → `Yapıştırdığınız metin bu dosyayla bayt bayt aynı.` · differe
 ## 5. What the owner is *not* being asked to trust
 
 * That the typed folder is "the project's": the pairing is the user's assertion (contract §4, test A6).
-* That the digest identifies the file's origin: it identifies the bytes read.
+* That the digest identifies the file's origin: it identifies the bytes read, at that moment.
+* That "only one file" was touched: parent-folder metadata and the folder's entry names are inspected (not shown or stored), as the gate text says.
+* That the typed path is hidden from the application window, the WebView2 runtime or the operating system's memory: it is not (#25).
 * That the reader's strictness matches Claude Code's.
 * That macOS behaves as designed: it is design-only until a macOS CI run executes the tests (plan §4).
 * That any write is now closer: `REAL_CONFIG_WRITE_NO_GO` is unchanged, and the Windows silent lost-update, absent lock, absent recovery journal and absent permission/ACL preservation of the 02B prototype remain open blockers for any write.
@@ -130,7 +146,23 @@ equal → `Yapıştırdığınız metin bu dosyayla bayt bayt aynı.` · differe
 
 ## 7. Residual blockers regardless of the answer
 
-#14 and #25 are open. #39's Windows lost-update is a hard NO-GO for writing. The independent review's open items O1–O5 (contract §11) are unresolved. The local Windows Rust test binary is blocked by Smart App Control, so Rust behaviour here is evidenced by CI only.
+#14 and #25 are open. #39's Windows lost-update is a hard NO-GO for writing. The independent reviewer decided O1–O5 on 2026-10-30 as technical decisions (contract §11); that is not owner approval. The local Windows Rust test binary is blocked by Smart App Control, so Rust behaviour here is evidenced by CI only.
+
+## 7a. Independent reviewer's technical recommendations (2026-10-30) — NOT owner approval
+
+| Decision | Reviewer's technical recommendation |
+|---|---|
+| D1 | add only one typed read command, and only if the owner explicitly approves |
+| D2 | A (typed per-call absolute path); acceptable for an initial one-file **read**, not for writes; no default path, persistence, home scan or agent execution |
+| D3 | exactly `.mcp.json`, 1 MiB, local only |
+| D4 | minimal closed payload, no raw file content; **D4a YES, D4b NO / deferred** |
+| D5 | one click = one read; no persisted path or content; **D5a NO** |
+| D6 | `managed_fs` read-only subset |
+| D7 | rigorous per-OS evidence and independent review |
+| D8 | all forbidden actions retained |
+| D9 | NO leaves the existing paste preview intact |
+
+The owner's decisions are made only in §8 and in Issue #40, in the owner's own words. They are blank.
 
 ## 8. Owner response (to be completed by the owner; nothing is pre-filled)
 

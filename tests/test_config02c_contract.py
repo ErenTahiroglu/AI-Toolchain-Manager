@@ -44,7 +44,12 @@ class Documents(unittest.TestCase):
             self.assertIn("READ_NOT_GRANTED", text, name)
             self.assertNotIn("READ_GRANTED", text, name)
             self.assertNotIn("CONFIG_02C_IMPLEMENTED", text, name)
-        self.assertIn("CONFIG_02C_DESIGN_READY_FOR_INDEPENDENT_REVIEW", doc(CONTRACT))
+        # R1: the readiness state is reported in the Issue after exact-SHA CI, never asserted inside the design files
+        contract = doc(CONTRACT)
+        self.assertIn("CONFIG_02C_DESIGN_R1", contract)
+        self.assertIn("CONFIG_02C_DESIGN_ACCEPTED_WITH_REVISIONS", contract)
+        self.assertIn("issuecomment-6518093495", contract)
+        self.assertNotIn("READY_FOR_INDEPENDENT_REVIEW", contract)
 
     def test_the_owner_response_block_is_blank(self):
         text = doc(REQUEST)
@@ -78,14 +83,89 @@ class Documents(unittest.TestCase):
 
     def test_the_skip_visibility_condition_is_stated(self):
         plan = doc(PLAN)
-        self.assertIn("CONFIG02C_SKIP", plan)
+        self.assertIn("CONFIG02C_RESULT <test-id> <os>", plan)
         self.assertIn("CONFIG02C_RESULTS", plan)
-        self.assertIn("BLOCKED", plan)
+        for word in ("PASS", "FAIL", "SKIPPED", "BLOCKED", "NOT RUN"):
+            self.assertIn(word, plan)
+        self.assertIn("a `SKIPPED` line is never counted as PASS", plan)
+        self.assertIn("no result line for that OS", plan)
+        self.assertIn("not evidence of a reader", plan)
+        self.assertIn("jsdom", plan)
+        self.assertNotIn("CONFIG02C_SKIP ", plan)
 
     def test_the_turkish_gate_text_names_the_file_the_limit_and_the_no_button(self):
         request = doc(REQUEST)
-        for needle in (".mcp.json", "1.048.576", "Hayır, metni yapıştırarak devam edeceğim", "Temizle", "kaydedilmez", "İnternete bağlanılmaz"):
+        for needle in (".mcp.json", "1.048.576", "Hayır, metni yapıştırarak devam edeceğim", "Temizle", "kaydetmez", "İnternete bağlanılmaz"):
             self.assertIn(needle, request, needle)
+
+
+class ReviewerDecisions(unittest.TestCase):
+    """Independent decision CONFIG_02C_DESIGN_ACCEPTED_WITH_REVISIONS (Issue #40, O1-O5) must be visible in the wording, not only in the Issue."""
+
+    def test_o1_two_readers_two_labels_never_merged(self):
+        for name in (CONTRACT, REQUEST):
+            text = doc(name)
+            self.assertIn("önceki envanter gözlemi (farklı kapsam/yöntem)", text, name)
+            self.assertIn("dosya anlık görüntüsü (katı JSON sözleşmesi)", text, name)
+        contract = doc(CONTRACT)
+        self.assertIn("never merged, averaged, ranked or used to override each other", contract)
+        self.assertIn("biri diğerini doğrulamaz veya çürütmez", contract)
+        self.assertIn("is persisted", contract)
+        self.assertIn("is **not changed by this work**", contract)
+
+    def test_o2_read_subset_only_and_14_stays_open(self):
+        contract = doc(CONTRACT)
+        self.assertIn("read-only subset of the existing handle-relative `managed_fs`", contract)
+        self.assertIn("No production import of the `#[cfg(test)]` 02B writer", contract)
+        self.assertIn("**stays open**", contract)
+        self.assertIn("does **not** resolve it", contract)
+        self.assertIn("independently scoped", contract)
+        self.assertIn("**Independence (R1, decision O2).**", doc(PLAN))
+
+    def test_o3_typed_path_is_not_claimed_hidden(self):
+        contract, request = doc(CONTRACT), doc(REQUEST)
+        self.assertIn("not a secure erase", contract.lower())
+        self.assertIn("#25", contract)
+        self.assertIn("Not a secure erase and not hidden from the renderer", request)
+        self.assertIn("garanti edilmez", request)
+        self.assertIn("any **write** needs the stronger chooser", contract)
+
+    def test_o4_names_stay_closed_and_declaration_is_syntax_only(self):
+        contract, request = doc(CONTRACT), doc(REQUEST)
+        self.assertIn("D4b is NO / deferred", contract)
+        self.assertIn("**NO / deferred**", request)
+        self.assertIn("source-backed syntax reference", contract)
+        self.assertIn("not a statement that the declaration is a verified working Exa server", contract)
+        self.assertIn("çalıştığı doğrulanmadı", request)
+
+    def test_disclosure_names_what_is_inspected_beyond_the_one_file(self):
+        contract, request = doc(CONTRACT), doc(REQUEST)
+        self.assertIn("ancestor *metadata* is touched", contract)
+        self.assertIn("Directory entry names", contract)
+        for needle in ("üst klasörlerin yalnızca türü ve bağlantı olup olmadığı denetlenir", "harf büyüklüğü farkıyla ikinci bir kopyası", "gösterilmez ve saklanmaz"):
+            self.assertIn(needle, request, needle)
+
+    def test_withdrawn_overclaims_do_not_come_back(self):
+        # The plan may QUOTE these (to say they are wrong); the two documents that make promises may not say them.
+        for name in (CONTRACT, REQUEST):
+            text = doc(name)
+            for phrase in ("nothing outside the file", "okuma biter bitmez silinir", "Başka dosya, alt klasör veya üst klasör okunmaz", "erased when the call"):
+                self.assertNotIn(phrase, text, f"{name}: {phrase}")
+
+    def test_digest_absent_and_strictness_are_not_overread(self):
+        contract, request = doc(CONTRACT), doc(REQUEST)
+        self.assertIn("the bytes observed at that moment", contract)
+        self.assertIn("not who wrote them, not that they are trustworthy", contract)
+        self.assertIn("kaynağını, güvenilirliğini veya dosyanın şimdiki durumunu göstermez", request)
+        self.assertIn("no entry named exactly `.mcp.json` was observed in that directory", contract)
+        self.assertIn("local parsing policy", contract)
+        self.assertIn("yerel bir politikadır", request)
+
+    def test_reviewer_recommendations_are_not_owner_approval(self):
+        request = doc(REQUEST)
+        self.assertIn("NOT owner approval", request)
+        self.assertIn("The owner's decisions are made only in §8", request)
+        self.assertIsNone(re.search(r"\[[xX]\]", request))
 
 
 class NothingNewIsReachable(unittest.TestCase):
