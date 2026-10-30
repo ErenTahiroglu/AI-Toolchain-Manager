@@ -82,8 +82,8 @@ fn config02c_b3_a_file_symlink_at_the_name_is_refused_and_the_outside_file_is_ne
     case("B3", || {
         let b = bed();
         let marker = sentinel("b3");
-        fs::write(b.outside.join("secret.json"), format!("{{\"mcpServers\":{{\"{marker}\":{{}}}}}}")).unwrap();
-        if !make_file_link(&b.target(), &b.outside.join("secret.json")) {
+        fs::write(b.base.join("secret.json"), format!("{{\"mcpServers\":{{\"{marker}\":{{}}}}}}")).unwrap();
+        if !make_file_link(&b.target(), &b.base.join("secret.json")) {
             return symlink_skip("cannot_create_file_symlink");
         }
         let r = run(&b);
@@ -420,8 +420,8 @@ fn config02c_d3_a_link_swapped_in_between_stat_and_open_is_refused_and_the_outsi
         let b = bed();
         b.put(VALID);
         let marker = sentinel("d3");
-        fs::write(b.outside.join("secret.json"), format!("{{\"{marker}\":1}}")).unwrap();
-        let (target, secret) = (b.target(), b.outside.join("secret.json"));
+        fs::write(b.base.join("secret.json"), format!("{{\"{marker}\":1}}")).unwrap();
+        let (target, secret) = (b.target(), b.base.join("secret.json"));
         let linked = Rc::new(Cell::new(false));
         let flag = linked.clone();
         act_at("mcpread:statted", move || {
