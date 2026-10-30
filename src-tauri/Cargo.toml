@@ -2,6 +2,7 @@
 name = "ai-toolchain-manager"
 version = "0.1.0"
 description = "AI Toolchain Manager - Phase 1A desktop foundation"
+license = "PolyForm-Noncommercial-1.0.0"
 edition = "2021"
 rust-version = "1.90"
 publish = false

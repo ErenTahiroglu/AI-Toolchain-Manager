@@ -104,6 +104,14 @@ ATM_SELFCHECK_JSON=out.json python -m unittest discover -s tests -v
 - [Phase 3A](docs/PHASE-3A.md) — incelenmiş tarif kayıt defteri, ayrı onay sözleşmesi, sentetik işlem motoru (kur/güncelle/kaldır/geri al/kurtarma); [Gitleaks pilot uygunluk değerlendirmesi](docs/GITLEAKS-PILOT-ASSESSMENT.md) (yalnızca araştırma: uygun değil)
 - [Aktif yoklama ilke önerisi](docs/ACTIVE-PROBE-POLICY-PROPOSAL.md) (uygulanmadı), [Windows Akıllı Uygulama Denetimi notu](docs/WINDOWS-SMART-APP-CONTROL.md), [dal yönetimi](docs/BRANCH-GOVERNANCE.md), [ADR'ler](docs/adr/)
 
+## Lisans
+
+Bu projenin kendi kaynak kodu ve belgeleri **PolyForm Noncommercial License 1.0.0** altında lisanslanmıştır (SPDX: `PolyForm-Noncommercial-1.0.0`). Tam ve değiştirilmemiş lisans metni ile zorunlu telif bildirimi (`Required Notice`) için bkz. [`LICENSE.md`](LICENSE.md); resmî kaynak: <https://polyformproject.org/licenses/noncommercial/1.0.0>. Kaynağın kökeni ve doğrulama biçimi: [`docs/license-01/LICENSE_NOTES.md`](docs/license-01/LICENSE_NOTES.md).
+
+- Kaynak kod herkese **görünür**; ancak bu bir **kaynak erişilebilir (source-available)** lisanstır. Açık Kaynak Girişimi (OSI) tarafından onaylı bir **açık kaynak lisansı değildir**.
+- Lisans yalnızca kendi metninde tanımlı **ticari olmayan** amaçlar için hak verir; **ticari kullanım hakkı vermez**. Neye izin verildiğini ve neye verilmediğini yalnızca `LICENSE.md` belirler; bu README onun özeti ya da hukuki yorumu değildir.
+- Bu lisans **yalnızca bu deponun kendi içeriği** içindir. Bağımlılıkların (npm ve Rust paketleri), kullanılan kütüphanelerin ve katalogda adı geçen üçüncü taraf araçların (ör. Exa, Claude Code, Playwright, jq) lisansları **değişmez**; her biri kendi lisansı ve bildirimleri altındadır. Bir aracın katalogda yer alması onun lisansını değiştirmez veya yeniden lisanslamaz. Üçüncü taraf bildirimleri ayrı tutulur (ör. `docs/phase-3d2/notices/`).
+
 ## Dallar
 
 Yalnızca iki kalıcı dal vardır: `main` (kararlı; değiştirilmez) ve `development` (tüm çalışma). Aşama dalları açılmaz; ayrıntı için [dal yönetimi](docs/BRANCH-GOVERNANCE.md).
