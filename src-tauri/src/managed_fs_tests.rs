@@ -692,7 +692,7 @@ fn moves_and_replacements_between_volumes_are_refused_and_nothing_moves() {
 
 #[test]
 fn the_unix_layer_has_no_unchecked_rename_and_no_general_overwrite_flag() {
-    let unix = include_str!("managed_fs_unix.rs").split("#[cfg(test)]").next().unwrap();
+    let unix = include_str!("managed_fs_unix.rs");
     assert!(!unix.contains("libc::renameat("), "an ordinary renameat replaces an existing destination: it must never be called");
     assert!(unix.contains("renameatx_np"));
     assert!(unix.contains("RENAME_EXCL") && unix.contains("RENAME_SWAP"));
