@@ -201,6 +201,15 @@ pub fn open_anchor_readonly(path: &Path) -> Result<DirImp, FsError> {
 }
 
 impl DirImp {
+    /// Test only: the access mode (`O_ACCMODE` bits of `F_GETFL`) the directory descriptor was opened with.
+    #[cfg(test)]
+    pub(crate) fn access_mode(&self) -> libc::c_int {
+        // SAFETY: `self.fd` is a valid open descriptor; F_GETFL has no further arguments.
+        let flags = unsafe { libc::fcntl(self.fd, libc::F_GETFL) };
+        assert!(flags >= 0, "fcntl(F_GETFL) failed");
+        flags & libc::O_ACCMODE
+    }
+
     pub fn open_child_dir(&self, name: &str) -> Result<DirImp, FsError> {
         hook::fire("before-open");
         let d = open_dir_at(self.fd, &cname(name)?)?;

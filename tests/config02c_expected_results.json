@@ -492,7 +492,18 @@
     "R1b": {
       "suite": "rust",
       "title": "project folder the user cannot write to is still read as a snapshot",
-      "skip_allowed": {},
+      "skip_allowed": {
+        "windows": [
+          "folder_stayed_writable_for_files",
+          "folder_stayed_writable_for_folders",
+          "cannot_set_a_deny_entry"
+        ],
+        "macos": [
+          "running_as_root_ignores_permissions",
+          "folder_stayed_writable_for_files",
+          "folder_stayed_writable_for_folders"
+        ]
+      },
       "expected_skip": {}
     },
     "R3a": {
@@ -524,6 +535,12 @@
     "R2": {
       "suite": "vitest",
       "title": "gate network sentence: no intentional network access by this read, WebView traffic not ruled out (#25), no erasure promise",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "R1c": {
+      "suite": "rust",
+      "title": "the reader's root handle was granted no write-like access (kernel-reported, no ACL needed)",
       "skip_allowed": {},
       "expected_skip": {}
     }

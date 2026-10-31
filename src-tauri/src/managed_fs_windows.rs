@@ -364,7 +364,24 @@ fn open_anchor_with(path: &Path, anchor_access: u32) -> Result<DirImp, FsError> 
     Ok(dir)
 }
 
+#[cfg(test)]
+#[link(name = "ntdll", kind = "raw-dylib")]
+extern "system" {
+    fn NtQueryInformationFile(file: Handle, iosb: *mut Iosb, info: *mut c_void, len: u32, class: i32) -> i32;
+}
+
 impl DirImp {
+    /// Test only: the access mask the kernel really GRANTED on this handle (`FileAccessInformation`), whatever was requested.
+    #[cfg(test)]
+    pub(crate) fn granted_access(&self) -> u32 {
+        let mut iosb = Iosb { status: 0, information: 0 };
+        let mut mask = 0u32;
+        // SAFETY: `mask` is a live u32 of the stated length; `self.h` is a valid open handle.
+        let st = unsafe { NtQueryInformationFile(self.h, &mut iosb, &mut mask as *mut u32 as *mut c_void, 4, 8) };
+        assert!(st >= 0, "NtQueryInformationFile(FileAccessInformation) failed: {st:#x}");
+        mask
+    }
+
     pub fn open_child_dir(&self, name: &str) -> Result<DirImp, FsError> {
         hook::fire("before-open");
         let d = open_dir_handle(self.h, name, DIR_ACCESS, SHARE_READ | SHARE_WRITE)?;

@@ -591,6 +591,31 @@ fn config02c_r1a_the_read_opens_the_root_with_no_add_file_or_add_subdirectory_ri
     });
 }
 
+#[test]
+fn config02c_r1c_the_root_handle_the_reader_holds_was_granted_no_write_like_access() {
+    case("R1c", || {
+        let b = bed();
+        b.put(VALID);
+        let reader = Dir::open_anchor_readonly(&b.root).expect("a readable synthetic root opens");
+        #[cfg(windows)]
+        {
+            let granted = reader.imp.granted_access();
+            // FILE_ADD_FILE 0x2, FILE_ADD_SUBDIRECTORY 0x4, FILE_DELETE_CHILD 0x40, FILE_WRITE_ATTRIBUTES 0x100, DELETE, WRITE_DAC, WRITE_OWNER
+            let write_like = 0x2 | 0x4 | 0x40 | 0x100 | 0x1_0000 | 0x4_0000 | 0x8_0000;
+            assert_eq!(granted & write_like, 0, "the kernel granted write-like access on the reader's root handle: {granted:#x}");
+            assert_ne!(granted & 0x1, 0, "FILE_LIST_DIRECTORY was granted");
+            // sensitivity of this check: the writer-capable open of the same folder is granted add-file and add-subdirectory
+            let writer = Dir::open_anchor(&b.root).expect("the writer open works on a writable synthetic root");
+            assert_eq!(writer.imp.granted_access() & 0x6, 0x6, "the contrast open really holds the write rights");
+        }
+        #[cfg(unix)]
+        {
+            assert_eq!(reader.imp.access_mode(), libc::O_RDONLY, "the reader's root descriptor is read-only");
+        }
+        Verdict::Pass
+    });
+}
+
 /// Restores the project folder's permissions however the test ends (a synthetic folder under the runner's temporary area only).
 struct RootLock {
     root: std::path::PathBuf,
@@ -602,7 +627,9 @@ impl Drop for RootLock {
     fn drop(&mut self) {
         #[cfg(windows)]
         {
-            let _ = std::process::Command::new("icacls").arg(&self.root).arg("/remove:d").arg(&self.user).output();
+            for who in [self.user.as_str(), "*S-1-1-0"] {
+                let _ = std::process::Command::new("icacls").arg(&self.root).arg("/remove:d").arg(who).output();
+            }
         }
         #[cfg(unix)]
         {
@@ -621,10 +648,13 @@ fn config02c_r1b_a_project_folder_the_user_cannot_write_to_is_still_read_as_a_sn
         let _lock = {
             let user = std::env::var("USERNAME").unwrap_or_default();
             // deny only "add file" and "add subdirectory" on THIS synthetic folder; listing, traversing and reading stay allowed
-            let deny = std::process::Command::new("icacls").arg(&b.root).arg("/deny").arg(format!("{user}:(WD,AD)")).output();
-            let lock = RootLock { root: b.root.clone(), user };
-            if !deny.map(|o| o.status.success()).unwrap_or(false) {
-                return Verdict::Skipped("cannot_set_a_deny_entry");
+            let lock = RootLock { root: b.root.clone(), user: user.clone() };
+            // the user's own entry and Everyone (S-1-1-0): a token that is also in a privileged group is still covered by one of them
+            for who in [user, "*S-1-1-0".to_string()] {
+                let deny = std::process::Command::new("icacls").arg(&b.root).arg("/deny").arg(format!("{who}:(WD,AD)")).output();
+                if !deny.map(|o| o.status.success()).unwrap_or(false) {
+                    return Verdict::Skipped("cannot_set_a_deny_entry");
+                }
             }
             lock
         };
@@ -643,11 +673,11 @@ fn config02c_r1b_a_project_folder_the_user_cannot_write_to_is_still_read_as_a_sn
         let probe = b.root.join("probe.tmp");
         if fs::File::create(&probe).is_ok() {
             let _ = fs::remove_file(&probe);
-            return Verdict::Skipped("folder_stayed_writable");
+            return Verdict::Skipped("folder_stayed_writable_for_files");
         }
         if fs::create_dir(b.root.join("probe-dir")).is_ok() {
             let _ = fs::remove_dir(b.root.join("probe-dir"));
-            return Verdict::Skipped("folder_stayed_writable");
+            return Verdict::Skipped("folder_stayed_writable_for_folders");
         }
         // ... while the user can still list it and read the file
         if fs::read_dir(&b.root).is_err() || fs::read(b.target()).ok().as_deref() != Some(VALID) {
