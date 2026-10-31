@@ -29,7 +29,7 @@ jobs:
             target: x86_64-pc-windows-msvc
             exe: ai-toolchain-manager.exe
           - name: macos-arm64
-            os: macos-14 # Apple Silicon (arm64) runner
+            os: macos-15 # Apple Silicon (arm64) runner
             target: aarch64-apple-darwin
             exe: ai-toolchain-manager
     defaults:
