@@ -11,7 +11,11 @@
 //! 3. looks at the constant name without following it: absent, a link, not a regular file, or more than one hard link are refusals;
 //! 4. opens it relative to the root handle, re-reads kind, identity and link count from the opened handle;
 //! 5. reads at most 1 MiB + 1 bytes, then re-reads identity, size and last-write time, reads a SECOND time and compares the bytes, and finally
-//!    looks at the name once more; any difference is `Changed` and NOTHING of the first reading is returned.
+//!    looks at the name once more and lists the root's names once more (the exact spelling must still be there and no other spelling of it);
+//!    any difference is `Changed` (or a case alias) and NOTHING of the first reading is returned.
+//!
+//! The root is opened through `Dir::open_anchor_readonly`: on Windows the final folder is opened without the add-file / add-subdirectory
+//! rights that the writer paths request, so a project folder the user can read but not write is read like any other.
 //!
 //! It contains no call that creates, writes, deletes, moves or re-names anything, holds no lock, opens no connection and starts no process.
 //! It keeps nothing after it returns: the bytes go to the caller, the handles are closed, no cache or token survives.
@@ -68,7 +72,7 @@ pub struct Observed {
 /// One bounded, consistent reading of `<root>/.mcp.json`. `root` must already have passed the text checks of `mcp_read::root_from_text`.
 pub fn read(root: &Path) -> Result<Observed, Failure> {
     hook::fire("mcpread:before-root");
-    let dir = Dir::open_anchor(root).map_err(|e| fail(Stage::Root, e))?;
+    let dir = Dir::open_anchor_readonly(root).map_err(|e| fail(Stage::Root, e))?;
     hook::fire("mcpread:root-opened");
 
     // The names are compared and dropped here; they are never returned, shown, logged or stored.
@@ -127,8 +131,23 @@ pub fn read(root: &Path) -> Result<Observed, Failure> {
         Some(s) if s.kind == Kind::File && s.identity == opened.identity && s.links == 1 && s.size == first.len() as u64 => {}
         _ => return Err(fail(Stage::Read, FsError::Changed)),
     }
+    // Every look above matches the name case-insensitively (Windows `OBJ_CASE_INSENSITIVE`, a case-insensitive APFS volume). A change of only
+    // the spelling after the first listing would therefore pass the identity checks. The spelling on disk is read once more, names only.
+    spelling_is_exact(&dir)?;
 
     Ok(Observed { size: first.len() as u64, sha256: sha256_hex(&first), bytes: first })
+}
+
+/// The names currently in the root, compared and dropped: the exact constant must be there, and no other spelling of it may be.
+fn spelling_is_exact(dir: &Dir) -> Result<(), Failure> {
+    let names = dir.imp.list(MAX_LIST_ENTRIES).map_err(|e| fail(Stage::Listing, e))?;
+    if names.iter().any(|n| n != TARGET && n.eq_ignore_ascii_case(TARGET)) {
+        return Err(Failure { stage: Stage::Listing, fault: Fault::CaseAlias });
+    }
+    if !names.iter().any(|n| n == TARGET) {
+        return Err(fail(Stage::Read, FsError::Changed));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

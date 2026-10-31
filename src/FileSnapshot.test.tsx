@@ -12,7 +12,7 @@ import { sha256Hex } from "./configPlan";
 import { ALL_STATUS_SAMPLES } from "./test/snapshotSamples";
 import {
   BRIDGE_DIFFERENT, BRIDGE_EQUAL, DECLINED_TEXT, DECLINE_BUTTON, INVENTORY_LABEL, NOT_REQUESTED_TEXT, READ_BUTTON, READ_CONSENT, SECTION_TITLE, SNAPSHOT_LABEL, SNAPSHOT_TTL_MS,
-  STATUSES, UNEXPECTED_TEXT, allFixedText, describeResult, errorText,
+  GATE_POINTS, STATUSES, UNEXPECTED_TEXT, allFixedText, describeResult, errorText,
 } from "./fileSnapshot";
 import type { ReviewedDeclaration } from "./configDeclarations";
 import { caseIt } from "./test/config02cResult";
@@ -87,6 +87,26 @@ describe("the words on screen are the reviewed words", () => {
   });
 });
 
+describe("the network sentence of the gate stays within the evidence (R1-F2)", () => {
+  caseIt("R2", "the gate says the read starts no network access on purpose, names the open WebView issue and promises no erasure or protection", () => {
+    const local = GATE_POINTS.find((p) => p.lead === "Yerel:");
+    expect(local).toBeDefined();
+    const text = local!.text;
+    expect(text).toContain("bu okuma işlemi");
+    expect(text).toContain("bilerek ağ bağlantısı başlatmaz");
+    expect(text).toContain("WebView çalışma ortamının ayrı ağ trafiği");
+    expect(text).toContain("dışlanmış değildir");
+    expect(text).toContain("(açık sorun #25)");
+    expect(text).toContain("olmadığı da kanıtlanmamıştır");
+    expect(text).toContain("vaadi değildir");
+    expect(text).toContain("hiçbir program çalıştırılmaz, hiçbir dosyaya yazılmaz, hiçbir şey kurulmaz");
+    // no absolute promise about the whole application or the runtime, and no claim of a confirmed leak
+    for (const absolute of ["İnternete bağlanılmaz", "internete bağlanmaz", "ağa hiçbir", "hiçbir ağ", "sızdırıldı", "sızdı."]) expect(text, absolute).not.toContain(absolute);
+    // the sentence is in the reviewed request exactly as shown
+    expect(requestDoc.replace(/[*`>]/g, "").replace(/\s+/g, " ")).toContain(text);
+  });
+});
+
 describe("the closed answer is accepted only in its exact shape", () => {
   caseIt("U2", "every status renders only fixed text; anything outside the contract is refused and never shown", () => {
     for (const sample of ALL_STATUS_SAMPLES) {
@@ -157,9 +177,10 @@ describe("opt-in, one click = one call, saying no", () => {
     renderPreview();
     await openSection();
     const text = document.body.textContent ?? "";
-    for (const needle of [".mcp.json", "1.048.576", "üst klasörlerin yalnızca türü", "harf büyüklüğü farkıyla", "gösterilmez ve saklanmaz", "güvenli silinmesi garanti edilmez", "5 dakika", INVENTORY_LABEL, SNAPSHOT_LABEL, "İnternete bağlanılmaz", NOT_REQUESTED_TEXT]) {
+    for (const needle of [".mcp.json", "1.048.576", "üst klasörlerin yalnızca türü", "harf büyüklüğü farkıyla", "gösterilmez ve saklanmaz", "güvenli silinmesi garanti edilmez", "5 dakika", INVENTORY_LABEL, SNAPSHOT_LABEL, "bilerek ağ bağlantısı başlatmaz", "WebView çalışma ortamının ayrı ağ trafiği", "#25", "kanıtlanmamıştır", NOT_REQUESTED_TEXT]) {
       expect(text, needle).toContain(needle);
     }
+    expect(text).not.toContain("İnternete bağlanılmaz"); // the absolute promise is gone (Issue #25 is open)
     expect(document.activeElement).not.toBe(readButton()); // no default focus on the read button
     expect(folderBox()).toHaveAttribute("autocomplete", "off");
     expect(screen.queryByRole("link")).not.toBeInTheDocument();

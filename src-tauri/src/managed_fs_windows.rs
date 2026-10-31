@@ -124,10 +124,14 @@ const FILE_DISPOSITION_INFORMATION: i32 = 13;
 const FILE_DISPOSITION_INFORMATION_EX: i32 = 64;
 const FILE_RENAME_INFORMATION_EX: i32 = 65;
 
-const DIR_ACCESS: u32 =
+pub(crate) const DIR_ACCESS: u32 =
     SYNCHRONIZE | READ_CONTROL | FILE_READ_DATA | FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_TRAVERSE | FILE_READ_ATTRIBUTES;
 /// Folders on the way DOWN to the anchor are only traversed: they need no write access (and a user has none on the volume root).
 const CHAIN_ACCESS: u32 = SYNCHRONIZE | FILE_READ_DATA | FILE_TRAVERSE | FILE_READ_ATTRIBUTES;
+/// CONFIG-02C: the rights for the FINAL component when the root is only read (list names, stat and open one child). Deliberately has no
+/// `FILE_WRITE_DATA` (= add file), no `FILE_APPEND_DATA` (= add subdirectory), no `DELETE` and no `READ_CONTROL`, so a project folder the user
+/// cannot write to (read-only share of a checkout, a locked-down ACL) can still be read. `DIR_ACCESS` (used by the writer paths) is unchanged.
+pub(crate) const READ_ANCHOR_ACCESS: u32 = SYNCHRONIZE | FILE_READ_DATA | FILE_TRAVERSE | FILE_READ_ATTRIBUTES;
 const OWNER_ONLY_SDDL: &str = "D:P(A;OICI;FA;;;OW)";
 
 pub fn map_status(status: i32) -> FsError {
@@ -308,6 +312,15 @@ fn finish_dir(h: Handle) -> Result<DirImp, FsError> {
 }
 
 pub fn open_anchor(path: &Path) -> Result<DirImp, FsError> {
+    open_anchor_with(path, DIR_ACCESS)
+}
+
+/// Same walk and same refusals as [`open_anchor`]; only the rights requested for the anchor itself differ (see [`READ_ANCHOR_ACCESS`]).
+pub fn open_anchor_readonly(path: &Path) -> Result<DirImp, FsError> {
+    open_anchor_with(path, READ_ANCHOR_ACCESS)
+}
+
+fn open_anchor_with(path: &Path, anchor_access: u32) -> Result<DirImp, FsError> {
     let text = path.to_str().ok_or(FsError::InvalidName)?;
     let text = text.strip_prefix(r"\\?\").unwrap_or(text);
     if text.starts_with(r"\\") || text.starts_with("//") {
@@ -343,7 +356,7 @@ pub fn open_anchor(path: &Path) -> Result<DirImp, FsError> {
         hook::fire("between-components");
         // no volume comparison along the anchor's own chain (only below the anchor); only the anchor itself is opened for use
         dir = if i + 1 == comps.len() {
-            open_dir_handle(dir.h, comp, DIR_ACCESS, SHARE_READ | SHARE_WRITE)?
+            open_dir_handle(dir.h, comp, anchor_access, SHARE_READ | SHARE_WRITE)?
         } else {
             open_dir_handle(dir.h, comp, CHAIN_ACCESS, SHARE_ALL)?
         };

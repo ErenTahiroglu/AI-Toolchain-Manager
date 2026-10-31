@@ -154,6 +154,9 @@ Where each id lives and what the manifest (`tests/config02c_expected_results.jso
 | G2 | G | the read-only module and the typed-result module contain none of the forbidden calls |
 | G4 | G | vitest: the component source |
 | G5 | G | `tools/config02c_results_check.py` + `tests/test_config02c_results_check.py` + the CI step |
+| R1a, R1b | (R2.1, finding F1) | R1a: the reader opens its root only through `open_anchor_readonly`; the Windows mask has no write-like right and `DIR_ACCESS` is unchanged (macOS: the directory open flags are `O_RDONLY`/`O_NOFOLLOW`). R1b: a synthetic root in which a file or folder cannot be created (Windows `icacls /deny user:(WD,AD)`; macOS `chmod 555`, skipped as root) is still read; the precondition is probed first and a folder that stayed writable is SKIPPED, never PASS; the permission is restored in a drop guard |
+| R3a, R3b | (R2.1, finding F3) | a case-only re-spelling of the file after the names were listed (R3a) or after both reads (R3b) is refused with nothing read. SKIPPED with `case_sensitive_volume_has_no_case_only_alias` where the volume treats the new spelling as a different file. The reproduction before the fix is recorded in the Issue, not here |
+| R2 | (R2.1, finding F2) | vitest: the gate's network sentence |
 | U1–U3 | (added) | one click = one call with exactly `{alias, directory, consent}`, declining = zero calls, strict acceptance of the answer, the digest comparison wording |
 
 Not run and not claimed: real GUI, keyboard focus order, screen-reader output, WebView2 runtime egress and profile state (#25); real network mounts; an unreadable root; macOS behaviour until the macOS run's lines are in the artifact.
@@ -164,6 +167,8 @@ Not run and not claimed: real GUI, keyboard focus order, screen-reader output, W
 * A same-user process can still change the file between the last check and the end of the read (D8). The digest identifies **the bytes observed**, not who wrote them, not that they are trustworthy, and not the file's state afterwards.
 * `absent` means no exactly-named entry was observed in that directory at that moment — not that MCP is unconfigured, and not that the directory is the project's root.
 * The handle-based root walk inspects **ancestor directory metadata** (type, link/reparse status, volume), and the reader lists the **root's entry names** in memory to detect a case-variant sibling. Neither is returned or stored, but neither is "nothing outside the file was looked at".
+* The spelling recheck (R3a/R3b) lists names once more after the last name lookup; a re-spelling after that listing, or a same-size/restored-time content edit (D8), is not detected.
+* The gate no longer promises that the application never uses the network. It states only that this read starts none on purpose; #25 (runtime traffic of the embedded WebView) is open and not measured here.
 * The existing inventory scan's lenient parse is not Claude Code's runtime behaviour either; this reader's strict refusal is a **local policy**.
 * The reader's strictness differs from Claude Code's parser; `present_metadata_only` is not "invalid".
 * The typed path exists in the WebView's JavaScript memory and input element, crosses IPC into Rust as request input, and may persist in memory the application does not control (JS string/GC behaviour, the WebView2 runtime, OS memory). Removing it from component state after the call is hygiene, **not** a secure erase, and nothing here hides it from the renderer. #25 (WebView2 runtime egress/profile state) is unresolved and unmeasured by this plan. A picker would keep the path in Rust but adds a dependency and a capability, and is a separate decision.

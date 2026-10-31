@@ -556,6 +556,173 @@ fn config02c_the_reader_leaves_the_folder_exactly_as_it_found_it() {
     });
 }
 
+// ---- R1 (independent review finding F1): the read opens the root with read rights only -------------------------------------------------------
+
+#[test]
+fn config02c_r1a_the_read_opens_the_root_with_no_add_file_or_add_subdirectory_right() {
+    case("R1a", || {
+        let production = include_str!("managed_fs_read.rs").split("#[cfg(test)]").next().unwrap();
+        assert!(production.contains("Dir::open_anchor_readonly("), "the reader opens its root through the read-only path");
+        assert!(!production.contains("Dir::open_anchor("), "the reader never uses the writer-capable root open");
+        #[cfg(windows)]
+        {
+            use crate::managed_fs::imp::{DIR_ACCESS, READ_ANCHOR_ACCESS};
+            // FILE_WRITE_DATA (add file) 0x2, FILE_APPEND_DATA (add subdirectory) 0x4, FILE_DELETE_CHILD 0x40, FILE_WRITE_ATTRIBUTES 0x100,
+            // DELETE 0x10000, WRITE_DAC 0x40000, WRITE_OWNER 0x80000, GENERIC_WRITE 0x40000000, GENERIC_ALL 0x10000000
+            let write_like = 0x2 | 0x4 | 0x40 | 0x100 | 0x1_0000 | 0x4_0000 | 0x8_0000 | 0x4000_0000 | 0x1000_0000;
+            assert_eq!(READ_ANCHOR_ACCESS & write_like, 0, "the read-only root mask asks for no write-like right: {READ_ANCHOR_ACCESS:#x}");
+            // exactly: SYNCHRONIZE | FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES
+            assert_eq!(READ_ANCHOR_ACCESS, 0x10_0000 | 0x1 | 0x20 | 0x80);
+            // the writer paths are unchanged: they still ask for add-file and add-subdirectory on their own handles
+            assert_eq!(DIR_ACCESS & 0x6, 0x6, "DIR_ACCESS is deliberately left as it was");
+        }
+        #[cfg(unix)]
+        {
+            let unix = include_str!("managed_fs_unix.rs");
+            let flags = unix.lines().find(|l| l.contains("const DIR_FLAGS")).expect("the directory open flags are declared in one place");
+            let flags_block = &unix[unix.find(flags).unwrap()..];
+            let flags_stmt = flags_block.split(';').next().unwrap();
+            assert!(flags_stmt.contains("O_RDONLY") && flags_stmt.contains("O_NOFOLLOW"), "{flags_stmt}");
+            for forbidden in ["O_WRONLY", "O_RDWR", "O_CREAT", "O_TRUNC", "O_APPEND"] {
+                assert!(!flags_stmt.contains(forbidden), "{forbidden} in the directory open flags");
+            }
+        }
+        Verdict::Pass
+    });
+}
+
+/// Restores the project folder's permissions however the test ends (a synthetic folder under the runner's temporary area only).
+struct RootLock {
+    root: std::path::PathBuf,
+    #[cfg(windows)]
+    user: String,
+}
+
+impl Drop for RootLock {
+    fn drop(&mut self) {
+        #[cfg(windows)]
+        {
+            let _ = std::process::Command::new("icacls").arg(&self.root).arg("/remove:d").arg(&self.user).output();
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&self.root, fs::Permissions::from_mode(0o755));
+        }
+    }
+}
+
+#[test]
+fn config02c_r1b_a_project_folder_the_user_cannot_write_to_is_still_read_as_a_snapshot() {
+    case("R1b", || {
+        let b = bed();
+        b.put(VALID);
+        #[cfg(windows)]
+        let _lock = {
+            let user = std::env::var("USERNAME").unwrap_or_default();
+            // deny only "add file" and "add subdirectory" on THIS synthetic folder; listing, traversing and reading stay allowed
+            let deny = std::process::Command::new("icacls").arg(&b.root).arg("/deny").arg(format!("{user}:(WD,AD)")).output();
+            let lock = RootLock { root: b.root.clone(), user };
+            if !deny.map(|o| o.status.success()).unwrap_or(false) {
+                return Verdict::Skipped("cannot_set_a_deny_entry");
+            }
+            lock
+        };
+        #[cfg(unix)]
+        let _lock = {
+            use std::os::unix::fs::PermissionsExt;
+            // SAFETY: plain libc call without arguments.
+            if unsafe { libc::geteuid() } == 0 {
+                return Verdict::Skipped("running_as_root_ignores_permissions");
+            }
+            let lock = RootLock { root: b.root.clone() };
+            fs::set_permissions(&b.root, fs::Permissions::from_mode(0o555)).unwrap();
+            lock
+        };
+        // the precondition must really hold, otherwise this case proves nothing: nothing can be created in the folder ...
+        let probe = b.root.join("probe.tmp");
+        if fs::File::create(&probe).is_ok() {
+            let _ = fs::remove_file(&probe);
+            return Verdict::Skipped("folder_stayed_writable");
+        }
+        if fs::create_dir(b.root.join("probe-dir")).is_ok() {
+            let _ = fs::remove_dir(b.root.join("probe-dir"));
+            return Verdict::Skipped("folder_stayed_writable");
+        }
+        // ... while the user can still list it and read the file
+        if fs::read_dir(&b.root).is_err() || fs::read(b.target()).ok().as_deref() != Some(VALID) {
+            return Verdict::Skipped("folder_became_unreadable");
+        }
+        let r = run(&b);
+        is(&r, Status::PresentSummarized, None);
+        assert_eq!(r.sha256.as_deref(), Some(crate::managed_fs::sha256_hex(VALID).as_str()), "{r:?}");
+        assert_eq!(r.size_bytes, Some(VALID.len() as u64));
+        assert!(!probe.exists() && !b.root.join("probe-dir").exists(), "the reader created nothing");
+        Verdict::Pass
+    });
+}
+
+// ---- R3 (independent review finding F3): a case-only re-spelling of the name after the names were listed -----------------------------------
+
+/// Re-spells `.mcp.json` as `.MCP.JSON` at one stage of the read. Returns whether the folder then really holds the new spelling.
+fn respell_at(stage: &'static str, b: &Bed) -> Rc<Cell<bool>> {
+    let (target, other) = (b.target(), b.root.join(".MCP.JSON"));
+    let done = Rc::new(Cell::new(false));
+    let flag = done.clone();
+    act_at(stage, move || {
+        flag.set(fs::rename(&target, &other).is_ok());
+    });
+    done
+}
+
+fn spelling_on_disk(b: &Bed) -> Vec<String> {
+    fs::read_dir(&b.root).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect()
+}
+
+fn refused_without_data(r: &ReadMcpConfigResult) {
+    assert!(
+        matches!((r.status, r.reason), (Status::UnsafePath, Some(Reason::CaseAlias)) | (Status::ChangedDuringRead, None)),
+        "a name whose spelling changed must not be summarised: {r:?}"
+    );
+    nothing_read(r);
+}
+
+#[test]
+fn config02c_r3a_a_case_only_respelling_after_the_names_were_listed_is_not_summarised() {
+    case("R3a", || {
+        let b = bed();
+        b.put(VALID);
+        let done = respell_at("mcpread:listed", &b);
+        let r = run(&b);
+        if !done.get() || !spelling_on_disk(&b).iter().any(|n| n == ".MCP.JSON") {
+            return Verdict::Skipped("cannot_respell_the_name_in_this_fixture");
+        }
+        if fs::metadata(b.target()).is_err() {
+            return Verdict::Skipped("case_sensitive_volume_has_no_case_only_alias");
+        }
+        refused_without_data(&r);
+        Verdict::Pass
+    });
+}
+
+#[test]
+fn config02c_r3b_a_case_only_respelling_after_both_reads_is_not_summarised() {
+    case("R3b", || {
+        let b = bed();
+        b.put(VALID);
+        let done = respell_at("mcpread:before-final-stat", &b);
+        let r = run(&b);
+        if !done.get() || !spelling_on_disk(&b).iter().any(|n| n == ".MCP.JSON") {
+            return Verdict::Skipped("cannot_respell_the_name_in_this_fixture");
+        }
+        if fs::metadata(b.target()).is_err() {
+            return Verdict::Skipped("case_sensitive_volume_has_no_case_only_alias");
+        }
+        refused_without_data(&r);
+        Verdict::Pass
+    });
+}
+
 // ---- G2: the module contains no write-capable call ---------------------------------------------------------------------------------------
 
 #[test]

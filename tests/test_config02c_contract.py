@@ -160,8 +160,9 @@ class Documents(unittest.TestCase):
 
     def test_the_turkish_gate_text_names_the_file_the_limit_and_the_no_button(self):
         request = doc(REQUEST)
-        for needle in (".mcp.json", "1.048.576", "Hayır, metni yapıştırarak devam edeceğim", "Temizle", "kaydetmez", "İnternete bağlanılmaz"):
+        for needle in (".mcp.json", "1.048.576", "Hayır, metni yapıştırarak devam edeceğim", "Temizle", "kaydetmez", "bilerek ağ bağlantısı başlatmaz", "#25", "kanıtlanmamıştır"):
             self.assertIn(needle, request, needle)
+        self.assertNotIn("İnternete bağlanılmaz", request)  # the absolute promise exceeds the evidence (Issue #25 is open)
 
 
 class ReviewerDecisions(unittest.TestCase):
@@ -341,6 +342,14 @@ class Reach(unittest.TestCase):
         fs_layer = read("src-tauri/src/managed_fs.rs")
         self.assertIn("pub fn modified(&self)", fs_layer)
         self.assertIn('#[path = "managed_fs_read.rs"]\npub(crate) mod read_mcp;', fs_layer)
+        # ... and the read-only root open (R1-F1): the reader never uses the writer-capable open, the Windows mask has no write-like right
+        self.assertIn("pub fn open_anchor_readonly(path: &Path)", fs_layer)
+        self.assertIn("Dir::open_anchor_readonly(", text)
+        self.assertNotIn("Dir::open_anchor(", text)
+        windows = read("src-tauri/src/managed_fs_windows.rs")
+        mask = re.search(r"const READ_ANCHOR_ACCESS: u32 = ([^;]+);", windows).group(1)
+        self.assertEqual(sorted(x.strip() for x in mask.split("|")), ["FILE_READ_ATTRIBUTES", "FILE_READ_DATA", "FILE_TRAVERSE", "SYNCHRONIZE"])
+        self.assertIn("open_anchor_with(path, DIR_ACCESS)", windows)  # the writer paths keep their rights
 
     def test_nothing_in_production_refers_to_the_02b_prototype(self):
         for path in SRC.rglob("*.rs"):

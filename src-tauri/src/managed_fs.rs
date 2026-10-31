@@ -301,6 +301,12 @@ impl Dir {
         Ok(Dir { imp: imp::open_anchor(path)? })
     }
 
+    /// CONFIG-02C: the same walk and the same refusals as [`Dir::open_anchor`], but the final folder is opened with read rights only (no
+    /// add-file / add-subdirectory right on Windows). For the single-file reader; every writer keeps using `open_anchor`.
+    pub fn open_anchor_readonly(path: &Path) -> Result<Dir, FsError> {
+        Ok(Dir { imp: imp::open_anchor_readonly(path)? })
+    }
+
     pub fn identity(&self) -> Identity {
         self.imp.identity
     }

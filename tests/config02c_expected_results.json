@@ -482,6 +482,50 @@
       "title": "every fixed sentence of the panel appears verbatim in the reviewed request",
       "skip_allowed": {},
       "expected_skip": {}
+    },
+    "R1a": {
+      "suite": "rust",
+      "title": "read opens the root without add-file/add-subdirectory rights; writer mask unchanged",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "R1b": {
+      "suite": "rust",
+      "title": "project folder the user cannot write to is still read as a snapshot",
+      "skip_allowed": {},
+      "expected_skip": {}
+    },
+    "R3a": {
+      "suite": "rust",
+      "title": "case-only respelling after the names were listed is not summarised",
+      "skip_allowed": {
+        "windows": [
+          "case_sensitive_volume_has_no_case_only_alias"
+        ],
+        "macos": [
+          "case_sensitive_volume_has_no_case_only_alias"
+        ]
+      },
+      "expected_skip": {}
+    },
+    "R3b": {
+      "suite": "rust",
+      "title": "case-only respelling after both reads is not summarised",
+      "skip_allowed": {
+        "windows": [
+          "case_sensitive_volume_has_no_case_only_alias"
+        ],
+        "macos": [
+          "case_sensitive_volume_has_no_case_only_alias"
+        ]
+      },
+      "expected_skip": {}
+    },
+    "R2": {
+      "suite": "vitest",
+      "title": "gate network sentence: no intentional network access by this read, WebView traffic not ruled out (#25), no erasure promise",
+      "skip_allowed": {},
+      "expected_skip": {}
     }
   },
   "not_collected": {

@@ -194,6 +194,12 @@ pub fn open_anchor(path: &Path) -> Result<DirImp, FsError> {
     Ok(dir)
 }
 
+/// CONFIG-02C: the read-only root open. On Unix `open_anchor` already opens every directory `O_RDONLY | O_DIRECTORY | O_NOFOLLOW`, which asks
+/// for no write permission, so the two are the same walk; the separate name keeps the read path from depending on that coincidence.
+pub fn open_anchor_readonly(path: &Path) -> Result<DirImp, FsError> {
+    open_anchor(path)
+}
+
 impl DirImp {
     pub fn open_child_dir(&self, name: &str) -> Result<DirImp, FsError> {
         hook::fire("before-open");
