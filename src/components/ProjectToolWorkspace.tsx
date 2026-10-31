@@ -320,7 +320,7 @@ export function ProjectToolWorkspace({ projects, catalog, inventory, target, onT
       <h2 id={`${ids}-title`} tabIndex={-1} ref={titleRef}>Proje Araç Matrisi</h2>
       <p className="muted small">
         Bir proje, işletim sistemi ve ajan yüzeyi seçin; her araç için <strong>isteğinizi</strong> kaydedin. Bu bir <strong>planlama ekranıdır</strong>: hiçbir şey kurmaz,
-        çalıştırmaz, doğrulamaz veya etkinleştirmez; ajan ayarlarına, dosyalarınıza ve internete dokunmaz. “Gerçek durum” bölümü, bu ekranın bilgisayarı denetlediği
+        çalıştırmaz, doğrulamaz veya etkinleştirmez; ajan ayarlarına ve dosyalarınıza dokunmaz ve bilerek ağ bağlantısı başlatmaz (WebView çalışma ortamının ayrı ağ trafiği bunun dışındadır; açık sorun #25). “Gerçek durum” bölümü, bu ekranın bilgisayarı denetlediği
         anlamına gelmez; uygulamanın kendi kaydını gösterir. Kurulum durumunun ayrıntısı Araç Kütüphanesi sayfasındadır.
       </p>
 

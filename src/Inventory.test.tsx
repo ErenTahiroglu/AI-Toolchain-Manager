@@ -46,6 +46,18 @@ describe("computer inventory (read-only discovery)", () => {
     expect(screen.getByText(/Bulundu ≠ yapılandırıldı ≠ çalışıyor/)).toBeInTheDocument();
   });
 
+  it("makes no absolute network promise: the scan starts no connection on purpose, the WebView runtime is named as outside that statement (#25)", async () => {
+    await open();
+    const banner = (await screen.findByText(/Bulundu ≠ yapılandırıldı ≠ çalışıyor/)).closest('[role="note"]');
+    expect(banner).not.toBeNull();
+    const text = (banner!.textContent ?? "").replace(/\s+/g, " ");
+    for (const needle of ["bu tarama bilerek ağ bağlantısı başlatmaz", "WebView çalışma ortamının ayrı ağ trafiği", "dışlanmış değildir", "(açık sorun #25)", "olmadığı da kanıtlanmamıştır", "Hiçbir program çalıştırılmaz"]) {
+      expect(text, needle).toContain(needle);
+    }
+    // the old unqualified promise is gone (same guard as the CONFIG-02C gate; Issue #25 is open)
+    for (const absolute of ["internete bağlanılmaz", "İnternete bağlanılmaz", "internete istek", "ağa hiçbir", "hiçbir ağ"]) expect(text, absolute).not.toContain(absolute);
+  });
+
   it("explains exactly what each permission reads and does not pre-select any of them", async () => {
     await open();
     const boxes = await screen.findAllByRole("checkbox");

@@ -309,8 +309,9 @@ export function InventoryPage() {
     <>
       <div className="banner banner-note" role="note">
         <strong>Bulundu ≠ yapılandırıldı ≠ çalışıyor.</strong> Bu tarama yalnızca <em>okur</em>: dosya adlarına ve belirli yapılandırma dosyalarına bakar.
-        Hiçbir program çalıştırılmaz, hiçbir şey kurulmaz, ajan ayarlarınıza yazılmaz, internete bağlanılmaz. Bir dosyanın var olması aracın çalıştığını göstermez;
-        işlev doğrulaması bu sürümde yoktur.
+        Hiçbir program çalıştırılmaz, hiçbir şey kurulmaz, ajan ayarlarınıza yazılmaz ve bu tarama bilerek ağ bağlantısı başlatmaz. Uygulamanın içindeki WebView çalışma ortamının
+        ayrı ağ trafiği bu denetimin dışındadır ve dışlanmış değildir (açık sorun #25); bunun bu taramayla ilgili olduğuna dair bir kanıt yoktur, ancak olmadığı da kanıtlanmamıştır.
+        Bir dosyanın var olması aracın çalıştığını göstermez; işlev doğrulaması bu sürümde yoktur.
       </div>
 
       <fieldset className="panel">

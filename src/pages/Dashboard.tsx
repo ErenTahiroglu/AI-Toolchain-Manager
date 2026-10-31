@@ -48,7 +48,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: string) => vo
           </p>
         )}
         <p className="muted small">
-          Bu sürüm (Faz 1B) hiçbir aracı kurmaz veya çalıştırmaz, hiçbir ajan ayarını değiştirmez ve internete istek göndermez.
+          Bu sürüm (Faz 1B) hiçbir aracı kurmaz veya çalıştırmaz, hiçbir ajan ayarını değiştirmez ve komutları bilerek ağ bağlantısı başlatmaz (uygulamanın içindeki WebView çalışma ortamının ayrı ağ trafiği bunun dışındadır; açık sorun #25).
           "Örnek" etiketli projeler <strong>örnek veridir</strong>. Kayıtlı kararlar yalnızca isteğinizdir; gerçek kurulum durumu değildir.
         </p>
       </section>
