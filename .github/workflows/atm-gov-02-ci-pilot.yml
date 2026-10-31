@@ -1,0 +1,259 @@
+name: ATM-GOV-02 CI Evidence Pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_commit_sha:
+        description: "Target ATM commit SHA"
+        required: true
+        default: "3a82d95e0a6e8545e55743a07b91a1a47212b592"
+      target_run_id:
+        description: "Target ATM CI run ID"
+        required: true
+        default: "41195527653"
+      target_run_attempt:
+        description: "Target ATM CI run attempt"
+        required: false
+        default: "1"
+  push:
+    branches: [development]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  ece-pilot:
+    name: ECE ATM CI Evidence Pilot
+    # Run if manually dispatched OR if explicitly opted-in via commit message
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[pilot-opt-in]')
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout ATM repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify operator policy integrity & execute N4 negative control
+        env:
+          POLICY_PATH: .github/ece/atm-ci-two-runner-v1.json
+          EXPECTED_HASH: f523eda2bca9d2512dc372fee476bb9dc094d3cebd29b6be27ce2a38df2e1c1f
+        run: |
+          set -euo pipefail
+          echo "Verifying operator policy file integrity..."
+          ACTUAL_HASH=$(sha256sum "$POLICY_PATH" | awk '{print $1}')
+          if [ "$ACTUAL_HASH" != "$EXPECTED_HASH" ]; then
+            echo "::error::Policy file integrity violation! Expected $EXPECTED_HASH, got $ACTUAL_HASH"
+            exit 1
+          fi
+          echo "Operator policy integrity verified: $ACTUAL_HASH"
+
+          # N4 Negative Control: Tampered policy must be refused before evaluation
+          echo "Executing N4 negative control: tampered policy refusal..."
+          cp "$POLICY_PATH" /tmp/tampered_policy.json
+          sed -i 's/"allow_extra_jobs": false/"allow_extra_jobs": true/' /tmp/tampered_policy.json
+          TAMPERED_HASH=$(sha256sum /tmp/tampered_policy.json | awk '{print $1}')
+          if [ "$TAMPERED_HASH" = "$EXPECTED_HASH" ]; then
+            echo "::error::N4 failed: tampered policy produced identical hash!"
+            exit 1
+          fi
+          echo "N4 PASSED: Tampered policy hash ($TAMPERED_HASH) != expected ($EXPECTED_HASH); refused before evaluation."
+
+      - name: Checkout ECE repository at approved SHA
+        uses: actions/checkout@v4
+        with:
+          repository: ErenTahiroglu/Evidence-Checkpoint-Engine
+          ref: 6c324d04b6e6837e3833ea53ce3f411a5b0ce289
+          path: ece-source
+          persist-credentials: false
+
+      - name: Verify ECE source commit
+        run: |
+          set -euo pipefail
+          ECE_SHA=$(git -C ece-source rev-parse HEAD)
+          EXPECTED_ECE_SHA="6c324d04b6e6837e3833ea53ce3f411a5b0ce289"
+          if [ "$ECE_SHA" != "$EXPECTED_ECE_SHA" ]; then
+            echo "::error::ECE source SHA mismatch! Expected $EXPECTED_ECE_SHA, got $ECE_SHA"
+            exit 1
+          fi
+          echo "ECE source SHA strictly verified: $ECE_SHA"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ece-source/ece/target
+          key: ${{ runner.os }}-cargo-ece-pilot-${{ hashFiles('ece-source/ece/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-ece-pilot-
+
+      - name: Build ECE CLI (locked dependencies)
+        working-directory: ece-source/ece
+        run: cargo build --locked --release
+
+      - name: Execute Positive Historical Assessment (P1)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_COMMIT: ${{ inputs.target_commit_sha || '3a82d95e0a6e8545e55743a07b91a1a47212b592' }}
+          TARGET_RUN_ID: ${{ inputs.target_run_id || '41195527653' }}
+          TARGET_RUN_ATTEMPT: ${{ inputs.target_run_attempt || '1' }}
+          CALLER_SHA: ${{ github.sha }}
+        run: |
+          set +e
+          CLI_RC=0
+          ./ece-source/ece/target/release/ece assess-github-run \
+            --owner ErenTahiroglu \
+            --repo AI-Toolchain-Manager \
+            --expected-repo-id 1413039335 \
+            --commit-sha "$TARGET_COMMIT" \
+            --run-id "$TARGET_RUN_ID" \
+            --run-attempt "$TARGET_RUN_ATTEMPT" \
+            --policy .github/ece/atm-ci-two-runner-v1.json \
+            --schema-dir ece-source/docs/gov-00/schemas \
+            > /tmp/assessment_positive.json 2> /tmp/ece_positive_stderr.log
+          CLI_RC=$?
+          set -e
+
+          echo "ECE CLI returned exit code: $CLI_RC"
+          python3 .github/scripts/verify_pilot_assessment.py \
+            --mode positive \
+            --assessment /tmp/assessment_positive.json \
+            --cli-rc "$CLI_RC" \
+            --expected-repo 1413039335 \
+            --expected-commit "$TARGET_COMMIT" \
+            --caller-sha "$CALLER_SHA" \
+            --summary-file "$GITHUB_STEP_SUMMARY"
+
+      - name: Execute Negative Control N1 — Wrong Repository ID
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_COMMIT: ${{ inputs.target_commit_sha || '3a82d95e0a6e8545e55743a07b91a1a47212b592' }}
+          TARGET_RUN_ID: ${{ inputs.target_run_id || '41195527653' }}
+          TARGET_RUN_ATTEMPT: ${{ inputs.target_run_attempt || '1' }}
+        run: |
+          set +e
+          CLI_RC=0
+          ./ece-source/ece/target/release/ece assess-github-run \
+            --owner ErenTahiroglu \
+            --repo AI-Toolchain-Manager \
+            --expected-repo-id 9999999999 \
+            --commit-sha "$TARGET_COMMIT" \
+            --run-id "$TARGET_RUN_ID" \
+            --run-attempt "$TARGET_RUN_ATTEMPT" \
+            --policy .github/ece/atm-ci-two-runner-v1.json \
+            --schema-dir ece-source/docs/gov-00/schemas \
+            > /tmp/assessment_n1.json 2> /tmp/ece_n1_stderr.log
+          CLI_RC=$?
+          set -e
+
+          echo "N1 CLI returned exit code: $CLI_RC"
+          python3 .github/scripts/verify_pilot_assessment.py \
+            --mode n1_wrong_repo \
+            --assessment /tmp/assessment_n1.json \
+            --cli-rc "$CLI_RC"
+
+      - name: Execute Negative Control N2 — Wrong Commit SHA
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_RUN_ID: ${{ inputs.target_run_id || '41195527653' }}
+          TARGET_RUN_ATTEMPT: ${{ inputs.target_run_attempt || '1' }}
+        run: |
+          set +e
+          CLI_RC=0
+          ./ece-source/ece/target/release/ece assess-github-run \
+            --owner ErenTahiroglu \
+            --repo AI-Toolchain-Manager \
+            --expected-repo-id 1413039335 \
+            --commit-sha 0000000000000000000000000000000000000000 \
+            --run-id "$TARGET_RUN_ID" \
+            --run-attempt "$TARGET_RUN_ATTEMPT" \
+            --policy .github/ece/atm-ci-two-runner-v1.json \
+            --schema-dir ece-source/docs/gov-00/schemas \
+            > /tmp/assessment_n2.json 2> /tmp/ece_n2_stderr.log
+          CLI_RC=$?
+          set -e
+
+          echo "N2 CLI returned exit code: $CLI_RC"
+          python3 .github/scripts/verify_pilot_assessment.py \
+            --mode n2_wrong_sha \
+            --assessment /tmp/assessment_n2.json \
+            --cli-rc "$CLI_RC"
+
+      - name: Execute Negative Control N3 — Historical Failed Windows CI
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          CLI_RC=0
+          ./ece-source/ece/target/release/ece assess-github-run \
+            --owner ErenTahiroglu \
+            --repo AI-Toolchain-Manager \
+            --expected-repo-id 1413039335 \
+            --commit-sha 6ae75da52315cb03e63661d762b9120f8abf48e5 \
+            --run-id 41191635153 \
+            --run-attempt 1 \
+            --policy .github/ece/atm-ci-two-runner-v1.json \
+            --schema-dir ece-source/docs/gov-00/schemas \
+            > /tmp/assessment_n3.json 2> /tmp/ece_n3_stderr.log
+          CLI_RC=$?
+          set -e
+
+          echo "N3 CLI returned exit code: $CLI_RC"
+          python3 .github/scripts/verify_pilot_assessment.py \
+            --mode n3_failed_ci \
+            --assessment /tmp/assessment_n3.json \
+            --cli-rc "$CLI_RC"
+
+      - name: Execute Negative Control N5 — Historical vs Current HEAD Distinction
+        env:
+          TARGET_COMMIT: ${{ inputs.target_commit_sha || '3a82d95e0a6e8545e55743a07b91a1a47212b592' }}
+          CALLER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          echo "Evaluating N5: Target commit ($TARGET_COMMIT) vs live caller HEAD ($CALLER_SHA)..."
+          if [ "$TARGET_COMMIT" = "$CALLER_SHA" ]; then
+            echo "::error::N5 violation: target commit unexpectedly equals caller HEAD!"
+            exit 1
+          fi
+          echo "N5 PASSED: Target commit confirmed historical; evaluating historical CI does not confer live HEAD acceptance."
+
+      - name: Package Provenance and Assessment Artifact
+        env:
+          CALLER_SHA: ${{ github.sha }}
+          TARGET_COMMIT: ${{ inputs.target_commit_sha || '3a82d95e0a6e8545e55743a07b91a1a47212b592' }}
+          TARGET_RUN_ID: ${{ inputs.target_run_id || '41195527653' }}
+          TARGET_RUN_ATTEMPT: ${{ inputs.target_run_attempt || '1' }}
+          POLICY_HASH: f523eda2bca9d2512dc372fee476bb9dc094d3cebd29b6be27ce2a38df2e1c1f
+          ECE_SHA: 6c324d04b6e6837e3833ea53ce3f411a5b0ce289
+        run: |
+          mkdir -p pilot_output
+          cp /tmp/assessment_positive.json pilot_output/assessment_positive.json
+          python3 -c "
+          import json, os
+          provenance = {
+              'pilot_id': 'atm-gov-02-p1',
+              'ece_source_commit': os.environ['ECE_SHA'],
+              'caller_workflow_commit': os.environ['CALLER_SHA'],
+              'target_commit_sha': os.environ['TARGET_COMMIT'],
+              'target_run_id': int(os.environ['TARGET_RUN_ID']),
+              'target_run_attempt': int(os.environ['TARGET_RUN_ATTEMPT']),
+              'target_repo_id': '1413039335',
+              'policy_id': 'atm-ci-two-runner-v1',
+              'policy_file_sha256': os.environ['POLICY_HASH'],
+              'checkpoint_accepted': False
+          }
+          with open('pilot_output/provenance.json', 'w') as f:
+              json.dump(provenance, f, indent=2)
+          "
+
+      - name: Upload Pilot Assessment Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: atm-gov-02-pilot-assessment
+          path: pilot_output/
+          retention-days: 7

@@ -1,0 +1,11 @@
+{
+  "policy_id": "atm-ci-two-runner-v1",
+  "policy_digest": "5c97ece3a8ffab9a28718d02b413bdac5e1d567b69f4e93648a2f0884d4edcb6",
+  "required_jobs": [
+    "windows-x64",
+    "macos-arm64"
+  ],
+  "allow_extra_jobs": false,
+  "target_repo_id": "1413039335",
+  "target_workflow_path": ".github/workflows/ci.yml"
+}
