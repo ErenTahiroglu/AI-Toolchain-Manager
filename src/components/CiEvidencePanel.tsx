@@ -141,11 +141,16 @@ export function CiEvidencePanel() {
       </div>
       <ul className="small">
         <li>
-          Düğmeye bastığınızda uygulamanın yerel (Rust) tarafı, <code>api.github.com</code> adresine <strong>tek seferlik, salt okunur, kimliksiz</strong> istekler gönderir (en çok 4 istek).
-          Hiçbir belirteç, çerez ya da kimlik bilgisi kullanılmaz; yazma yapılmaz; hiçbir şey kaydedilmez.
+          Düğmeye bastığınızda uygulamanın yerel (Rust) tarafı, <code>api.github.com</code> adresine <strong>tek seferlik, salt okunur, kimliksiz</strong> istekler gönderir.
+          Doğrulama genellikle dört istek gerektirir (depo, commit, çalıştırma ve tek sayfalık iş listesi); iş listesi birden çok sayfaya yayılırsa ya da aynı adres içinde
+          yönlendirme olursa daha fazla istek gönderilebilir. Bu uygulama kesin bir üst sınır uygulamaz. Yazma yapılmaz; hiçbir şey kaydedilmez.
         </li>
         <li>
-          GitHub; IP adresinizi ve uygulama sürümünü görür. İşletim sistemi ya da ortam ara sunucu ayarları uygulanabilir. Kimliksiz erişim, saatte yaklaşık 60 istekle sınırlıdır.
+          Bu çağrı yolu, ortamdaki GitHub belirteçlerini okumayan kimliksiz istemci oluşturucusunu kullanır ve bilerek bir GitHub <code>Authorization</code> başlığı eklemez.
+          İşletim sistemi ya da ortam ara sunucu ayarları uygulanabilir; ara sunucu kimlik doğrulaması yapılandırılmışsa bunu HTTP altyapısı yönetir ve bu uygulama bunun olamayacağını iddia etmez.
+        </li>
+        <li>
+          GitHub; IP adresinizi ve istemcinin sabit <code>User-Agent</code> değerini (<code>Evidence-Checkpoint-Engine-GOV-02</code>) görür. Kimliksiz erişim, saatte yaklaşık 60 istekle sınırlıdır.
           Bu yerel isteklerin dışında, gömülü WebView2 çalışma zamanının ayrı ağ trafiği (Issue #25) çözülmüş değildir ve bu ifadenin dışındadır.
         </li>
         <li>

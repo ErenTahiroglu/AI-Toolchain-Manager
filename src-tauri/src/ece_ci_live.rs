@@ -11,7 +11,8 @@
 //! * The HTTP library may follow the operating system's or the environment's proxy configuration. The anonymous constructor
 //!   enforces the request target and a redirect policy (scheme, host and port), NOT a physical network-egress guarantee.
 //! * Unauthenticated GitHub API access is rate limited (60 requests per hour per IP address, per GitHub's documentation). A pass
-//!   needs at most four requests.
+//!   typically needs four requests (repository, commit, run and one page of jobs). More requests occur when the jobs list spans several
+//!   pages (the accepted client allows up to ten) or when a same-origin redirect is followed; ATM enforces no absolute maximum.
 //! * A result is a historical machine observation. It is not checkpoint acceptance, not a review and not an authorization.
 //! * Dropping the awaiting future does not stop a blocking request; the single-flight token is released only when the work ends.
 
