@@ -300,7 +300,7 @@ class Reach(unittest.TestCase):
         deps = re.search(r"\[dependencies\]\r?\n(.*?)\r?\n\r?\n", cargo, re.S).group(1)
         self.assertEqual(
             sorted(re.findall(r"^([a-z0-9_-]+) =", deps, re.M)),
-            sorted(["tauri", "tauri-plugin-single-instance", "tauri-plugin-autostart", "rusqlite", "serde", "serde_json", "sha2", "uuid", "chrono", "regex"]),
+            sorted(["tauri", "tauri-plugin-single-instance", "tauri-plugin-autostart", "rusqlite", "serde", "serde_json", "sha2", "uuid", "chrono", "regex", "ece_lib"]),  # ATM-GOV-02 P2A: the offline ECE verifier library (see src-tauri/src/ece_ci.rs)
         )
 
     def test_only_the_old_scan_and_the_new_request_take_a_directory(self):

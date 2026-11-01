@@ -37,6 +37,11 @@ mod device_trust;
 mod diagnostics;
 mod discovery;
 mod discovery_probe;
+mod ece_ci;
+#[cfg(test)]
+mod ece_ci_serialization_tests;
+#[cfg(test)]
+mod ece_ci_tests;
 mod error;
 mod gate;
 mod github_url;
