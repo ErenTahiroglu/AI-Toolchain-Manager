@@ -345,6 +345,7 @@ pub const ALLOWED_PERMISSIONS: &[&str] = &[
     "allow-get-startup-state",
     "allow-set-startup-enabled",
     "allow-report-ui-error",
+    "allow-assess-atm-checkpoint",
 ];
 
 /// Top-level manifest keys that carry no extra authority. Keys such as `webviews`, `remote`,

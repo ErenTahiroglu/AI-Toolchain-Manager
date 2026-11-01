@@ -38,6 +38,7 @@ const COMMANDS: &[&str] = &[
     "get_startup_state",
     "set_startup_enabled",
     "report_ui_error",
+    "assess_atm_checkpoint",
 ];
 
 fn main() {

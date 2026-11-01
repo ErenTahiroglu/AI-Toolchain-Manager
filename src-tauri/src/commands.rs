@@ -411,3 +411,25 @@ pub fn report_ui_error(state: State<'_, AppState>, message: String) -> AppResult
         Ok(())
     })
 }
+
+/// ATM-GOV-02 P2B: ONE explicit, user-initiated, read-only look at the public GitHub Actions evidence of ONE run of THIS repository,
+/// judged by the ECE verifier. The request carries a commit SHA, a run ID and an attempt number and nothing else: repository, workflow,
+/// jobs and policy are fixed in Rust, and unknown fields are refused. Input is validated before any client is built. Only ECE's
+/// anonymous client is constructed (no token, no Authorization header); one assessment runs at a time, on a worker thread. The
+/// answer is the closed `CiEvidenceReport`: a machine CI observation, never an acceptance, a review or an authorization. Nothing is
+/// stored. A network or provider failure is reported as such, never as a failed CI. See `ece_ci_live.rs` for the limits.
+#[tauri::command]
+pub async fn assess_atm_checkpoint(
+    state: State<'_, AppState>,
+    request: crate::ece_ci_live::AssessAtmCheckpointRequest,
+) -> AppResult<crate::ece_ci::CiEvidenceReport> {
+    let validated = crate::ece_ci_live::validate(&request).map_err(|e| e.app_error())?;
+    let token = crate::ece_ci_live::InFlight::try_acquire(&state.ci_assess_in_flight)
+        .ok_or_else(|| AppError::new("CI_ASSESS_BUSY", "Bir GitHub CI denetimi zaten sürüyor; bitmesini bekleyin."))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _held = token;
+        crate::ece_ci_live::assess_live(&validated, crate::ece_ci_live::anonymous_provider)
+    })
+    .await
+    .map_err(|_| AppError::new("CI_ASSESS_TASK_FAILED", "Denetim arka planda beklenmedik biçimde sonlandı; sonucu geçerli saymayın."))
+}

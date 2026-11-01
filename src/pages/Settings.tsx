@@ -101,7 +101,11 @@ export function SettingsPage({ onSettingsChanged }: { onSettingsChanged?: () => 
       <section aria-labelledby="h-privacy">
         <h2 id="h-privacy">Gizlilik</h2>
         <ul>
-          <li>Telemetri yok. Bu sürüm hiçbir ağ isteği yapmaz.</li>
+          <li>
+            Telemetri yok. Uygulamanın komutları, bir tek istisna dışında, bilerek ağ bağlantısı başlatmaz; başlangıçta, arka planda ya da zamanlayıcıyla istek gönderilmez. İstisna:
+            Checkpoint Merkezi’ndeki “GitHub CI Kanıtını Denetle” düğmesine bastığınızda yerel taraf, yalnızca <code>api.github.com</code> adresine, kimliksiz ve salt okunur istekler
+            gönderir (o bölümde ayrıntılı açıklanır). Gömülü WebView2 çalışma zamanının ayrı ağ trafiği (Issue #25) bu ifadenin dışındadır, çözülmüş değildir ve dışlanmış sayılmaz.
+          </li>
           <li>Kayıtlar yalnızca bu bilgisayarda tutulur; gizli değerler ve kişisel yollar silinir.</li>
           <li>Hiçbir araç kurulmaz, hiçbir ajan ayar dosyası değiştirilmez.</li>
         </ul>

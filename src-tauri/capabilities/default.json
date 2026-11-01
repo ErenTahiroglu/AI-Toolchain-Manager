@@ -42,6 +42,7 @@
     "allow-set-setting",
     "allow-get-startup-state",
     "allow-set-startup-enabled",
-    "allow-report-ui-error"
+    "allow-report-ui-error",
+    "allow-assess-atm-checkpoint"
   ]
 }

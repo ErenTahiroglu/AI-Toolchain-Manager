@@ -29,7 +29,9 @@ class FrontendOnly(unittest.TestCase):
         for path in (ROOT / "src-tauri" / "src").rglob("*.rs"):
             self.assertNotIn("checkpoint-view", path.read_text(encoding="utf-8"), str(path))
         perms = json.loads(read("src-tauri/capabilities/default.json"))["permissions"]
-        for p in perms:
+        # ATM-GOV-02 P2B (owner-authorized): exactly ONE permission may name a checkpoint, the one for the user-initiated GitHub CI assessment command.
+        self.assertEqual([p for p in perms if "checkpoint" in p], ["allow-assess-atm-checkpoint"])
+        for p in [p for p in perms if p != "allow-assess-atm-checkpoint"]:
             self.assertIsNone(re.search(r"fs|shell|http|opener|dialog|clipboard|process|os:|path|window|checkpoint", p, re.I), p)  # (the pre-existing catalog command permission "allow-preview-github-url" is not new)
         names = sorted(p.name for p in (ROOT / "src-tauri" / "migrations").glob("*.sql"))
         self.assertEqual(len(names), 10)
@@ -55,7 +57,9 @@ class FrontendOnly(unittest.TestCase):
     def test_the_page_is_a_separate_navigation_entry_and_unchanged_pages_remain(self):
         app = read("src/App.tsx")
         self.assertIn('{ id: "checkpoints", label: "Checkpoint Merkezi" }', app)
-        self.assertIn('{page === "checkpoints" && <CheckpointsPage />}', app)
+        # ATM-GOV-02 P2B: the manual viewer page is unchanged; the separate native-verification panel is rendered after it on the same route.
+        self.assertIn('{page === "checkpoints" && (', app)
+        self.assertRegex(app, r'<CheckpointsPage />\s*<CiEvidencePanel />')
         self.assertIn("<ErrorBoundary key={page}>", app)  # a page is re-mounted on every navigation: its state is destroyed on leaving
         for label in ("Ana Sayfa", "Projeler", "Araç Kütüphanesi", "Öneriler", "Bilgisayar Envanteri", "Kurulum Planı", "İstem Kütüphanesi", "Etkinlik ve Denetim", "Ayarlar"):
             self.assertIn('label: "%s"' % label, app)

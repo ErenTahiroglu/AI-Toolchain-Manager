@@ -42,8 +42,8 @@ class Isolation(unittest.TestCase):
 
     def test_no_command_capability_migration_or_dependency_was_added(self):
         # CONFIG-02C (Issue #40, owner-authorized): exactly one command, `read_project_mcp_config`, and its single permission are allowed; tests/test_config02c_contract.py pins that they are the only ones.
-        self.assertEqual(len(re.findall(r"#\[tauri::command\]", read("src-tauri/src/commands.rs"))), 37)
-        for p in [x for x in json.loads(read("src-tauri/capabilities/default.json"))["permissions"] if x != "allow-read-project-mcp-config"]:
+        self.assertEqual(len(re.findall(r"#\[tauri::command\]", read("src-tauri/src/commands.rs"))), 38)  # 37 + ATM-GOV-02 P2B `assess_atm_checkpoint` (owner-authorized)
+        for p in [x for x in json.loads(read("src-tauri/capabilities/default.json"))["permissions"] if x not in ("allow-read-project-mcp-config", "allow-assess-atm-checkpoint")]:
             self.assertIsNone(re.search(r"fs|shell|http|opener|dialog|clipboard|process|os:|path", p, re.I), p)
         migrations = sorted(p.name for p in (ROOT / "src-tauri" / "migrations").glob("*.sql"))
         self.assertEqual((len(migrations), migrations[-1]), (10, "0010_codex_cli_surface.sql"))

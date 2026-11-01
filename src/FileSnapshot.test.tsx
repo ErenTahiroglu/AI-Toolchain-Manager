@@ -413,7 +413,7 @@ describe("no new reach in the component", () => {
     expect(snapshotSource).not.toMatch(/(?:>|\s)(Uygula|Kopyala|Dışa aktar|İndir|Kaydet)(?:<|\s)/);
     const permissions: string[] = JSON.parse(capabilitySource).permissions;
     expect(permissions.filter((p) => /mcp|config/.test(p))).toEqual(["allow-read-project-mcp-config"]);
-    expect(permissions).toHaveLength(37);
+    expect(permissions).toHaveLength(38); // 37 + ATM-GOV-02 P2B `allow-assess-atm-checkpoint` (owner-authorized; the mcp/config filter above is unaffected)
   });
 
   it("the panel is shown for Claude Code rows only", async () => {

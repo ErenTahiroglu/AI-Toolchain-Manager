@@ -25,11 +25,11 @@ sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 regex = "1"
-# ATM-GOV-02 P2A: the Evidence-Checkpoint-Engine verifier as an OFFLINE library, pinned to one full immutable revision.
-# `default-features = false` is load-bearing: it leaves ECE's `github-http` (its live GitHub client and ambient token lookup) and
-# `preserve-json-order` (which would change the key order of ATM's own JSON text) OFF.
-# `ece_ci_tests` and `ece_ci_serialization_tests` fail if any of this changes. See src/ece_ci.rs.
-ece_lib = { package = "ece", git = "https://github.com/ErenTahiroglu/Evidence-Checkpoint-Engine", rev = "9981773e1956539393b848037ae6b406e4d91f4b", default-features = false }
+# ATM-GOV-02 P2B: the Evidence-Checkpoint-Engine verifier, pinned to one full immutable revision, WITH its live GitHub read client.
+# `github-http` compiles that client, so this build CONTAINS a network-capable TLS stack; the one user-initiated command that may use it
+# is `assess_atm_checkpoint`, and it constructs only the ANONYMOUS client (no ambient token). `preserve-json-order` stays OFF on purpose:
+# it would change the key order of ATM's own JSON text (see src/ece_ci_serialization_tests.rs). `default-features = false` is load-bearing.
+ece_lib = { package = "ece", git = "https://github.com/ErenTahiroglu/Evidence-Checkpoint-Engine", rev = "9f4e53e0a944a7681fb49957f0d5e30597c3148a", default-features = false, features = ["github-http"] }
 
 # Handle-based, no-follow file access for the read-only discovery layer (discovery/fsx.rs).
 [target.'cfg(unix)'.dependencies]

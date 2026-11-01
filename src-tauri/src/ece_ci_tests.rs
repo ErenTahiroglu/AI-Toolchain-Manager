@@ -739,14 +739,16 @@ fn repo_file(relative: &str) -> String {
 }
 
 #[test]
-fn ece_is_pinned_to_one_full_revision_with_default_features_off() {
+fn ece_is_pinned_to_one_full_revision_with_only_the_github_http_feature() {
     let manifest = repo_file("Cargo.toml");
     let line = manifest.lines().find(|l| l.starts_with("ece_lib = ")).expect("the ECE dependency line");
     assert!(line.contains("package = \"ece\""), "{line}");
     assert!(line.contains("git = \"https://github.com/ErenTahiroglu/Evidence-Checkpoint-Engine\""), "{line}");
     assert!(line.contains(&format!("rev = \"{ECE_REVISION}\"")), "{line}");
     assert!(line.contains("default-features = false"), "{line}");
-    assert!(!line.contains("features = ["), "no ECE feature may be switched on: {line}");
+    // P2B: exactly the live client feature. `preserve-json-order` (serde_json/preserve_order) must stay OFF.
+    assert!(line.contains("features = [\"github-http\"]"), "{line}");
+    assert!(!line.contains("preserve-json-order"), "{line}");
     assert_eq!(ECE_REVISION.len(), 40);
     assert!(ECE_REVISION.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
 }
@@ -757,7 +759,7 @@ fn lock_block(lock: &str, name: &str) -> Option<String> {
 }
 
 #[test]
-fn the_lockfile_resolves_ece_to_that_revision_and_brings_in_no_http_stack() {
+fn the_lockfile_resolves_ece_to_that_revision_and_json_order_stays_off() {
     let lock = repo_file("Cargo.lock");
     let ece = lock_block(&lock, "ece").expect("ece in Cargo.lock");
     assert!(
@@ -766,11 +768,11 @@ fn the_lockfile_resolves_ece_to_that_revision_and_brings_in_no_http_stack() {
         )),
         "{ece}"
     );
-    for forbidden in ["reqwest", "hyper", "rustls", "native-tls", "openssl", "tokio", "h2", "ring", "socket2", "mio", "indexmap"] {
-        assert!(!ece.contains(&format!("\"{forbidden}")), "ECE must not depend on {forbidden}: {ece}");
-    }
-    // ECE's own HTTP client dependency (reqwest 0.12) is absent from the whole graph. Tauri's reqwest is a different, pre-existing one.
-    assert!(!lock.contains("name = \"reqwest\"\nversion = \"0.12"), "reqwest 0.12 must not be in Cargo.lock");
+    // P2B: the live client IS part of this build (reqwest 0.12 with its TLS stack). What must still be absent is the JSON-order feature:
+    // `indexmap` is what `serde_json/preserve_order` would add to the ECE package.
+    assert!(ece.contains("\"reqwest"), "github-http brings ECE's HTTP client: {ece}");
+    assert!(!ece.contains("\"indexmap"), "ECE must not depend on indexmap (preserve-json-order is off): {ece}");
+    assert!(lock.contains("name = \"reqwest\"\nversion = \"0.12"), "reqwest 0.12 is expected in Cargo.lock with github-http");
 }
 
 #[test]
@@ -801,14 +803,19 @@ fn the_module_contains_no_network_credential_filesystem_or_process_code() {
 }
 
 #[test]
-fn no_command_ipc_capability_or_ui_reaches_the_module() {
-    let lib = repo_file("src/lib.rs");
+fn exactly_one_command_reaches_the_module_and_nothing_else_does() {
+    // P2B: ONE command, `assess_atm_checkpoint`, is the only route to `ece_ci`; the self-check, the health checks, the startup state and
+    // `main` still reach nothing of it. (P2A asserted that NO command reached it.)
     let commands = repo_file("src/commands.rs");
-    assert!(!commands.contains("ece_ci"), "no Tauri command may reach ece_ci");
-    assert!(!lib.replace("mod ece_ci;", "").contains("ece_ci::"), "lib.rs registers nothing from ece_ci");
+    assert_eq!(commands.matches("pub async fn assess_atm_checkpoint").count(), 1);
+    assert_eq!(commands.matches("ece_ci_live::").count(), commands.matches("crate::ece_ci_live::").count(), "only via the live module");
+    assert!(commands.matches("crate::ece_ci::").count() <= 1, "commands.rs names ece_ci only for the report type it returns");
+    let lib = repo_file("src/lib.rs");
+    assert_eq!(lib.matches("commands::assess_atm_checkpoint").count(), 1);
     let capabilities = repo_file("capabilities/default.json");
-    assert!(!capabilities.contains("ece"), "no capability mentions ECE");
-    for other in ["src/selfcheck.rs", "src/health.rs", "src/state.rs", "src/main.rs"] {
+    assert_eq!(capabilities.matches("allow-assess-atm-checkpoint").count(), 1);
+    assert!(!capabilities.contains("ece"), "no capability grants anything named after ECE");
+    for other in ["src/selfcheck.rs", "src/state.rs", "src/main.rs"] {
         assert!(!repo_file(other).contains("ece_ci"), "{other}");
     }
 }

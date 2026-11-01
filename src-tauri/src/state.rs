@@ -3,7 +3,10 @@ use crate::{
     health::{HealthReport, PreviousShutdown, TrayState},
 };
 use rusqlite::Connection;
-use std::sync::{atomic::AtomicU32, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, AtomicU32},
+    Arc, Mutex,
+};
 
 pub struct AppState {
     /// `None` means the database could not be opened: the app runs degraded and refuses mutations.
@@ -15,6 +18,8 @@ pub struct AppState {
     pub last_report: Mutex<Option<HealthReport>>,
     /// Caps UI error reports per session so a render loop cannot flood the log.
     pub ui_error_count: AtomicU32,
+    /// P2B: at most one live GitHub CI assessment at a time (released when the blocking work ends, not when a caller stops waiting).
+    pub ci_assess_in_flight: Arc<AtomicBool>,
     /// The installation workflow (catalog -> preview -> confirm -> result). Its supply is empty in a release build.
     pub install: crate::install_flow::InstallService,
 }

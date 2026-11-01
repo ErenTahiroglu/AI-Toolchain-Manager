@@ -5,10 +5,15 @@
 //! `evaluate_github_evidence_with_store()`), against a `GitHubProvider` the CALLER supplies, with the operator-owned policy
 //! `.github/ece/atm-ci-two-runner-v1.json`. The decision algorithm lives in ECE; nothing here reimplements it.
 //!
-//! WHAT THIS IS NOT. It makes no network request, builds no HTTP client, reads no token or environment variable, spawns no process,
-//! touches no file and no database, and no command, IPC route, capability, window or poller reaches it. P2A has NO caller: the
-//! only providers that exist in this build are the in-memory synthetic ones in the tests. A live provider is a separate, reviewed
-//! change (P2B). The manually pasted Checkpoint Center viewer is unchanged and remains UNTRUSTED.
+//! WHAT THIS IS NOT. THIS module makes no network request, builds no HTTP client, reads no token or environment variable, spawns no
+//! process and touches no file and no database. The live provider is constructed in `ece_ci_live.rs` (P2B), by one user-initiated
+//! command, as the ANONYMOUS client only. The manually pasted Checkpoint Center viewer is unchanged and remains UNTRUSTED.
+//!
+//! P2B ADDITIONS (this module still decides nothing about CI itself): `assess_ci_evidence_latest_attempt_only` wraps the caller's
+//! provider in a guard that (a) refuses a run whose LATEST attempt is not the requested one, because ECE reads run-level facts
+//! from the unscoped run endpoint and jobs from the requested attempt, which would mix two attempts after a re-run; (b) fails
+//! closed when the names the provider returns disagree with the fixed target; (c) classifies a provider/network failure as such,
+//! never as an observed CI failure; (d) never asks the provider for artifacts (the request declares none).
 //!
 //! WHAT THE RESULT MEANS (the vocabulary is ECE's, kept exactly):
 //! * `CiResult::VerifiedPass`     the defined machine CI checks (both required jobs) passed for that run attempt.
@@ -22,15 +27,18 @@
 //! TRUST BOUNDARY. The policy bytes are embedded at build time and checked against an INDEPENDENT expected SHA-256 on every
 //! call. The `policy_digest` field inside the file is self-declared and is NOT a trust anchor. The result copies no JSON, URL,
 //! path or free text from ECE or from the provider: every field is a closed enum, a number, or a constant of this module.
-#![allow(dead_code)] // P2A is offline and has no caller (no command, IPC route, UI or poller); the tests and P2B's reviewed wiring use it
+#![allow(dead_code)] // the P2A entry point `assess_ci_evidence` keeps its tests but has no production caller; P2B uses the latest-attempt-only entry
 
-use ece_lib::github::{evaluate_github_evidence_with_store, GitHubProvider, TargetEvidenceRequest, TrustedCheckPolicy};
+use ece_lib::github::models::{GitHubArtifact, GitHubCommit, GitHubJob, GitHubRepository, GitHubWorkflowRun};
+use ece_lib::github::{evaluate_github_evidence_with_store, GitHubClientError, GitHubProvider, TargetEvidenceRequest, TrustedCheckPolicy};
 use ece_lib::SchemaStore;
+use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::sync::Mutex;
 
 /// The full, immutable ECE revision this build depends on (Cargo.toml pins the same value; a test compares them).
-pub const ECE_REVISION: &str = "9981773e1956539393b848037ae6b406e4d91f4b";
+pub const ECE_REVISION: &str = "9f4e53e0a944a7681fb49957f0d5e30597c3148a";
 /// The independently expected SHA-256 of the operator-owned policy file. Not read from the file itself.
 pub const POLICY_FILE_SHA256: &str = "f523eda2bca9d2512dc372fee476bb9dc094d3cebd29b6be27ce2a38df2e1c1f";
 pub const POLICY_ID: &str = "atm-ci-two-runner-v1";
@@ -45,13 +53,16 @@ pub const REQUIRED_JOBS: [&str; 2] = ["windows-x64", "macos-arm64"];
 pub(crate) const POLICY_BYTES: &[u8] = include_bytes!("../../.github/ece/atm-ci-two-runner-v1.json");
 /// The only assessment schema version this projection understands.
 const SUPPORTED_ASSESSMENT_SCHEMA: &str = "0.1.0-draft";
+/// The version of the closed report that crosses the IPC boundary.
+pub const REPORT_SCHEMA_VERSION: &str = "atm.ece-ci-assessment.v1";
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The closed result
 // ---------------------------------------------------------------------------------------------------------------------
 
 /// ECE's overall verdict. `NotAssessed` is this module's own value for "no assessment was produced" (see [`ErrorClass`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Outcome {
     AssessedLimitations,
     AssessedFail,
@@ -59,7 +70,8 @@ pub enum Outcome {
     NotAssessed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum CiResult {
     VerifiedPass,
     Failed,
@@ -69,7 +81,8 @@ pub enum CiResult {
     NotEvaluated,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EvidenceAvailability {
     NotProvided,
     Available,
@@ -80,27 +93,31 @@ pub enum EvidenceAvailability {
 }
 
 /// Only the two states a machine can produce. A "reviewed" state is not representable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ReviewState {
     Unreviewed,
     NotEvaluated,
 }
 
 /// The single state P2A can report. "Authorized" is not representable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AuthorizationState {
     AuthorizationPending,
 }
 
 /// A past observation, never a statement about the current HEAD (`CurrentHead` is not representable), or "not evaluated" when
 /// no assessment of the run was produced.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Freshness {
     HistoricalBaseline,
     NotEvaluated,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Limitation {
     NoIndependentReview,
     NoHumanAuthorization,
@@ -112,7 +129,8 @@ pub enum Limitation {
 
 /// Why the outcome is not a pass. Derived from ECE's structured fields; the few reasons ECE only states in prose are matched by
 /// their fixed prefix and never copied. Anything unrecognised becomes `Unclassified`, which can only ever lower the result.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum BlockingClass {
     RepositoryIdentityMismatch,
     CommitNotVerified,
@@ -128,7 +146,8 @@ pub enum BlockingClass {
     Unclassified,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ErrorClass {
     /// The embedded policy bytes are not the independently expected bytes, or do not say what this module is written for.
     PolicyIntegrity,
@@ -146,10 +165,50 @@ pub enum ErrorClass {
     MalformedAssessment,
     /// The assessment is about a different target than the one asked for.
     BindingMismatch,
+    /// P2B: the run's latest attempt is not the requested attempt (superseded by a re-run, or not existing yet). Never substituted.
+    AttemptNotLatest,
+    /// P2B: the names the provider returned disagree with the fixed target although the numeric ID may match. Fails closed.
+    ProviderIdentityInconsistent,
+    /// P2B: the live client could not be constructed.
+    ClientInitFailure,
+}
+
+/// WHY the provider could not supply the evidence. A network or provider failure is never an observed CI failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ProviderFailureKind {
+    RateLimited,
+    NetworkUnavailable,
+    Timeout,
+    /// HTTP 401 or 403 that is not a rate limit.
+    Forbidden,
+    NotFound,
+    /// Any other HTTP error status.
+    HttpError,
+    InvalidResponse,
+    ResponseTooLarge,
+    IncompleteResponse,
+}
+
+impl ProviderFailureKind {
+    pub(crate) fn from_client_error(e: &GitHubClientError) -> Self {
+        match e {
+            GitHubClientError::RateLimited { .. } => Self::RateLimited,
+            GitHubClientError::NotFound { .. } => Self::NotFound,
+            GitHubClientError::Unauthorized(_) => Self::Forbidden,
+            GitHubClientError::HttpError { .. } => Self::HttpError,
+            GitHubClientError::Timeout(_) => Self::Timeout,
+            GitHubClientError::NetworkError(_) => Self::NetworkUnavailable,
+            GitHubClientError::InvalidJson(_) | GitHubClientError::EmptyResponse => Self::InvalidResponse,
+            GitHubClientError::SizeLimitExceeded(_) => Self::ResponseTooLarge,
+            GitHubClientError::IncompletePagination { .. } => Self::IncompleteResponse,
+        }
+    }
 }
 
 /// Where the assessment came from and what it is bound to. All constants of this module or validated request values.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Provenance {
     pub ece_revision: &'static str,
     pub policy_id: &'static str,
@@ -163,8 +222,10 @@ pub struct Provenance {
 }
 
 /// The bounded result. Nothing in it is attacker-controlled free text.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CiEvidenceReport {
+    pub schema_version: &'static str,
     pub provenance: Provenance,
     pub outcome: Outcome,
     pub ci: CiResult,
@@ -175,6 +236,8 @@ pub struct CiEvidenceReport {
     pub limitations: Vec<Limitation>,
     pub blocking: Vec<BlockingClass>,
     pub error: Option<ErrorClass>,
+    /// Set only when `error` is `ProviderFailure`: the closed reason the evidence could not be obtained.
+    pub provider_failure: Option<ProviderFailureKind>,
 }
 
 impl CiEvidenceReport {
@@ -331,8 +394,9 @@ pub(crate) fn evaluate_request(
     }
 }
 
-fn not_assessed(request: &CiEvidenceRequest, error: ErrorClass) -> CiEvidenceReport {
+pub(crate) fn not_assessed(request: &CiEvidenceRequest, error: ErrorClass) -> CiEvidenceReport {
     CiEvidenceReport {
+        schema_version: REPORT_SCHEMA_VERSION,
         provenance: request.provenance(),
         outcome: Outcome::NotAssessed,
         ci: CiResult::NotEvaluated,
@@ -343,7 +407,189 @@ fn not_assessed(request: &CiEvidenceRequest, error: ErrorClass) -> CiEvidenceRep
         limitations: vec![Limitation::NoIndependentReview, Limitation::NoHumanAuthorization, Limitation::NotCurrentHeadAttestation],
         blocking: Vec::new(),
         error: Some(error),
+        provider_failure: None,
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// P2B: the live-evidence guard. ECE is NOT modified; this wraps the provider ECE is given and judges what it saw.
+// ---------------------------------------------------------------------------------------------------------------------
+
+#[derive(Default)]
+struct Seen {
+    /// The `run_attempt` the run endpoint reported: the run's LATEST attempt.
+    latest_attempt: Option<u32>,
+    /// A name the provider returned disagrees with the fixed target.
+    identity_inconsistent: bool,
+    /// The first provider failure that is not a legitimate "does not exist" answer about the commit.
+    provider_failure: Option<ProviderFailureKind>,
+    /// The provider was asked for the jobs of an attempt other than the run's latest one (it was not called).
+    jobs_skipped: bool,
+}
+
+/// Records what the real provider returns and enforces three rules before ECE can reach a pass:
+/// 1. run-level facts and jobs must describe the SAME attempt (the requested one is the latest), otherwise nothing is assessed;
+/// 2. the names the provider reports must be the fixed target's (ECE binds the numeric ID; the names are checked here);
+/// 3. a provider failure is reported as a provider failure, even when ECE would have turned it into a blocking reason.
+///
+/// Artifacts are never requested (the request declares none), so a pass depends on no artifact bytes and no extra request is spent.
+pub(crate) struct AttemptGuardedProvider<'a> {
+    inner: &'a dyn GitHubProvider,
+    requested_attempt: u32,
+    seen: Mutex<Seen>,
+}
+
+impl<'a> AttemptGuardedProvider<'a> {
+    pub(crate) fn new(inner: &'a dyn GitHubProvider, requested_attempt: u32) -> Self {
+        Self { inner, requested_attempt, seen: Mutex::new(Seen::default()) }
+    }
+
+    fn note(&self, f: impl FnOnce(&mut Seen)) {
+        if let Ok(mut seen) = self.seen.lock() {
+            f(&mut seen);
+        }
+    }
+
+    fn fail(&self, error: &GitHubClientError) {
+        self.note(|seen| {
+            if seen.provider_failure.is_none() {
+                seen.provider_failure = Some(ProviderFailureKind::from_client_error(error));
+            }
+        });
+    }
+}
+
+impl GitHubProvider for AttemptGuardedProvider<'_> {
+    fn get_repository(&self, owner: &str, repo: &str) -> Result<GitHubRepository, GitHubClientError> {
+        let result = self.inner.get_repository(owner, repo);
+        match &result {
+            Ok(r) => {
+                if r.full_name != REPOSITORY_FULL_NAME || r.name != REPOSITORY_NAME || r.owner.login != REPOSITORY_OWNER {
+                    self.note(|seen| seen.identity_inconsistent = true);
+                }
+            }
+            Err(e) => self.fail(e),
+        }
+        result
+    }
+
+    fn get_commit(&self, owner: &str, repo: &str, commit_sha: &str) -> Result<GitHubCommit, GitHubClientError> {
+        let result = self.inner.get_commit(owner, repo, commit_sha);
+        // "No such commit in this repository" is a legitimate observation about the target; every other error is not.
+        if let Err(e) = &result {
+            if !matches!(e, GitHubClientError::NotFound { .. }) {
+                self.fail(e);
+            }
+        }
+        result
+    }
+
+    fn get_workflow_run(&self, owner: &str, repo: &str, run_id: u64) -> Result<GitHubWorkflowRun, GitHubClientError> {
+        let result = self.inner.get_workflow_run(owner, repo, run_id);
+        match &result {
+            Ok(run) => {
+                let inconsistent = matches!(&run.repository, Some(r) if r.full_name != REPOSITORY_FULL_NAME);
+                self.note(|seen| {
+                    seen.latest_attempt = Some(run.run_attempt);
+                    if inconsistent {
+                        seen.identity_inconsistent = true;
+                    }
+                });
+            }
+            Err(e) => self.fail(e),
+        }
+        result
+    }
+
+    fn get_attempt_jobs(&self, owner: &str, repo: &str, run_id: u64, attempt: u32) -> Result<Vec<GitHubJob>, GitHubClientError> {
+        let latest = self.seen.lock().ok().and_then(|seen| seen.latest_attempt);
+        if matches!(latest, Some(l) if l != self.requested_attempt) {
+            // The result will be refused as AttemptNotLatest whatever the jobs say: do not spend a request on them.
+            self.note(|seen| seen.jobs_skipped = true);
+            return Ok(Vec::new());
+        }
+        let result = self.inner.get_attempt_jobs(owner, repo, run_id, attempt);
+        if let Err(e) = &result {
+            self.fail(e);
+        }
+        result
+    }
+
+    fn get_artifacts(&self, _owner: &str, _repo: &str, _run_id: u64) -> Result<Vec<GitHubArtifact>, GitHubClientError> {
+        Ok(Vec::new())
+    }
+
+    fn download_artifact_digest(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _artifact_id: u64,
+        _max_bytes: usize,
+    ) -> Result<String, GitHubClientError> {
+        // Never reachable (no artifact is declared) and never a download: refuse rather than reach the network.
+        Err(GitHubClientError::NotFound { resource: "artifact download is not part of this assessment".to_string() })
+    }
+}
+
+fn provider_unavailable(request: &CiEvidenceRequest, kind: ProviderFailureKind) -> CiEvidenceReport {
+    CiEvidenceReport {
+        schema_version: REPORT_SCHEMA_VERSION,
+        provenance: request.provenance(),
+        outcome: Outcome::InsufficientEvidence,
+        ci: CiResult::UnverifiedRun,
+        availability: EvidenceAvailability::Unreachable,
+        review: ReviewState::NotEvaluated,
+        authorization: AuthorizationState::AuthorizationPending,
+        freshness: Freshness::NotEvaluated,
+        limitations: vec![Limitation::NoIndependentReview, Limitation::NoHumanAuthorization, Limitation::NotCurrentHeadAttestation],
+        blocking: Vec::new(),
+        error: Some(ErrorClass::ProviderFailure),
+        provider_failure: Some(kind),
+    }
+}
+
+/// The P2B entry point: [`assess_ci_evidence`] behind the [`AttemptGuardedProvider`]. A pass is possible only when the requested
+/// attempt is the run's latest attempt; a superseded (or not yet existing) attempt is `NotAssessed` / `AttemptNotLatest`.
+pub fn assess_ci_evidence_latest_attempt_only(provider: &dyn GitHubProvider, request: &CiEvidenceRequest) -> CiEvidenceReport {
+    let policy = match load_policy(POLICY_BYTES) {
+        Ok(p) => p,
+        Err(e) => return not_assessed(request, e),
+    };
+    let store = match SchemaStore::from_embedded() {
+        Ok(s) => s,
+        Err(_) => return not_assessed(request, ErrorClass::SchemaUnavailable),
+    };
+    assess_guarded_with(provider, request, &policy, &store)
+}
+
+pub(crate) fn assess_guarded_with(
+    provider: &dyn GitHubProvider,
+    request: &CiEvidenceRequest,
+    policy: &TrustedCheckPolicy,
+    store: &SchemaStore,
+) -> CiEvidenceReport {
+    let guard = AttemptGuardedProvider::new(provider, request.run_attempt);
+    let report = assess_with(&guard, request, policy, store);
+    let Ok(seen) = guard.seen.lock() else {
+        return not_assessed(request, ErrorClass::EvaluatorFailure);
+    };
+    // A policy/schema/evaluator problem happened before or without any usable evidence: keep it as it is.
+    if report.outcome == Outcome::NotAssessed {
+        return report;
+    }
+    // 1. Provider failure beats everything: it is not an observation about the checkpoint.
+    if let Some(kind) = seen.provider_failure {
+        return provider_unavailable(request, kind);
+    }
+    // 2. The names the provider reported disagree with the fixed target.
+    if seen.identity_inconsistent {
+        return not_assessed(request, ErrorClass::ProviderIdentityInconsistent);
+    }
+    // 3. The run-level facts describe the latest attempt; they may only be used for that attempt.
+    if matches!(seen.latest_attempt, Some(latest) if latest != request.run_attempt) {
+        return not_assessed(request, ErrorClass::AttemptNotLatest);
+    }
+    report
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -446,6 +692,7 @@ pub(crate) fn project(
         && exit_code == 3;
     if provider_failure_shape {
         return Ok(CiEvidenceReport {
+            schema_version: REPORT_SCHEMA_VERSION,
             provenance: request.provenance(),
             outcome: Outcome::InsufficientEvidence,
             ci: CiResult::UnverifiedRun,
@@ -456,6 +703,7 @@ pub(crate) fn project(
             limitations: vec![Limitation::NoIndependentReview, Limitation::NoHumanAuthorization, Limitation::NotCurrentHeadAttestation],
             blocking: Vec::new(),
             error: Some(ErrorClass::ProviderFailure),
+            provider_failure: None,
         });
     }
     // Otherwise the run was assessed: it is a past observation, unreviewed, with nothing reviewed or authorized.
@@ -559,6 +807,7 @@ pub(crate) fn project(
     limitations.push(Limitation::HostedRunnersOnly);
 
     Ok(CiEvidenceReport {
+        schema_version: REPORT_SCHEMA_VERSION,
         provenance: request.provenance(),
         outcome,
         ci,
@@ -569,5 +818,6 @@ pub(crate) fn project(
         limitations,
         blocking,
         error: None,
+        provider_failure: None,
     })
 }

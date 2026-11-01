@@ -631,6 +631,37 @@ export interface InstalledDetails {
   never: string[];
   lastResult: InstallResult | null;
 }
+/** ATM-GOV-02 P2B: the input of the one live command. Nothing else (no repository, URL, token, workflow, job or policy) can be sent. */
+export interface AssessAtmCheckpointRequest {
+  commitSha: string;
+  runId: number;
+  runAttempt: number;
+}
+/** The closed native report. Every enum-like member is a plain string here ON PURPOSE: the page maps only documented values (see ciAssessment.ts). */
+export interface CiAssessmentReport {
+  schemaVersion: string;
+  provenance: {
+    eceRevision: string;
+    policyId: string;
+    policyFileSha256: string;
+    repository: string;
+    repositoryId: number;
+    workflowPath: string;
+    commitSha: string;
+    runId: number;
+    runAttempt: number;
+  };
+  outcome: string;
+  ci: string;
+  availability: string;
+  review: string;
+  authorization: string;
+  freshness: string;
+  limitations: string[];
+  blocking: string[];
+  error: string | null;
+  providerFailure: string | null;
+}
 export interface RecoverySummary {
   examined: boolean; auditReconciled: number; auditUnreconciled: number; rolledBack: number; rolledForward: number; needsAttention: number; notes: string[];
 }

@@ -38,6 +38,9 @@ mod diagnostics;
 mod discovery;
 mod discovery_probe;
 mod ece_ci;
+mod ece_ci_live;
+#[cfg(test)]
+mod ece_ci_live_tests;
 #[cfg(test)]
 mod ece_ci_serialization_tests;
 #[cfg(test)]
@@ -71,7 +74,10 @@ use health::{PreviousShutdown, TrayState};
 use state::AppState;
 use std::{
     path::PathBuf,
-    sync::{atomic::AtomicU32, Mutex},
+    sync::{
+        atomic::{AtomicBool, AtomicU32},
+        Arc, Mutex,
+    },
 };
 use tauri::{
     menu::{Menu, MenuItem},
@@ -174,6 +180,7 @@ fn setup(app: &mut tauri::App) -> Result<(), BoxError> {
         previous_shutdown,
         last_report: Mutex::new(None),
         ui_error_count: AtomicU32::new(0),
+        ci_assess_in_flight: Arc::new(AtomicBool::new(false)),
         install,
     });
     let state = app.state::<AppState>();
@@ -277,6 +284,7 @@ pub fn run() {
             commands::get_startup_state,
             commands::set_startup_enabled,
             commands::report_ui_error,
+            commands::assess_atm_checkpoint,
         ])
         .build(tauri::generate_context!());
 

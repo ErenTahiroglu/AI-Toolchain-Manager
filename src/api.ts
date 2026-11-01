@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppError, AppInfo, AuditEvent, CatalogEntry, ChainReport, Dashboard, DiagnosticRow, Evaluation, ExecutionBlock, HealthReport,
   CleanupPlan, InstallAction, InstalledDetails, InstallPlan, InstallPreview, InstallResult, Inventory, PlanRequest, PreferenceView, ProjectView,
-  PromptSourceRow, ReadMcpConfigRequest, ReadMcpConfigResult, RecoverySummary, ScanRequest, ScanSummary, Scenario, Settings, StartupState, TaskInput, ToolState, UrlPreview,
+  AssessAtmCheckpointRequest, CiAssessmentReport, PromptSourceRow, ReadMcpConfigRequest, ReadMcpConfigResult, RecoverySummary, ScanRequest, ScanSummary, Scenario, Settings, StartupState, TaskInput, ToolState, UrlPreview,
 } from "./types";
 
 /** Normalises whatever the IPC layer throws into the AppError shape the UI renders. */
@@ -88,6 +88,11 @@ export const api = {
   getStartupState: () => call<StartupState>("get_startup_state"),
   setStartupEnabled: (enabled: boolean) => call<StartupState>("set_startup_enabled", { enabled }),
   reportUiError: (message: string) => call<void>("report_ui_error", { message }),
+
+  // ATM-GOV-02 P2B: ONE explicit, user-initiated, read-only look at the public CI evidence of ONE run of THIS repository, judged by the ECE
+  // verifier in Rust. The only inputs are a commit SHA, a run ID and an attempt; repository, workflow, jobs and policy are fixed natively.
+  // It must be called only from an explicit submit handler: never from an effect, a mount, a timer or navigation.
+  assessAtmCheckpoint: (request: AssessAtmCheckpointRequest) => call<CiAssessmentReport>("assess_atm_checkpoint", { request }),
 };
 
 /** Best effort: reporting an error must never throw a second one. */

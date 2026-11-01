@@ -265,12 +265,12 @@ class Reach(unittest.TestCase):
 
     def test_exactly_one_new_command_and_one_new_permission_registered_in_every_place(self):
         commands = read("src-tauri/src/commands.rs")
-        self.assertEqual(commands.count("#[tauri::command]"), 37)
+        self.assertEqual(commands.count("#[tauri::command]"), 38)  # 37 + ATM-GOV-02 P2B `assess_atm_checkpoint` (owner-authorized)
         self.assertEqual(len(re.findall(r"\bfn read_project_mcp_config\b", commands)), 1)
         for rel in ("src-tauri/src/lib.rs", "src-tauri/build.rs", "src-tauri/src/health.rs", "src-tauri/capabilities/default.json"):
             self.assertEqual(len(re.findall(r"read[_-]project[_-]mcp[_-]config", read(rel))), 1, rel)
         permissions = json.loads(read("src-tauri/capabilities/default.json"))["permissions"]
-        self.assertEqual(len(permissions), 37)
+        self.assertEqual(len(permissions), 38)  # 37 + allow-assess-atm-checkpoint
         self.assertEqual([p for p in permissions if "mcp" in p or "config" in p], [PERMISSION])
         for p in permissions:
             self.assertIsNone(re.search(r"fs|shell|http|opener|dialog|clipboard|process|os:|path", p, re.I), p)
