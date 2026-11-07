@@ -13,6 +13,9 @@ import pasteLogicSource from "./checkpointView.ts?raw";
 import { TARGET_REPOSITORY } from "./ciAssessment";
 import { parseClaimsForm, EMPTY_FORM } from "./claimsForm";
 import { goodReport } from "./test/ciReport";
+// vitest serves CSS imports empty, so the stylesheet is read as text; @types/node is not installed (and not added), hence the expected type error
+// @ts-expect-error TS2591: no Node type definitions in this project
+import { readFileSync } from "node:fs";
 import { createBackend, type Backend } from "./test/backend";
 import type { ProjectView } from "./types";
 
@@ -23,10 +26,12 @@ const RUN = "41217731446";
 let backend: Backend;
 type Pending = { args: Record<string, unknown>; resolve: (v: unknown) => void; reject: (e: unknown) => void };
 let assessCalls: Pending[];
+let listGate: Promise<void> | null; // when set, the project list answers only after it resolves
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (cmd: string, args?: Record<string, unknown>) => {
     if (cmd === "assess_atm_checkpoint") return new Promise((resolve, reject) => { assessCalls.push({ args: args ?? {}, resolve, reject }); });
+    if (cmd === "list_projects" && listGate) return listGate.then(() => backend.handle(cmd, args));
     return backend.handle(cmd, args);
   },
 }));
@@ -38,6 +43,7 @@ let fetchSpy: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   backend = createBackend();
   assessCalls = [];
+  listGate = null;
   fetchSpy = vi.fn();
   vi.stubGlobal("fetch", fetchSpy);
 });
@@ -370,5 +376,143 @@ describe("source boundary", () => {
     expect(centerSource.match(/api\.\w+/g)).toEqual(["api.listProjects"]);
     expect(overviewSource).not.toMatch(/\bapi\b/);
     expect(panelSource.match(/api\.assessAtmCheckpoint\(/g)).toHaveLength(1);
+  });
+});
+
+const openCheckpoints = async () => {
+  render(<App />);
+  await userEvent.click(within(nav()).getByRole("button", { name: "Checkpoint Merkezi" }));
+  await screen.findByRole("heading", { level: 1, name: "Checkpoint Merkezi" });
+};
+const summaryHeading = () => screen.queryByRole("heading", { level: 2, name: "Proje Checkpoint Özeti" });
+
+describe("RT-WP2-01: the project list is loading or unreadable", () => {
+  it("while the list is pending there is a loading state and no empty or partial summary (no cards, no fixed ATM row, no filter counts)", async () => {
+    let open!: () => void;
+    listGate = new Promise<void>((r) => { open = r; });
+    backend.projects.push(ref("r1", "Proje X"));
+    await openCheckpoints();
+    expect(screen.getByText("Proje listesi yükleniyor…")).toBeInTheDocument();
+    expect(cards()).toHaveLength(0);
+    expect(document.body.textContent).not.toContain("ATM (sabit hedef)");
+    expect(document.body.textContent).not.toMatch(/kart gösteriliyor/);
+    // the independent parts stay usable
+    expect(screen.getByRole("textbox", { name: /Checkpoint metaverisi/ })).toBeInTheDocument();
+    expect(shaBox()).toBeInTheDocument();
+    await act(async () => open());
+    await waitFor(() => expect(cards()).toHaveLength(2));
+    expect(screen.queryByText("Proje listesi yükleniyor…")).toBeNull();
+  });
+
+  it("a failed list read builds no summary and no card; the error offers a retry, and the paste viewer and the ECE form stay usable", async () => {
+    backend.failures["list_projects"] = { code: "DB_UNAVAILABLE", message: "Veritabanı okunamadı." };
+    backend.projects.push(ref("r1", "Proje X"));
+    await openCheckpoints();
+    expect(await screen.findByText(/Kayıtlı proje listesi okunamadığı için özet oluşturulmadı/)).toBeInTheDocument();
+    expect(screen.getByText(/Veritabanı okunamadı/)).toBeInTheDocument();
+    expect(cards()).toHaveLength(0);
+    expect(document.body.textContent).not.toContain("ATM (sabit hedef)");
+    expect(document.body.textContent).not.toMatch(/kart gösteriliyor|gerçek depo olmadığı için gösterilmiyor/);
+    expect(screen.getByRole("textbox", { name: /Checkpoint metaverisi/ })).toBeInTheDocument();
+    // the independent ECE panel still works (and still only on the user's submit)
+    fill();
+    await userEvent.click(submitButton());
+    expect(assessCalls).toHaveLength(1);
+    await resolveWith(0, goodReport());
+    expect(screen.getByRole("region", { name: "GitHub CI denetim sonucu" })).toBeInTheDocument();
+  });
+
+  it("retry after a failure shows the correct rows", async () => {
+    backend.failures["list_projects"] = { code: "DB_UNAVAILABLE", message: "Veritabanı okunamadı." };
+    backend.projects.push(ref("r1", "Proje X"));
+    await openCheckpoints();
+    await screen.findByText(/özet oluşturulmadı/);
+    delete backend.failures["list_projects"];
+    await userEvent.click(screen.getByRole("button", { name: "Yeniden dene" }));
+    await waitFor(() => expect(cards().map((c) => text(c.querySelector("h3")))).toEqual(["ATM (sabit hedef)", "Proje X"]));
+    expect(screen.queryByText(/özet oluşturulmadı/)).toBeNull();
+  });
+
+  it("a successful but really empty list (only a synthetic project) still shows the fixed ATM row", async () => {
+    await goCheckpoints();
+    expect(cards().map((c) => text(c.querySelector("h3")))).toEqual(["ATM (sabit hedef)"]);
+  });
+
+  it("a failed read on re-entering the page shows the explanation, never an empty or old summary", async () => {
+    backend.projects.push(ref("r1", "Proje X"));
+    await goCheckpoints();
+    expect(cards()).toHaveLength(2);
+    backend.failures["list_projects"] = { code: "DB_UNAVAILABLE", message: "Veritabanı okunamadı." };
+    await userEvent.click(within(nav()).getByRole("button", { name: "Ana Sayfa" }));
+    await userEvent.click(within(nav()).getByRole("button", { name: "Checkpoint Merkezi" }));
+    await screen.findByText(/özet oluşturulmadı/);
+    expect(cards()).toHaveLength(0);
+    expect(summaryHeading()).not.toBeNull();
+  });
+});
+
+const stylesSource: string = readFileSync("src/styles.css", "utf8");
+
+describe("RT-WP2-02: three columns at the normal content width (static contract; jsdom does not measure layout)", () => {
+  const rule = (sel: string) => stylesSource.match(new RegExp(sel.replace(".", "\\.") + " \\{([^}]*)\\}"))![1];
+  it("three minimum-width cards and two gaps fit the unchanged .content width, and the grid still collapses on narrow windows", () => {
+    const content = rule(".content");
+    const max = Number(/max-width: (\d+)px/.exec(content)![1]);
+    const sidePadding = Number(/padding: [\d.]+rem ([\d.]+)rem/.exec(content)![1]) * 16;
+    expect(max).toBe(1100); // the global width is not changed by this fix
+    const grid = rule(".ov-grid");
+    const minRem = Number(/minmax\(min\(100%, ([\d.]+)rem\), 1fr\)/.exec(grid)![1]);
+    const gapRem = Number(/gap: ([\d.]+)rem/.exec(grid)![1]);
+    expect(grid).toContain("repeat(auto-fit");
+    expect((3 * minRem + 2 * gapRem) * 16).toBeLessThanOrEqual(max - 2 * sidePadding);
+    expect(grid).toContain("min(100%,"); // the minimum is capped by the container: one column when the window is narrow
+  });
+});
+
+describe("RT-WP2-03: the freshness line follows what ECE reported", () => {
+  const goToAtm = async () => {
+    backend.projects.push(ref("a", ATM_NAME));
+    await goCheckpoints();
+    await claim(ATM_NAME, { repo: TARGET_REPOSITORY, accepted: SHA });
+    fill();
+    await userEvent.click(submitButton());
+  };
+  const notAssessed = (over = {}) => goodReport({
+    outcome: "NOT_ASSESSED", ci: "NOT_EVALUATED", availability: "NOT_EVALUATED", review: "NOT_EVALUATED", freshness: "NOT_EVALUATED",
+    limitations: ["NO_INDEPENDENT_REVIEW", "NO_HUMAN_AUTHORIZATION", "NOT_CURRENT_HEAD_ATTESTATION"], blocking: [], error: "ATTEMPT_NOT_LATEST", ...over,
+  });
+  it("a completed historical assessment keeps the historical-evidence warning", async () => {
+    await goToAtm();
+    await resolveWith(0, goodReport());
+    const t = text(card(ATM_NAME));
+    expect(t).toContain("TARİHSEL KANIT — GÜNCEL HEAD ONAYI DEĞİLDİR");
+    expect(t).not.toContain("Güncellik değerlendirilmedi");
+  });
+  it("NOT_ASSESSED / NOT_EVALUATED: neutral freshness text, no historical-evidence claim, no CI result claim", async () => {
+    await goToAtm();
+    await resolveWith(0, notAssessed());
+    const t = text(card(ATM_NAME));
+    expect(t).toContain("Güncellik değerlendirilmedi; güncel HEAD doğrulanmadı.");
+    expect(t).not.toMatch(/TARİHSEL KANIT|tarihsel kanıt/i);
+    expect(t).not.toMatch(/başarılı sonuçlandı|geçti/);
+    expect(t).toContain("Değerlendirme hatasını inceleyin");
+  });
+  it("a provider failure is neither a CI failure nor an acceptance, and makes no historical-evidence claim", async () => {
+    await goToAtm();
+    await resolveWith(0, goodReport({ outcome: "INSUFFICIENT_EVIDENCE", ci: "NOT_EVALUATED", review: "NOT_EVALUATED", freshness: "NOT_EVALUATED", limitations: [], error: "PROVIDER_FAILURE", providerFailure: "RATE_LIMITED" }));
+    const t = text(card(ATM_NAME));
+    expect(t).toMatch(/Bu, gözlenmiş bir CI başarısızlığı değildir/);
+    expect(t).not.toMatch(/TARİHSEL KANIT|başarılı sonuçlandı|başarısız ya da eksik|Düzeltin/);
+    expect(t).toContain("Güncellik değerlendirilmedi; güncel HEAD doğrulanmadı.");
+    expect(t).toContain("Sonra yeniden deneyin");
+  });
+  it("the trust separation is unchanged: HEAD unknown, review and authorization from ECE only, standing blockers listed", async () => {
+    await goToAtm();
+    await resolveWith(0, notAssessed({ limitations: ["NO_INDEPENDENT_REVIEW"] }));
+    const t = text(card(ATM_NAME));
+    expect(t).toMatch(/Güncel HEAD doğrulanmadı — bilinmiyor/);
+    expect(t).toMatch(/Gözlenen inceleme değerlendirilmedi \[bilinmiyor\]/);
+    expect(t).toMatch(/Gözlenen onay İNSAN ONAYI: BEKLEMEDE \[ECE\]/);
+    expect(t).toMatch(/Devam eden eksikler.*HEAD doğrulanmadı.*Bağımsız inceleme doğrulanmadı.*İnsan onayı doğrulanmadı/);
   });
 });

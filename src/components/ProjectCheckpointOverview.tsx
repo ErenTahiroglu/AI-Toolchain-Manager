@@ -9,6 +9,9 @@ import type { AtmRow, OverviewRow, RowNote, UserClaims } from "../projectCheckpo
 export type Source = "ECE" | "beyan" | "bilinmiyor";
 export const SourceTag = ({ s }: { s: Source }) => <span className={`ov-src ov-src-${s}`}>[{s}]</span>;
 
+/** For an observation whose freshness was not evaluated: neutral, no historical-evidence claim (the shared FRESHNESS_LABEL.NOT_EVALUATED text would make one). */
+const NOT_EVALUATED_FRESHNESS = "Güncellik değerlendirilmedi; güncel HEAD doğrulanmadı.";
+
 export const RECOMMENDED_TEXT: Record<string, string> = {
   ENTER_ACCEPTED_CHECKPOINT: "Beyan edilen son kabul commit’ini girin.",
   RUN_ECE_FOR_CLAIMED_ACCEPTED_SHA: "Beyan edilen kabul commit’i için aşağıdaki ECE denetim formunu siz çalıştırın (çalıştırma kimliğini ve denemeyi elle girersiniz).",
@@ -56,7 +59,7 @@ function ObservationBlock({ row }: { row: AtmRow }) {
           {ERROR_LABEL[v.error]}.{v.providerFailure !== null && <> {PROVIDER_FAILURE_LABEL[v.providerFailure]}.</>} Bu, gözlenmiş bir CI başarısızlığı değildir; CI sonucu hakkında bir şey söylenmedi.
         </p>
       )}
-      <p className="small muted">{LABEL_HISTORICAL}</p>
+      <p className="small muted">{v.freshness === "HISTORICAL_BASELINE" ? LABEL_HISTORICAL : NOT_EVALUATED_FRESHNESS}</p>
     </div>
   );
 }

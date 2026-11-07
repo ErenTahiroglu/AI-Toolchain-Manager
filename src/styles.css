@@ -195,7 +195,7 @@ fieldset.panel legend { font-weight: 700; padding: 0 .4rem; }
 .ov-warn { color: var(--unk-fg); background: var(--unk-bg); border-radius: 8px; padding: .3rem .6rem; }
 .ov-filters { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: end; margin: .75rem 0 .25rem; }
 .ov-filters .field { margin: 0; min-width: 11rem; flex: 1; }
-.ov-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 21rem), 1fr)); gap: 1rem; align-items: start; }
+.ov-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: 1rem; align-items: start; }
 .ov-card { background: var(--surface); border: 1px solid var(--border); border-top: 3px solid var(--accent); border-radius: 14px; padding: 1rem 1.1rem; min-width: 0; overflow-wrap: anywhere; }
 .ov-card[data-role="FOREIGN"] { border-top-color: var(--border); }
 .ov-card h3 { margin: 0 0 .25rem; font-size: 1.1rem; }

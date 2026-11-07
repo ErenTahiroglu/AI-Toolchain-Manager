@@ -27,7 +27,9 @@ export function CheckpointCenter() {
   const panelRef = useRef<HTMLDivElement>(null);
   const pendingKey = useRef<string | null>(null); // the ATM row key at the moment the running submission started
 
+  // `list` only feeds the panel key (so a failed reload does not reset the form); the SUMMARY is built only from a list that was read successfully (`ready`)
   const list = projects.data ?? [];
+  const ready = projects.data !== null && projects.error === null;
   const atmKey = atmKeyOf(list, claims);
   const atmKeyRef = useRef(atmKey);
   atmKeyRef.current = atmKey;
@@ -66,8 +68,20 @@ export function CheckpointCenter() {
 
   return (
     <>
-      {projects.error && <ErrorNotice error={projects.error} onRetry={projects.reload} />}
-      <ProjectCheckpointOverview rows={rows} hiddenSynthetic={list.filter((p) => p.kind !== "reference").length} onSave={save} onClear={clear} onGoToPanel={goToPanel} />
+      {projects.error && (
+        <section className="ov" aria-label="Proje checkpoint özeti yüklenemedi">
+          <h2>Proje Checkpoint Özeti</h2>
+          <p className="small">Kayıtlı proje listesi okunamadığı için özet oluşturulmadı; hiçbir proje ya da kart gösterilmiyor. Aşağıdaki yapıştırma görüntüleyicisi ve ECE denetim formu bundan etkilenmez.</p>
+          <ErrorNotice error={projects.error} onRetry={projects.reload} />
+        </section>
+      )}
+      {!projects.error && projects.data === null && (
+        <section className="ov" aria-label="Proje checkpoint özeti yükleniyor">
+          <h2>Proje Checkpoint Özeti</h2>
+          <p className="muted" aria-live="polite">Proje listesi yükleniyor…</p>
+        </section>
+      )}
+      {ready && <ProjectCheckpointOverview rows={rows} hiddenSynthetic={list.filter((p) => p.kind !== "reference").length} onSave={save} onClear={clear} onGoToPanel={goToPanel} />}
       <CheckpointsPage />
       {/* keyed by the ATM row: when the row the panel belongs to changes, the panel (its inputs and any pending answer) is dropped with it */}
       <div ref={panelRef} tabIndex={-1} className="ov-panel-anchor">
