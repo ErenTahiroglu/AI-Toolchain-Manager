@@ -57,9 +57,17 @@ class FrontendOnly(unittest.TestCase):
     def test_the_page_is_a_separate_navigation_entry_and_unchanged_pages_remain(self):
         app = read("src/App.tsx")
         self.assertIn('{ id: "checkpoints", label: "Checkpoint Merkezi" }', app)
-        # ATM-GOV-02 P2B: the manual viewer page is unchanged; the separate native-verification panel is rendered after it on the same route.
-        self.assertIn('{page === "checkpoints" && (', app)
-        self.assertRegex(app, r'<CheckpointsPage />\s*<CiEvidencePanel />')
+        # ATM-GOV-02 P2C-WP2: the route renders CheckpointCenter, which composes the unchanged manual viewer and, AFTER it, exactly one ECE panel.
+        self.assertRegex(app, r'\{page === "checkpoints" && <CheckpointCenter />\}')
+        self.assertRegex(app, r'import \{ CheckpointCenter \} from "\./pages/CheckpointCenter";')
+        self.assertEqual(len(re.findall(r"<CheckpointCenter\b", app)), 1)
+        center = read("src/pages/CheckpointCenter.tsx")
+        self.assertRegex(center, r'import \{ CheckpointsPage \} from "\./Checkpoints";')
+        self.assertRegex(center, r'import \{ CiEvidencePanel \} from "\.\./components/CiEvidencePanel";')
+        viewer = re.findall(r"<CheckpointsPage\s*/>", center)
+        panel = re.findall(r"<CiEvidencePanel\b", center)
+        self.assertEqual((len(viewer), len(panel)), (1, 1))  # exactly one instance of each
+        self.assertLess(center.index("<CheckpointsPage"), center.index("<CiEvidencePanel"))  # the independent paste viewer comes before the ECE panel
         self.assertIn("<ErrorBoundary key={page}>", app)  # a page is re-mounted on every navigation: its state is destroyed on leaving
         for label in ("Ana Sayfa", "Projeler", "Araç Kütüphanesi", "Öneriler", "Bilgisayar Envanteri", "Kurulum Planı", "İstem Kütüphanesi", "Etkinlik ve Denetim", "Ayarlar"):
             self.assertIn('label: "%s"' % label, app)
