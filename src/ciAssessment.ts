@@ -187,3 +187,57 @@ export function describeReport(report: unknown, asked: AssessAtmCheckpointReques
     provenance: p as unknown as CiAssessmentReport["provenance"],
   };
 }
+
+// ---- ATM-GOV-02 P2C-WP1: the observation handed to the project checkpoint overview --------------------------------------------------------
+// A recognized, session-only machine observation of the ONE fixed ATM target. Pure: no IPC, no network, no storage. The stamp is a module-private
+// Symbol; it is NOT cryptographic authentication (code that can import this module or hold the object can imitate it). The protection is the
+// controlled data flow (the only producer's caller is the panel's IPC result handler) PLUS the runtime checks in `isEceObservation`, together.
+const OBS = Symbol("ece-observation");
+export const ATM_ROW_KEY = "atm-fixed-target" as const;
+
+export interface EceObservation {
+  readonly [OBS]: true;
+  readonly rowKey: typeof ATM_ROW_KEY;
+  readonly asked: AssessAtmCheckpointRequest;
+  readonly view: Extract<AssessmentView, { recognized: true }>;
+}
+
+/**
+ * The single producer. Builds an observation ONLY from a recognized `describeReport` result; anything else is `null`. The result is an independent,
+ * deeply frozen snapshot: the caller's native report is neither referenced nor frozen, and the observation cannot be changed afterwards.
+ */
+export function makeEceObservation(report: unknown, asked: AssessAtmCheckpointRequest): EceObservation | null {
+  const described = describeReport(report, asked);
+  if (!described.recognized) return null;
+  const view = Object.freeze({
+    ...described,
+    provenance: Object.freeze({ ...described.provenance }),
+    limitations: Object.freeze([...described.limitations]) as string[],
+    blocking: Object.freeze([...described.blocking]) as string[],
+  });
+  const obs = Object.freeze({ rowKey: ATM_ROW_KEY, asked: Object.freeze({ commitSha: asked.commitSha, runId: asked.runId, runAttempt: asked.runAttempt }), view });
+  // Non-enumerable: a spread/JSON copy of an observation does not carry the stamp. (Defined before freezing the object itself.)
+  const stamped = Object.defineProperty({ ...obs }, OBS, { value: true, enumerable: false });
+  return Object.freeze(stamped) as unknown as EceObservation;
+}
+
+const frozenObject = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && Object.isFrozen(x);
+
+/**
+ * Runtime check. Not only the stamp: an OWN stamp, a deeply frozen snapshot, the fixed row key, valid `asked`, a recognized view, and a provenance that
+ * matches the fixed target AND `asked`. Not cryptographic authentication: the protection is the controlled producer, these checks and immutability together.
+ */
+export function isEceObservation(x: unknown): x is EceObservation {
+  if (!frozenObject(x) || !Object.prototype.hasOwnProperty.call(x, OBS)) return false;
+  const o = x as Record<PropertyKey, unknown>;
+  if (o[OBS] !== true || o.rowKey !== ATM_ROW_KEY) return false;
+  const a = o.asked;
+  if (!frozenObject(a) || typeof a.commitSha !== "string" || typeof a.runId !== "number" || typeof a.runAttempt !== "number") return false;
+  if (!parseInput(a.commitSha, String(a.runId), String(a.runAttempt)).ok) return false;
+  const v = o.view;
+  if (!frozenObject(v) || v.recognized !== true) return false;
+  const p = v.provenance;
+  if (!frozenObject(p) || !frozenObject(v.limitations) || !Array.isArray(v.limitations) || !frozenObject(v.blocking) || !Array.isArray(v.blocking)) return false;
+  return p.repository === TARGET_REPOSITORY && p.repositoryId === TARGET_REPOSITORY_ID && p.workflowPath === TARGET_WORKFLOW &&
+    p.commitSha === a.commitSha && p.runId === a.runId && p.runAttempt === a.runAttempt;
+}
