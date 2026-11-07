@@ -241,3 +241,6 @@ export function isEceObservation(x: unknown): x is EceObservation {
   return p.repository === TARGET_REPOSITORY && p.repositoryId === TARGET_REPOSITORY_ID && p.workflowPath === TARGET_WORKFLOW &&
     p.commitSha === a.commitSha && p.runId === a.runId && p.runAttempt === a.runAttempt;
 }
+
+/** What the ECE panel tells its parent (ATM-GOV-02 P2C-WP2). `result` carries an observation only for a recognized answer to a submission of this panel. */
+export type ObservationEvent = { kind: "started" } | { kind: "result"; obs: EceObservation } | { kind: "cleared" };

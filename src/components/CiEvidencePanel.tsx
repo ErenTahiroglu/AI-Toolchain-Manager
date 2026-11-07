@@ -10,8 +10,8 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { api, toAppError } from "../api";
 import {
   AUTHORIZATION_LABEL, AVAILABILITY_LABEL, BLOCKING_LABEL, CI_LABEL, describeReport, ERROR_LABEL, FRESHNESS_LABEL, INPUT_ERROR, LABEL_MACHINE, LIMITATION_LABEL,
-  MAX_RUN_ATTEMPT, OUTCOME_LABEL, parseInput, PROVIDER_FAILURE_LABEL, REQUIRED_JOBS, REVIEW_LABEL, TARGET_REPOSITORY, TARGET_REPOSITORY_ID, TARGET_WORKFLOW,
-  type AssessmentView, type InputField,
+  makeEceObservation, MAX_RUN_ATTEMPT, OUTCOME_LABEL, parseInput, PROVIDER_FAILURE_LABEL, REQUIRED_JOBS, REVIEW_LABEL, TARGET_REPOSITORY, TARGET_REPOSITORY_ID, TARGET_WORKFLOW,
+  type AssessmentView, type InputField, type ObservationEvent,
 } from "../ciAssessment";
 import type { AppError, AssessAtmCheckpointRequest } from "../types";
 
@@ -75,7 +75,8 @@ function Result({ view }: { view: AssessmentView }) {
   );
 }
 
-export function CiEvidencePanel() {
+/** `onObservation` (optional) tells a parent about this panel's own submissions only: started, a recognized result, cleared. Nothing else can produce an observation. */
+export function CiEvidencePanel({ onObservation }: { onObservation?: (event: ObservationEvent) => void } = {}) {
   const uid = useId();
   const [sha, setSha] = useState("");
   const [runId, setRunId] = useState("");
@@ -85,11 +86,14 @@ export function CiEvidencePanel() {
   const seq = useRef(0); // bumped by every edit and every submit: only the latest submit's answer may be shown
   const mounted = useRef(true);
   const resultRef = useRef<HTMLElement>(null);
+  const notify = useRef(onObservation);
+  notify.current = onObservation;
 
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false; // leaving the page: nothing is shown, stored or kept
+      notify.current?.({ kind: "cleared" });
     };
   }, []);
   useEffect(() => {
@@ -100,6 +104,7 @@ export function CiEvidencePanel() {
     set(value);
     seq.current += 1; // an answer that is still on its way belongs to the old inputs
     setView({ kind: "idle" }); // the screen never shows a result for inputs that are no longer in the boxes
+    notify.current?.({ kind: "cleared" });
   };
 
   const submit = (event: FormEvent) => {
@@ -108,24 +113,29 @@ export function CiEvidencePanel() {
     const parsed = parseInput(sha.trim(), runId.trim(), attempt.trim());
     if (!parsed.ok) {
       setView({ kind: "invalid", field: parsed.field }); // nothing is sent
+      notify.current?.({ kind: "cleared" }); // the earlier result is no longer on screen
       return;
     }
     const mine = ++seq.current;
     const asked = parsed.request;
     setPending(true);
     setView({ kind: "idle" });
+    notify.current?.({ kind: "started" });
     api.assessAtmCheckpoint(asked).then(
       (report) => {
         if (!mounted.current) return;
         setPending(false);
         if (mine !== seq.current) return; // the inputs changed meanwhile: this answer is not for them
         setView({ kind: "shown", asked, view: describeReport(report, asked) });
+        const obs = makeEceObservation(report, asked); // the only producer; null for an unrecognized answer
+        notify.current?.(obs ? { kind: "result", obs } : { kind: "cleared" });
       },
       (e: unknown) => {
         if (!mounted.current) return;
         setPending(false);
         if (mine !== seq.current) return;
         setView({ kind: "error", error: toAppError(e) });
+        notify.current?.({ kind: "cleared" });
       },
     );
   };

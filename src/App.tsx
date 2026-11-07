@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { ErrorBoundary, ErrorNotice, useLoad } from "./components/common";
 import { ActivityPage } from "./pages/Activity";
-import { CiEvidencePanel } from "./components/CiEvidencePanel";
-import { CheckpointsPage } from "./pages/Checkpoints";
+import { CheckpointCenter } from "./pages/CheckpointCenter";
 import { DashboardPage } from "./pages/Dashboard";
 import { ProjectsPage } from "./pages/Projects";
 import { PromptsPage } from "./pages/Prompts";
@@ -94,12 +93,7 @@ export default function App() {
           {page === "plan" && <PlanPage />}
           {page === "prompts" && <PromptsPage />}
           {page === "activity" && <ActivityPage />}
-          {page === "checkpoints" && (
-            <>
-              <CheckpointsPage />
-              <CiEvidencePanel />
-            </>
-          )}
+          {page === "checkpoints" && <CheckpointCenter />}
           {page === "settings" && <SettingsPage />}
         </ErrorBoundary>
       </main>
