@@ -104,7 +104,7 @@ describe("the comparison", () => {
     expect(g.getByLabelText("Ajan yüzeyi")).toHaveValue("");
     expect(onOpen).not.toHaveBeenCalled();
     for (const bad of FORBIDDEN) expect(calls(bad), bad).toHaveLength(0);
-    expect(calls("list_projects")).toHaveLength(1); // the one existing read-only call it uses
+    await waitFor(() => expect(calls("list_projects")).toHaveLength(1)); // the one existing read-only call it uses (made by an effect)
     expect(g.queryByText(/Seçtiğiniz hedef için yayıncı beyanı/)).not.toBeInTheDocument(); // no target, no compatibility claim
     expect(g.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(g.queryByRole("button", { name: /^(Kaydet|Kur|Etkinleştir|Kabul)/ })).not.toBeInTheDocument();
@@ -123,7 +123,7 @@ describe("the comparison", () => {
     const g = await group();
     expect(g.queryByLabelText("Proje")).not.toBeInTheDocument();
     expect(g.queryByRole("button", { name: /^Matriste aç/ })).not.toBeInTheDocument();
-    expect(calls("list_projects")).toHaveLength(1);
+    await waitFor(() => expect(calls("list_projects")).toHaveLength(1));
   });
 });
 
