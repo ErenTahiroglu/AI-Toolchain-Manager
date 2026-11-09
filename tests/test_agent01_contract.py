@@ -53,7 +53,7 @@ class SurfaceListsAgree(unittest.TestCase):
 
     def test_no_catalog_data_file_or_schema_carries_a_codex_evidence_row(self):
         # the word "codex" may appear in a publisher's own description (e.g. a purpose text); an evidence ROW or schema value for the surface may not
-        for rel in ("data/catalog-seed.json", "data/catalog-candidates-1b.json", "data/catalog-candidates-c01.json", "data/catalog-candidates-c02.json", "data/catalog-candidates-c03.json", "schemas/catalog-entry.schema.json"):
+        for rel in ("data/catalog-seed.json", "data/catalog-candidates-1b.json", "data/catalog-candidates-c01.json", "data/catalog-candidates-c02.json", "data/catalog-candidates-c03.json", "data/catalog-candidates-c04.json", "schemas/catalog-entry.schema.json"):
             text = read(rel)
             self.assertNotIn("codex-cli", text, rel)
             self.assertIsNone(re.search(r'"agentSurface"\s*:\s*"codex', text, re.I), rel)
@@ -61,11 +61,11 @@ class SurfaceListsAgree(unittest.TestCase):
 
     def test_the_historic_candidate_identities_are_all_still_present(self):
         ids = []
-        for rel in ("data/catalog-seed.json", "data/catalog-candidates-1b.json", "data/catalog-candidates-c01.json", "data/catalog-candidates-c02.json", "data/catalog-candidates-c03.json"):
+        for rel in ("data/catalog-seed.json", "data/catalog-candidates-1b.json", "data/catalog-candidates-c01.json", "data/catalog-candidates-c02.json", "data/catalog-candidates-c03.json", "data/catalog-candidates-c04.json"):
             for r in json.loads(read(rel))["records"]:
                 ids.append(r.get("toolId") or r["record"]["toolId"])
-        self.assertEqual((len(ids), len(set(ids))), (22, 22))
-        self.assertEqual((9, 4, 3, 2, 4), tuple(len(json.loads(read("data/%s.json" % f))["records"]) for f in ("catalog-seed", "catalog-candidates-1b", "catalog-candidates-c01", "catalog-candidates-c02", "catalog-candidates-c03")))
+        self.assertEqual((len(ids), len(set(ids))), (23, 23))
+        self.assertEqual((9, 4, 3, 2, 4, 1), tuple(len(json.loads(read("data/%s.json" % f))["records"]) for f in ("catalog-seed", "catalog-candidates-1b", "catalog-candidates-c01", "catalog-candidates-c02", "catalog-candidates-c03", "catalog-candidates-c04")))
 
 
 class CapabilityAndCommandsUnchanged(unittest.TestCase):

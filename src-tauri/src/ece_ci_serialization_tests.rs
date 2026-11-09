@@ -3,7 +3,7 @@
 //! The expected values below were produced by the BASELINE build (dd37b04, before ECE was a dependency) and are written out as
 //! literals. They fail if a dependency, or a feature a dependency switches on, changes how ATM's own JSON text is produced.
 //! The case that motivated them: ECE-LIB-01 switched `serde_json/preserve_order` on for every consumer; ATM's startup
-//! `catalog::seed_all` compares stored `record_json` TEXT with freshly serialized text, so all 22 seed rows would have been
+//! `catalog::seed_all` compares stored `record_json` TEXT with freshly serialized text, so all 23 seed rows would have been
 //! rewritten at the first start after an upgrade. ECE-LIB-02 moved that behind a feature that `default-features = false` leaves off.
 
 use crate::{audit, catalog, db, discovery};
@@ -17,7 +17,7 @@ fn sha256_hex(text: &str) -> String {
 }
 
 /// (data file, toolId, SHA-256 of `record.to_string()`), computed on the baseline build.
-const SEED_RECORD_TEXT_SHA256: [(&str, &str, &str); 22] = [
+const SEED_RECORD_TEXT_SHA256: [(&str, &str, &str); 23] = [
     ("data/catalog-seed.json", "ponytail", "3b2b88196bde2b9795f4635a42e2b69841ae67d1c325d288d5672f428abbd8aa"),
     ("data/catalog-seed.json", "codebase-memory-mcp", "c862d3643793daf2e50aeeac224c6ec2ecac8687fd33ece1d0095752cc5cc1dd"),
     ("data/catalog-seed.json", "graphify", "c496966282d25e119e637b1ababef71c383b7302f1fd56f4376dbb9401aefe09"),
@@ -48,14 +48,20 @@ const SEED_RECORD_TEXT_SHA256: [(&str, &str, &str); 22] = [
         "4884afce4f8285fde39e7ee097e44c69eb44b87a2b339e3bcd5ed9a1a0fa5510",
     ),
     ("data/catalog-candidates-c03.json", "ruvnet-ruflo", "0275661dad91844e95c97492b7c3fd9b666556bc88e416c95c00af2d2e146f98"),
+    (
+        "data/catalog-candidates-c04.json",
+        "google-elephant-goldfish-model",
+        "8505637343ebbbc461dddd44531a03b288705d923b8846b52bdfc8d87a575e40",
+    ),
 ];
 
-const SEED_FILES: [(&str, &str); 5] = [
+const SEED_FILES: [(&str, &str); 6] = [
     ("data/catalog-seed.json", include_str!("../../data/catalog-seed.json")),
     ("data/catalog-candidates-1b.json", include_str!("../../data/catalog-candidates-1b.json")),
     ("data/catalog-candidates-c01.json", include_str!("../../data/catalog-candidates-c01.json")),
     ("data/catalog-candidates-c02.json", include_str!("../../data/catalog-candidates-c02.json")),
     ("data/catalog-candidates-c03.json", include_str!("../../data/catalog-candidates-c03.json")),
+    ("data/catalog-candidates-c04.json", include_str!("../../data/catalog-candidates-c04.json")),
 ];
 
 #[test]
@@ -71,7 +77,7 @@ fn serde_json_objects_still_serialize_with_sorted_keys() {
 }
 
 #[test]
-fn all_22_seed_records_serialize_byte_identically_to_the_baseline() {
+fn all_23_seed_records_serialize_byte_identically_to_the_baseline() {
     let mut seen = 0;
     for (file, raw) in SEED_FILES {
         let root: Value = serde_json::from_str(raw).unwrap();
@@ -86,7 +92,7 @@ fn all_22_seed_records_serialize_byte_identically_to_the_baseline() {
             seen += 1;
         }
     }
-    assert_eq!(seen, 22);
+    assert_eq!(seen, 23);
 }
 
 fn seeded() -> Connection {

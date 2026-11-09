@@ -10,6 +10,8 @@ const NEW_IDS: [&str; 3] = ["microsoft-playwright", "apify-mcp-server", "exa-mcp
 const C02_IDS: [&str; 2] = ["microsoft-playwright-cli", "microsoft-playwright-mcp"];
 /// CATALOG-03 (Issue #28) added these four; they are part of every full-catalog expectation below.
 const C03_IDS: [&str; 4] = ["egonex-ai-understand-anything", "thedotmack-claude-mem", "multica-ai-andrej-karpathy-skills", "ruvnet-ruflo"];
+/// CATALOG-04 added this one; it is part of every full-catalog expectation below.
+const C04_IDS: [&str; 1] = ["google-elephant-goldfish-model"];
 const PRIOR_IDS: [&str; 13] = [
     "ponytail",
     "codebase-memory-mcp",
@@ -64,17 +66,18 @@ fn lf_sha(text: &str) -> String {
 fn a_fresh_database_has_the_same_thirteen_entries_plus_exactly_the_three_candidates() {
     let conn = seeded();
     let all = catalog::list_catalog(&conn).unwrap();
-    assert_eq!(SEED_ENTRY_COUNT, 22, "9 Phase 0 + 4 Phase 1B + 3 CATALOG-01 + 2 CATALOG-02 + 4 CATALOG-03");
-    assert_eq!(all.len(), 22);
+    assert_eq!(SEED_ENTRY_COUNT, 23, "9 Phase 0 + 4 Phase 1B + 3 CATALOG-01 + 2 CATALOG-02 + 4 CATALOG-03 + 1 CATALOG-04");
+    assert_eq!(all.len(), 23);
     let mut ids: Vec<&str> = all.iter().map(|e| e.entry_id.as_str()).collect();
     ids.sort_unstable();
-    let mut expected: Vec<&str> = PRIOR_IDS.iter().chain(NEW_IDS.iter()).chain(C02_IDS.iter()).chain(C03_IDS.iter()).copied().collect();
+    let mut expected: Vec<&str> =
+        PRIOR_IDS.iter().chain(NEW_IDS.iter()).chain(C02_IDS.iter()).chain(C03_IDS.iter()).chain(C04_IDS.iter()).copied().collect();
     expected.sort_unstable();
     assert_eq!(ids, expected);
     let mut keys: Vec<&str> = all.iter().map(|e| e.source_key.as_str()).collect();
     keys.sort_unstable();
     keys.dedup();
-    assert_eq!(keys.len(), 22, "no duplicate source key");
+    assert_eq!(keys.len(), 23, "no duplicate source key");
 }
 
 #[test]
@@ -281,7 +284,7 @@ fn seeding_again_changes_nothing_and_creates_no_duplicate() {
         catalog::seed_all(&conn).unwrap();
     }
     assert_eq!((fingerprintable_state(&conn), n(&conn, "SELECT count(*) FROM diagnostics WHERE code = 'SEED_SOURCE_TAKEN'")), before);
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 22);
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 23);
     assert_eq!(health(&conn, "catalog-invariants"), "passed");
 }
 
@@ -293,7 +296,7 @@ fn upgrading_an_existing_database_adds_the_three_and_keeps_every_choice() {
         "DELETE FROM catalog_entries WHERE entry_id IN ('microsoft-playwright','apify-mcp-server','exa-mcp-server','microsoft-playwright-cli','microsoft-playwright-mcp','egonex-ai-understand-anything','thedotmack-claude-mem','multica-ai-andrej-karpathy-skills','ruvnet-ruflo')",
     )
     .unwrap();
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 13);
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 14);
     // the user's own choices on the older entries
     catalog::set_enabled(&conn, "agent-browser", false).unwrap();
     catalog::remove_entry(&conn, "gitleaks").unwrap();
@@ -308,7 +311,7 @@ fn upgrading_an_existing_database_adds_the_three_and_keeps_every_choice() {
     catalog::seed_all(&conn).unwrap();
     catalog::seed_all(&conn).unwrap();
 
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 22);
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 23);
     assert_eq!(n(&conn, "SELECT count(*) FROM project_preferences"), prefs);
     assert_eq!(n(&conn, "SELECT count(*) FROM preference_history"), history);
     let max_seq: Option<String> =
@@ -334,7 +337,7 @@ fn a_new_seed_never_resurrects_a_candidate_the_user_removed_or_disabled() {
     catalog::seed_all(&conn).unwrap();
     assert!(!entry(&conn, "exa-mcp-server").enabled);
     assert!(entry(&conn, "apify-mcp-server").removed_at.is_some());
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 22);
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 23);
 }
 
 // ---- collisions with an entry the user added from a link ------------------------------------------------------------------------------
@@ -354,8 +357,8 @@ fn a_user_added_source_wins_and_the_collision_is_reported_without_a_duplicate() 
     catalog::seed_all(&conn).unwrap();
     catalog::seed_all(&conn).unwrap();
 
-    // 13 shipped earlier + Exa + the two CATALOG-02 and four CATALOG-03 seeds + the two user rows; the two colliding seeds were not inserted
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 22);
+    // 13 shipped earlier + Exa + the two CATALOG-02 and four CATALOG-03 seeds + the EGM seed + the two user rows; the two colliding seeds were not inserted
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 23);
     assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries WHERE source_key = 'apify/apify-mcp-server'"), 1);
     assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries WHERE source_key = 'microsoft/playwright'"), 1);
     let apify_after = entry(&conn, "apify-apify-mcp-server");

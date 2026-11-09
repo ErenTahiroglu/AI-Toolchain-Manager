@@ -8,6 +8,8 @@ use rusqlite::Connection;
 use serde_json::Value;
 
 const C03: [&str; 4] = ["egonex-ai-understand-anything", "thedotmack-claude-mem", "multica-ai-andrej-karpathy-skills", "ruvnet-ruflo"];
+/// CATALOG-04: part of every full-catalog expectation below.
+const C04: [&str; 1] = ["google-elephant-goldfish-model"];
 const EARLIER: [&str; 18] = [
     "ponytail",
     "codebase-memory-mcp",
@@ -74,15 +76,15 @@ fn state(conn: &Connection) -> Vec<(String, String, String, String, bool, bool)>
 #[test]
 fn a_fresh_database_has_the_eighteen_earlier_entries_plus_exactly_the_four() {
     let conn = seeded();
-    assert_eq!(SEED_ENTRY_COUNT, 22, "9 Phase 0 + 4 Phase 1B + 3 CATALOG-01 + 2 CATALOG-02 + 4 CATALOG-03");
+    assert_eq!(SEED_ENTRY_COUNT, 23, "9 Phase 0 + 4 Phase 1B + 3 CATALOG-01 + 2 CATALOG-02 + 4 CATALOG-03 + 1 CATALOG-04");
     let all = catalog::list_catalog(&conn).unwrap();
     let mut ids: Vec<&str> = all.iter().map(|e| e.entry_id.as_str()).collect();
     ids.sort_unstable();
-    let mut expected: Vec<&str> = EARLIER.iter().chain(C03.iter()).copied().collect();
+    let mut expected: Vec<&str> = EARLIER.iter().chain(C03.iter()).chain(C04.iter()).copied().collect();
     expected.sort_unstable();
     assert_eq!(ids, expected);
     let keys: std::collections::BTreeSet<&str> = all.iter().map(|e| e.source_key.as_str()).collect();
-    assert_eq!(keys.len(), 22, "no duplicate source key");
+    assert_eq!(keys.len(), 23, "no duplicate source key");
     // exactly four new source identities, all lower-cased owner/repo keys
     let new_keys: Vec<&str> = all.iter().filter(|e| C03.contains(&e.entry_id.as_str())).map(|e| e.source_key.as_str()).collect();
     let mut sorted = new_keys.clone();
@@ -461,7 +463,7 @@ fn upgrading_an_eighteen_entry_database_adds_exactly_the_four_and_keeps_every_ch
         "DELETE FROM catalog_entries WHERE entry_id IN ('egonex-ai-understand-anything','thedotmack-claude-mem','multica-ai-andrej-karpathy-skills','ruvnet-ruflo')",
     )
     .unwrap();
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 18);
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 19);
     catalog::set_enabled(&conn, "exa-mcp-server", false).unwrap();
     catalog::remove_entry(&conn, "microsoft-playwright-mcp").unwrap();
     crate::projects::add_reference(&conn, "proje", "Proje", "").unwrap();
@@ -474,7 +476,7 @@ fn upgrading_an_eighteen_entry_database_adds_exactly_the_four_and_keeps_every_ch
     catalog::seed_all(&conn).unwrap();
     catalog::seed_all(&conn).unwrap();
 
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 22);
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 23);
     assert_eq!(n(&conn, "SELECT count(*) FROM project_preferences"), prefs);
     assert_eq!(n(&conn, "SELECT count(*) FROM preference_history"), history);
     assert_eq!(n(&conn, "SELECT coalesce(max(sequence), 0) FROM audit_events"), audit, "seeding writes no audit event");
@@ -503,7 +505,7 @@ fn repeat_seeding_is_idempotent_and_never_resurrects_a_removed_or_disabled_candi
     catalog::seed_all(&conn).unwrap();
     assert!(!entry(&conn, "ruvnet-ruflo").enabled);
     assert!(entry(&conn, "thedotmack-claude-mem").removed_at.is_some());
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 22);
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 23);
     assert_eq!(health(&conn), "passed");
 }
 
@@ -530,8 +532,8 @@ fn links_the_user_added_earlier_win_are_reported_and_never_duplicated() {
     catalog::seed_all(&conn).unwrap();
     catalog::seed_all(&conn).unwrap();
 
-    // 18 shipped earlier + the 4 user rows; the four colliding seeds were not inserted
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 22);
+    // 18 shipped earlier + the EGM seed + the 4 user rows; the four colliding seeds were not inserted
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 23);
     for id in C03 {
         let e = entry(&conn, id);
         assert_eq!(

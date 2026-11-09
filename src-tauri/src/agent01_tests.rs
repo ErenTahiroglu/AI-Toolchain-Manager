@@ -70,13 +70,13 @@ fn a_codex_preference_is_stored_under_its_own_surface_and_never_under_another() 
 }
 
 #[test]
-fn for_all_twenty_two_historic_entries_codex_compatibility_is_unknown_and_acceptance_stays_refused() {
+fn for_all_twenty_three_entries_codex_compatibility_is_unknown_and_acceptance_stays_refused() {
     let conn = seeded();
     projects::add_reference(&conn, "proje-bir", "Benim sitem", "").unwrap();
     let baseline = prefs(&conn);
     let entries = catalog::list_catalog(&conn).unwrap();
     assert_eq!(entries.len(), catalog::SEED_ENTRY_COUNT);
-    assert_eq!(entries.len(), 22, "the historic candidate identities are all present");
+    assert_eq!(entries.len(), 23, "the 22 earlier candidate identities and the CATALOG-04 entry are all present");
     for e in &entries {
         for platform in [WIN, MAC] {
             assert_eq!(
@@ -111,6 +111,7 @@ fn no_catalog_data_file_carries_a_codex_evidence_row() {
         ("c01", include_str!("../../data/catalog-candidates-c01.json")),
         ("c02", include_str!("../../data/catalog-candidates-c02.json")),
         ("c03", include_str!("../../data/catalog-candidates-c03.json")),
+        ("c04", include_str!("../../data/catalog-candidates-c04.json")),
     ] {
         assert!(!json.contains("codex-cli"), "{name}: AGENT-01 adds no synthetic Codex support claim");
     }

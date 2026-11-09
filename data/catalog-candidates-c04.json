@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "snapshotDate": "2026-11-08",
+  "note": "CATALOG-04 candidate: one repository. Metadata only: each field is either the publisher's own statement or a read-only observation of the pinned commit (a locally installed copy whose files were compared with the GitHub repository at that commit on 2026-11-08), never a review, a test or an authorisation. The record conforms to schemas/catalog-entry.schema.json v2. `entryKind`, `pluginIdentity`, `sourcePath`, `purpose` and `executionPolicy` are application-level wrapper fields, as in the earlier candidate files.",
+  "records": [
+    {
+      "entryKind": "agent_plugin",
+      "pluginIdentity": null,
+      "sourcePath": null,
+      "purpose": "Tasarım belgelerini taze bağlamlı yorumcu ajanlarla inceleyen Claude Code eklentisi (Google Elephant-Goldfish Model). Belgeler ajanın kendi model sağlayıcısında işlenir; bootstrap ajanı dosya yazma ve kabuk araçlarını bildirir. Bu uygulama kurmaz, çalıştırmaz.",
+      "executionPolicy": "manual-only",
+      "record": {
+        "schemaVersion": 2,
+        "toolId": "google-elephant-goldfish-model",
+        "displayName": "Elephant-Goldfish Model",
+        "repository": { "url": "https://github.com/google/elephant-goldfish-model", "owner": "google", "name": "elephant-goldfish-model" },
+        "sourceSnapshot": { "observedRef": "main", "immutableCommit": "e9e1f06aa4e26e95cd4ed37210a0632202c429e9", "releaseVersion": null, "revisionState": "immutable-commit", "observedAt": "2026-11-08T00:00:00Z", "evidenceIds": ["R57"] },
+        "category": "agent-plugin",
+        "reviewState": "unreviewed",
+        "license": { "state": "known", "spdxId": "Apache-2.0", "evidenceId": "R57" },
+        "targetEvidence": [
+          { "platformTarget": "windows-x64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R57", "limitation": "The publisher's Claude Code guide gives Windows path syntax for permission rules but no support statement for Windows or any CPU architecture. Documentation is not a functional test and nothing was tested." },
+          { "platformTarget": "macos-arm64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R57", "limitation": "The publisher's Claude Code guide names no macOS behaviour and no CPU architecture. Nothing was tested." }
+        ],
+        "installMethods": [
+          { "methodId": "native-plugin-manager", "evidenceId": "R57", "publisherPin": "plugin egm from the marketplace google/elephant-goldfish-model (publisher-stated; not checked against the marketplace)" }
+        ],
+        "dependencies": ["Claude Code 2.1.271 or newer for omitClaudeMd support; older versions are not treated as verified isolation environments (docs/claude.md)"],
+        "privilegeClaims": [
+          "Runs inside Claude Code under the session's permission rules; the user approves reads and writes (docs/claude.md)",
+          "Reviewer agents declare Read, Grep and Glob only (agent files at the pinned commit)",
+          "The bootstrap orchestrator agent declares Agent, Bash, Read, Grep, Glob, Write and Edit (same files)",
+          "The synthesizer agent declares Agent, Read, Grep, Glob and Write; the host does not restrict its Write to a path (docs/claude.md)",
+          "Bootstrap can run local discovery commands and a project-configured formatter (publisher's data-handling note)",
+          "No hooks file and no .mcp.json exist in the pinned tree (listing of 401 paths and a text search, 2026-11-08)"
+        ],
+        "networkClaims": [
+          "The publisher states the package operates no hosted service, database, analytics client or telemetry endpoint (docs/privacy.md)",
+          "Prompts, files and model responses are processed by the host assistant under the host's own account, terms and retention (docs/privacy.md)",
+          "A formatter or other command the user approves may contact a package registry or another service (docs/privacy.md)",
+          "The publisher's install command is 'claude plugin marketplace add google/elephant-goldfish-model'; how the host fetches the marketplace was not checked"
+        ],
+        "artifactEvidence": null,
+        "verificationClaims": [{ "kind": "function", "state": "publisher-describes", "evidenceId": "R57" }],
+        "privacy": {
+          "telemetry": "none-declared",
+          "mayTransmitProjectContent": true,
+          "evidenceId": "R57",
+          "notes": [
+            "The publisher says the host assistant reads the project files and documents supplied for a task and processes them under its own account settings, terms and privacy policy (docs/privacy.md); content is therefore processed by the host assistant, not by a service of the publisher. Cost and data handling depend on the host.",
+            "The reviewer agents are read-only by declaration; the declaration was read, not tested. The bootstrap skill's orchestrator declares file-write, edit and shell tools and is run only when a user starts it. This record starts nothing and authorises nothing.",
+            "The publisher's tree also contains adapters for other hosts (for example a Codex one). They are outside this record: the catalog schema has no Codex agent surface, so no Codex row exists.",
+            "No telemetry is declared by the publisher; none was tested. The statement about hooks and .mcp.json covers the pinned commit only, not other revisions."
+          ]
+        },
+        "updatedAt": "2026-11-08T00:00:00Z"
+      }
+    }
+  ]
+}
