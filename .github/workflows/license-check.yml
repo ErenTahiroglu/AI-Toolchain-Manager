@@ -1,5 +1,5 @@
 # License integrity only. Reads the committed LICENSE.md and README.md; no dependency installation, no secrets,
-# no network, no writes and no project code is run. This is not the application's CI (main holds Phase 0 documents only).
+# no network, no writes and no project code is run. This is not the application's CI (main contains the application and its own CI; this workflow only checks license integrity).
 name: license-check
 
 on:
