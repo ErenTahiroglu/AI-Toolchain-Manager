@@ -22,7 +22,7 @@ jobs:
           - name: macos-arm64
             os: macos-15 # Apple Silicon (arm64) runner; same label as ci.yml
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - name: Verify LICENSE.md and the README license section (read-only, standard library only)

@@ -31,7 +31,7 @@ jobs:
 
     steps:
       - name: Checkout ATM repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
@@ -61,7 +61,7 @@ jobs:
           echo "N4 PASSED: Tampered policy hash ($TAMPERED_HASH) != expected ($EXPECTED_HASH); refused before evaluation."
 
       - name: Checkout ECE repository at approved SHA
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ErenTahiroglu/Evidence-Checkpoint-Engine
           ref: 6c324d04b6e6837e3833ea53ce3f411a5b0ce289
@@ -80,10 +80,10 @@ jobs:
           echo "ECE source SHA strictly verified: $ECE_SHA"
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch head (no release tag)
 
       - name: Cache Cargo dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
@@ -252,7 +252,7 @@ jobs:
           "
 
       - name: Upload Pilot Assessment Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: atm-gov-02-pilot-assessment
           path: pilot_output/
