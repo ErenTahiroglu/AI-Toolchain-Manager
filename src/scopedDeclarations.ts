@@ -28,7 +28,7 @@ export interface DeclarationReading {
   freshness: DeclarationFreshness;
   /** Only a valid RFC 3339 timestamp. */
   observedAt: string | null;
-  /** Whole hours at the moment the inventory was read; only with a valid timestamp, a safe integer in 0..=87600 (display trust limit). */
+  /** Whole hours at the moment the inventory was read; only with a valid timestamp, a safe integer in 0..=8760 (display trust limit). */
   ageHours: number | null;
 }
 
@@ -48,8 +48,8 @@ const hasExactKeys = (v: Record<string, unknown>, keys: readonly string[]): bool
 };
 const DETECTOR_KEYS = ["kind", "coverage"] as const;
 const READING_KEYS = ["scope", "configuration", "freshness", "observedAt", "ageHours"] as const;
-/** Display trust limit for the auxiliary age only (about ten years). Not a retention rule, freshness policy or scan cutoff. */
-export const MAX_AGE_HOURS = 87600;
+/** Display trust limit for the auxiliary age only (one year, defined as 365 days = 8760 hours; no calendar math). Not a retention rule, freshness policy, backend scan cutoff or historical-evidence policy. */
+export const MAX_AGE_HOURS = 8760;
 
 /**
  * Takes the request as the wire delivered it. Two different things can be wrong:
@@ -57,7 +57,7 @@ export const MAX_AGE_HOURS = 87600;
  *    value, a wrong type, more than three readings, a repeated or mis-ordered scope, a reading whose scope the coverage does not call "read", a detector
  *    that does not match the surface. This makes the WHOLE view unavailable; nothing is partially trusted and nothing is repaired.
  *  - the two AUXILIARY time members of a correctly shaped reading: an invalid `observedAt` is sanitized to null (and then `ageHours` is null too); an invalid
- *    `ageHours` (not a safe integer in 0..=87600) is sanitized to null. The freshness enum is validated independently and is never derived from these.
+ *    `ageHours` (not a safe integer in 0..=8760) is sanitized to null. The freshness enum is validated independently and is never derived from these.
  * Future timestamps are not judged here (no clock is read).
  */
 export function describeScopedDeclarations(request: { agentSurface: string; declarationDetector?: unknown; declarations?: unknown }): ScopedView {

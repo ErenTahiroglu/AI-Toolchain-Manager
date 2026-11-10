@@ -6,7 +6,7 @@ import noteSource from "./components/ScopedConfigNote.tsx?raw";
 import { describeOrigin, METHOD_TEXT, ORIGIN_METHODS, originMethodText } from "./origin";
 import {
   CONFIGURATION_TEXT, COVERAGE_TEXT, DECLARATION_CONFIGURATIONS, DECLARATION_FRESHNESS, DECLARATION_SCOPES, FRESHNESS_TEXT, NOT_IMPLEMENTED_TEXT, PRESENCE_LABEL, SCOPE_COVERAGE,
-  SCOPE_NAME, SCOPED_DISCLAIMER, SCOPED_HEADING, SCOPED_NOT_READ_NOTE, SCOPED_SEPARATE, describeScopedDeclarations, notImplementedExtra, scopeLines,
+  MAX_AGE_HOURS, SCOPE_NAME, SCOPED_DISCLAIMER, SCOPED_HEADING, SCOPED_NOT_READ_NOTE, SCOPED_SEPARATE, describeScopedDeclarations, notImplementedExtra, scopeLines,
 } from "./scopedDeclarations";
 
 const CC = "claude-code-terminal";
@@ -149,12 +149,15 @@ describe("auxiliary time members are sanitized to null (never a reason to drop a
     }
   });
 
-  it("age boundaries: 0 and 87600 are kept, 87601 and -1 become null", () => {
-    expect(one({ ageHours: 0 }).ageHours).toBe(0);
-    expect(one({ ageHours: 87600 }).ageHours).toBe(87600);
-    expect(one({ ageHours: 87601 }).ageHours).toBeNull();
-    expect(one({ ageHours: -1 }).ageHours).toBeNull();
-    expect(one({ ageHours: 87601 })).toMatchObject({ observedAt: T0, configuration: "configured", freshness: "current" });
+  it("age boundaries (one year = 365 x 24 = 8760 hours): 0, 8759 and 8760 are kept; 8761, 87600, 87601 and -1 become null", () => {
+    expect(MAX_AGE_HOURS).toBe(365 * 24);
+    for (const ok of [0, 1, 8759, 8760]) expect(one({ ageHours: ok }).ageHours, String(ok)).toBe(ok);
+    for (const bad of [8761, 87600, 87601, -1]) expect(one({ ageHours: bad }).ageHours, String(bad)).toBeNull();
+    // an out-of-range age is only an invalid auxiliary value: the reading stays described and the valid timestamp and trust-bearing fields are untouched
+    for (const bad of [8761, 87600, 87601]) {
+      expect(one({ ageHours: bad })).toEqual({ scope: "project", configuration: "configured", freshness: "current", observedAt: T0, ageHours: null });
+    }
+    expect(one({ ageHours: 8761, freshness: "previous_stale" })).toMatchObject({ freshness: "previous_stale", observedAt: T0, ageHours: null });
   });
 
   it("unsafe, non-finite, fractional, negative and non-number ages become null while the valid timestamp is kept", () => {
