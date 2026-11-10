@@ -28,7 +28,7 @@ export interface DeclarationReading {
   freshness: DeclarationFreshness;
   /** Only a valid RFC 3339 timestamp. */
   observedAt: string | null;
-  /** Whole hours at the moment the inventory was read; only with a valid timestamp, never negative. */
+  /** Whole hours at the moment the inventory was read; only with a valid timestamp, a safe integer in 0..=87600 (display trust limit). */
   ageHours: number | null;
 }
 
@@ -41,15 +41,28 @@ export type ScopedView =
 
 const isOneOf = <T extends string>(list: readonly T[], v: unknown): v is T => typeof v === "string" && (list as readonly string[]).includes(v);
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+/** True exactly when the object's own keys are precisely `keys` (no missing, unexpected or substituted key; a count alone is not enough). */
+const hasExactKeys = (v: Record<string, unknown>, keys: readonly string[]): boolean => {
+  const own = Reflect.ownKeys(v);
+  return own.length === keys.length && keys.every((k) => Object.prototype.hasOwnProperty.call(v, k));
+};
+const DETECTOR_KEYS = ["kind", "coverage"] as const;
+const READING_KEYS = ["scope", "configuration", "freshness", "observedAt", "ageHours"] as const;
+/** Display trust limit for the auxiliary age only (about ten years). Not a retention rule, freshness policy or scan cutoff. */
+export const MAX_AGE_HOURS = 87600;
 
 /**
- * Takes the request as the wire delivered it. Anything that is not exactly the documented shape - an unknown enum value, a wrong type, more than three
- * readings, a repeated or mis-ordered scope, a reading whose scope the coverage does not call "read", a detector that does not match the surface - makes the
- * WHOLE view unavailable. Nothing is partially trusted and nothing is repaired.
+ * Takes the request as the wire delivered it. Two different things can be wrong:
+ *  - STRUCTURE and trust-bearing fields: an object whose own keys are not exactly the documented ones (missing, unexpected or substituted), an unknown enum
+ *    value, a wrong type, more than three readings, a repeated or mis-ordered scope, a reading whose scope the coverage does not call "read", a detector
+ *    that does not match the surface. This makes the WHOLE view unavailable; nothing is partially trusted and nothing is repaired.
+ *  - the two AUXILIARY time members of a correctly shaped reading: an invalid `observedAt` is sanitized to null (and then `ageHours` is null too); an invalid
+ *    `ageHours` (not a safe integer in 0..=87600) is sanitized to null. The freshness enum is validated independently and is never derived from these.
+ * Future timestamps are not judged here (no clock is read).
  */
 export function describeScopedDeclarations(request: { agentSurface: string; declarationDetector?: unknown; declarations?: unknown }): ScopedView {
   const detector = request.declarationDetector;
-  if (!isObject(detector) || !isOneOf(DETECTOR_KINDS, detector.kind)) return { kind: "unavailable" };
+  if (!isObject(detector) || !hasExactKeys(detector, DETECTOR_KEYS) || !isOneOf(DETECTOR_KINDS, detector.kind)) return { kind: "unavailable" };
   const readingsWire = request.declarations;
   if (!Array.isArray(readingsWire)) return { kind: "unavailable" };
 
@@ -71,13 +84,13 @@ export function describeScopedDeclarations(request: { agentSurface: string; decl
   const readings: DeclarationReading[] = [];
   let lastOrder = -1;
   for (const w of readingsWire) {
-    if (!isObject(w) || Object.keys(w).length !== 5) return { kind: "unavailable" };
+    if (!isObject(w) || !hasExactKeys(w, READING_KEYS)) return { kind: "unavailable" };
     if (!isOneOf(DECLARATION_SCOPES, w.scope) || !isOneOf(DECLARATION_CONFIGURATIONS, w.configuration) || !isOneOf(DECLARATION_FRESHNESS, w.freshness)) return { kind: "unavailable" };
     const order = DECLARATION_SCOPES.indexOf(w.scope);
     if (order <= lastOrder) return { kind: "unavailable" }; // repeated or out of the fixed order project -> local -> global
     lastOrder = order;
     const observedAt = typeof w.observedAt === "string" && parseRfc3339(w.observedAt) !== null ? w.observedAt : null;
-    const ageHours = observedAt !== null && typeof w.ageHours === "number" && Number.isInteger(w.ageHours) && w.ageHours >= 0 ? w.ageHours : null;
+    const ageHours = observedAt !== null && typeof w.ageHours === "number" && Number.isSafeInteger(w.ageHours) && w.ageHours >= 0 && w.ageHours <= MAX_AGE_HOURS ? w.ageHours : null;
     readings.push({ scope: w.scope, configuration: w.configuration, freshness: w.freshness, observedAt, ageHours });
   }
   // a scope is "read" exactly when a reading exists for it

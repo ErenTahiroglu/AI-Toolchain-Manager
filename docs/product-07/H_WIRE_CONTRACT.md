@@ -76,13 +76,27 @@ Computed per scope, **only when `kind = claude_mcp`**:
 | `no_record` | nothing else explains the missing reading | "not configured" |
 **An empty `declarations` array never means "not configured".** Only a *current* reading with `configuration = not_configured` is a confirmed negative for its own scope. The case "detector not implemented" is `kind = not_implemented` (coverage `null`). "File or JSON unreadable" is `malformed`/`unreadable`. "Older observation" is `freshness = previous_*`.
 
+### 2.8 Exact member sets, and what is sanitized instead of rejected (Stage 1B R2, Issue #37)
+**Structure (whole view `unavailable`).** The frontend validator checks the exact own-key set, not a key count:
+* `declarationDetector` has precisely `kind` and `coverage`, for `claude_mcp` and for `not_implemented` alike.
+* each entry of `declarations` has precisely `scope`, `configuration`, `freshness`, `observedAt` and `ageHours`.
+* A missing, unexpected **or substituted** key (for example `observedAt` replaced by an unknown key, so the count is still five) makes the whole scoped view `unavailable`. A present key whose value is `null` is shape-valid.
+* The surrounding `RequestVsObservation` object is **not** key-restricted; it legitimately carries other members.
+* Trust-bearing members (`scope`, `configuration`, `freshness`, the detector kind, the coverage values and their consistency, the scope order, the 0..=3 limit and the surface rule) stay strictly validated; a violation drops the whole view as before.
+
+**Auxiliary time members (sanitized to `null`, view stays `described`).** Only for a correctly shaped reading:
+* `observedAt` that is not a valid RFC 3339 timestamp (wrong type, bad syntax, impossible date) → `null`, and then `ageHours` is `null` too.
+* `ageHours` that is not a **safe integer** with `0 <= ageHours <= 87600` → `null` (`87600` is valid, `87601` is not; `NaN`, `±Infinity`, fractions, negatives, strings and values such as `2**53` or `1e308` are invalid). `87600` hours (about ten years) is only a limit on the auxiliary number shown in the UI. It is **not** a retention rule, a freshness policy or a scan cutoff, and nothing persisted is removed because of it.
+* A `null` time never implies a current installation, current freshness or a confirmed configuration. `freshness` is a separate, independently validated enum and is never derived from `observedAt` or `ageHours`.
+* **Unchanged:** future timestamps. A syntactically valid RFC 3339 stamp in the future is kept as sent; the validator reads no clock and applies no future-timestamp rule.
+
 ## 3. Display contract (TypeScript/React)
 * **Two labelled blocks, never merged.** (a) the existing stored presence result (status label + backend note, **unchanged**) now introduced as "Saklanan varlık sonucu"; (b) a new, separate "Kapsama göre MCP tanımı (yapılandırma dosyası okuması)" block.
 * Each reading line states scope (project / local / global in plain words), what was read, current vs previous (with age and the reason class), and the **fixed disclaimer** that a recorded match is not "kurulu/etkin/onaylı/çalışan/doğrulanmış". Missing scopes are described by their `coverage` value in words that never say "tanım yok".
 * Coexistence ("program found by name" + "no definition in the project", or the reverse) is explained in one muted sentence: *the two answer different questions and can both be true*. **No red banner, no "çelişki/çatışma/hata", no green badge**, no new status. A `configured` reading is never green.
 * `kind = not_implemented` → one sentence naming what is not read (Codex CLI, Antigravity IDE, Claude Desktop, bare `local-cli`, CLI-only tools) and that nothing can be said about MCP definitions there; a `local-cli` machine lookup is described as a machine-level program lookup and is **never** described as Codex-specific.
 * D7: where `origin.method = claude-plugin-declaration` the origin block adds: the project/local label only says which settings scope was checked; the presence itself comes from the user-level plugin record/cache and is **not** a project-specific installation. Stored origin values and `note` are untouched.
-* Older backend payload (no new members): the new block is simply not rendered and **no coverage claim** is made; the matrix looks exactly as today. A new member with an unknown enum value, wrong type, > 3 entries, a repeated or mis-ordered scope, or a `claude_mcp` detector on a surface other than `claude-code-terminal` → the whole block is "unavailable" (fail closed), never partially trusted.
+* Older backend payload (no new members): the new block is simply not rendered and **no coverage claim** is made; the matrix looks exactly as today. A new member with an unknown enum value, wrong type, > 3 entries, a repeated or mis-ordered scope, a `claude_mcp` detector on a surface other than `claude-code-terminal`, or an object whose own keys are not exactly the documented set (§2.8) → the whole block is "unavailable" (fail closed), never partially trusted.
 * Shared read-only component `ScopedConfigNote` is used by the matrix (`ObservationSection`) and — display only, no new reason — by the review queue item. Accessibility: a heading, list semantics, no focus theft, long Turkish text wraps.
 
 ## 4. Compatibility matrix

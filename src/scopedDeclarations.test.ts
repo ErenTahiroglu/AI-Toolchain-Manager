@@ -94,6 +94,92 @@ describe("describeScopedDeclarations takes only the exact documented shape", () 
   });
 });
 
+describe("exact own-key sets: a count is not enough; structure violations drop the whole view", () => {
+  const unavailable = (w: unknown) => expect(describeScopedDeclarations(w as Parameters<typeof describeScopedDeclarations>[0]).kind).toBe("unavailable");
+  const without = (o: Record<string, unknown>, key: string) => Object.fromEntries(Object.entries(o).filter(([k]) => k !== key));
+  const cov = { project: "read", local: "no_record", global: "no_record" };
+
+  it("a reading with observedAt or ageHours REPLACED by an unknown key (still five keys) is unavailable", () => {
+    unavailable(wire([{ ...without(reading("project"), "observedAt"), extra: "x" }]));
+    unavailable(wire([{ ...without(reading("project"), "ageHours"), extra: "x" }]));
+    unavailable(wire([{ ...without(reading("project"), "scope"), scop: "project" }]));
+  });
+
+  it("a reading with a missing time key (four keys) or an extra key (six keys) is unavailable; a present key with a null value is shape-valid", () => {
+    unavailable(wire([without(reading("project"), "observedAt")]));
+    unavailable(wire([without(reading("project"), "ageHours")]));
+    unavailable(wire([{ ...reading("project"), extra: 1 }]));
+    expect(described(describeScopedDeclarations(wire([reading("project", { observedAt: null, ageHours: null })]))).readings[0]).toMatchObject({ observedAt: null, ageHours: null });
+  });
+
+  it("the detector must have exactly kind and coverage, for claude_mcp and for not_implemented", () => {
+    unavailable({ agentSurface: CC, declarationDetector: { kind: "claude_mcp", coverage: cov, extra: "x" }, declarations: [reading("project")] });
+    unavailable({ agentSurface: CC, declarationDetector: { kind: "not_implemented", coverage: null, extra: "x" }, declarations: [] });
+    unavailable({ agentSurface: "codex-cli", declarationDetector: { kind: "not_implemented", coverage: null, extra: "x" }, declarations: [] });
+    unavailable({ agentSurface: CC, declarationDetector: { kind: "claude_mcp" }, declarations: [reading("project")] }); // coverage missing
+    unavailable({ agentSurface: CC, declarationDetector: { kind: "claude_mcp", cover: cov }, declarations: [reading("project")] }); // coverage substituted
+    unavailable({ agentSurface: CC, declarationDetector: { kind: "not_implemented" }, declarations: [] }); // coverage missing
+    unavailable({ agentSurface: CC, declarationDetector: { coverage: cov, type: "claude_mcp" }, declarations: [] }); // kind substituted
+  });
+
+  it("the surrounding request object is NOT key-restricted (it legitimately carries other fields)", () => {
+    const v = describeScopedDeclarations({ ...wire([reading("project")]), status: "unknown_current", note: "x", origin: {}, somethingElse: 1 } as never);
+    expect(v.kind).toBe("described");
+  });
+
+  it("valid shapes are unchanged: no readings, one to three readings, not_implemented", () => {
+    expect(described(describeScopedDeclarations(wire([]))).readings).toEqual([]);
+    expect(described(describeScopedDeclarations(wire([reading("project"), reading("local"), reading("global")]))).readings).toHaveLength(3);
+    expect(describeScopedDeclarations({ agentSurface: "codex-cli", declarationDetector: { kind: "not_implemented", coverage: null }, declarations: [] })).toEqual({ kind: "not_implemented", surface: "codex-cli" });
+  });
+
+  it("trust-bearing malformed fields stay unavailable even when the time members are fine", () => {
+    unavailable(wire([reading("project", { scope: "nowhere" })]));
+    unavailable(wire([reading("project", { configuration: 3 })]));
+    unavailable(wire([reading("project", { freshness: null })]));
+  });
+});
+
+describe("auxiliary time members are sanitized to null (never a reason to drop a correctly shaped reading)", () => {
+  const one = (over: Record<string, unknown>) => described(describeScopedDeclarations(wire([reading("project", over)]))).readings[0];
+
+  it("invalid timestamp values give observedAt null and ageHours null, trust-bearing fields intact", () => {
+    for (const bad of ["", "garbage", "2026-10-23", "2026-13-01T00:00:00Z", "2026-02-30T00:00:00Z", "2026-10-23T24:00:00Z", "2026-10-23T09:00:60Z", "2026-10-23T09:00:00", 12345, {}, [], true]) {
+      expect(one({ observedAt: bad, ageHours: 5 }), String(bad)).toEqual({ scope: "project", configuration: "configured", freshness: "current", observedAt: null, ageHours: null });
+    }
+  });
+
+  it("age boundaries: 0 and 87600 are kept, 87601 and -1 become null", () => {
+    expect(one({ ageHours: 0 }).ageHours).toBe(0);
+    expect(one({ ageHours: 87600 }).ageHours).toBe(87600);
+    expect(one({ ageHours: 87601 }).ageHours).toBeNull();
+    expect(one({ ageHours: -1 }).ageHours).toBeNull();
+    expect(one({ ageHours: 87601 })).toMatchObject({ observedAt: T0, configuration: "configured", freshness: "current" });
+  });
+
+  it("unsafe, non-finite, fractional, negative and non-number ages become null while the valid timestamp is kept", () => {
+    for (const bad of [2 ** 53, 2 ** 60, 1e308, Number.MAX_VALUE, Infinity, -Infinity, NaN, 2.5, -0.5, "3", "", null, true, {}, [3]]) {
+      expect(one({ ageHours: bad }), String(bad)).toMatchObject({ observedAt: T0, ageHours: null });
+    }
+  });
+
+  it("timestamp syntax handling is unchanged: valid RFC 3339 (offsets, fractions, lowercase) and a future stamp are kept as sent; no clock is read", () => {
+    for (const ok of ["2026-10-23T09:00:00Z", "2026-10-23T09:00:00.123+03:00", "2026-10-23t09:00:00z", "2999-01-01T00:00:00Z"]) {
+      expect(one({ observedAt: ok }).observedAt, ok).toBe(ok);
+    }
+    expect(scopedSource).not.toMatch(/Date\.now|new Date\(|setTimeout|setInterval/);
+  });
+
+  it("null time evidence implies nothing: the line omits the time and freshness stays the separately validated enum", () => {
+    const v = described(describeScopedDeclarations(wire([reading("project", { observedAt: null, ageHours: null, freshness: "previous_other" })])));
+    const line = scopeLines(v).find((l) => l.scope === "project")!;
+    expect(line.current).toBe(false);
+    expect(line.text).not.toMatch(/Gözlem zamanı/);
+    const cur = scopeLines(described(describeScopedDeclarations(wire([reading("project", { observedAt: "garbage" })])))).find((l) => l.scope === "project")!;
+    expect(cur.current).toBe(true); // freshness is independent of the sanitized time
+  });
+});
+
 describe("the words never turn a missing reading into a negative, and never claim more than a recorded match", () => {
   const all = (): string[] => [
     ...Object.values(CONFIGURATION_TEXT), ...Object.values(FRESHNESS_TEXT), ...Object.values(COVERAGE_TEXT), ...Object.values(SCOPE_NAME), NOT_IMPLEMENTED_TEXT, SCOPED_HEADING,
