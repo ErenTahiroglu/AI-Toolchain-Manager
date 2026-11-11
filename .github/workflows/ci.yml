@@ -49,6 +49,9 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-test.txt
 
+      - name: Verify immutable GitHub Actions pins
+        run: python tools/check_action_pins.py
+
       - name: Rust toolchain (stable, ${{ matrix.target }})
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy --target ${{ matrix.target }}
