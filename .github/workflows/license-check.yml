@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   license:
-    name: ${{ matrix.name }}
+    name: license-${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

@@ -38,6 +38,26 @@ def official_block():
     return head.decode("utf-8"), body
 
 
+JOB_NAME_TEMPLATE = re.compile(r"^jobs:\n  [A-Za-z0-9_-]+:\n    name: (.+)$", re.M)
+MATRIX_NAME = re.compile(r"^\s+- name: (\S+)\s*$", re.M)
+
+
+def check_names(workflow_text):
+    """Displayed job names a workflow would publish, read from its source (static, stdlib only): the single job's `name:` template with each
+    matrix name substituted. Fails loudly if the template or the matrix names cannot be found."""
+    text = workflow_text.replace("\r\n", "\n")
+    template = JOB_NAME_TEMPLATE.search(text)
+    assert template, "job name template not found"
+    matrix = text.split("matrix:", 1)[1].split("steps:", 1)[0]
+    names = MATRIX_NAME.findall(matrix)
+    assert names, "matrix names not found"
+    return [template.group(1).strip().replace("${{ matrix.name }}", n) for n in names]
+
+
+def workflow_check_names(rel):
+    return check_names((ROOT / ".github" / "workflows" / rel).read_text(encoding="utf-8"))
+
+
 class LicenseText(unittest.TestCase):
     def test_official_text_is_byte_identical_to_the_upstream_file(self):
         _, body = official_block()
@@ -90,6 +110,24 @@ class Readme(unittest.TestCase):
         self.assertIn("Branch caveat", notes)
         self.assertIn("68eda3f0407490fabccb517dcf822ab4818fc0bf", notes)
         self.assertIn("is NOT licensed by this change", notes)
+
+
+class CheckNames(unittest.TestCase):
+    """CI-CHECK-NAMES-01 (Issue #51): the license workflow must not publish check-run names that the CI workflow also publishes."""
+
+    def test_license_check_names_are_prefixed_and_keep_both_platforms(self):
+        self.assertEqual(workflow_check_names("license-check.yml"), ["license-windows-x64", "license-macos-arm64"])
+
+    def test_license_check_names_do_not_collide_with_the_ci_job_names(self):
+        ci = workflow_check_names("ci.yml")
+        self.assertEqual(ci, ["windows-x64", "macos-arm64"])
+        self.assertEqual(set(workflow_check_names("license-check.yml")) & set(ci), set())
+
+    def test_the_same_checker_flags_the_original_unprefixed_source(self):
+        # the license workflow's job header as it was before this change: the checker must read it as colliding with CI
+        original = "jobs:\n  license:\n    name: ${{ matrix.name }}\n    strategy:\n      matrix:\n        include:\n          - name: windows-x64\n          - name: macos-arm64\n    steps:\n"
+        self.assertEqual(check_names(original), ["windows-x64", "macos-arm64"])
+        self.assertNotEqual(set(check_names(original)) & set(workflow_check_names("ci.yml")), set())
 
 
 if __name__ == "__main__":
