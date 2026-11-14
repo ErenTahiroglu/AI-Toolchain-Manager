@@ -13,9 +13,12 @@ What it does (standard library only, offline, read-only):
 It is NOT a YAML parser. Python has no standard-library YAML parser, so this is a deliberately narrow, line-based reader of the syntax the repository's
 workflows use today: block mappings and sequences indented with spaces, plain or single-line quoted scalars, single-line flow lists of plain words and
 block scalars (`|`, `>` with an optional `+`/`-`). Text inside block scalars (shell scripts) and comments is skipped, so ordinary text containing "uses:" is not a
-dependency. These are rejected as unsupported, because they could hide or alter a `uses` value: multi-document markers and directives, tab indentation,
-anchors, aliases, merge keys, tags, complex keys, quoted keys, flow mappings, flow lists containing `:` or quotes, multi-line plain/quoted scalars,
-block-scalar indentation indicators, a `uses` key in any spelling other than the lowercase one, a file without a top-level `jobs:`, a BOM, NUL or a lone CR.
+dependency. These are rejected as unsupported, because they could hide or alter a `uses` value: multi-document markers and directives, any tab character on a
+structural line (tabs are fine inside block-scalar script text and comment lines), anchors, aliases, merge keys, tags, complex keys, quoted keys, flow mappings,
+flow lists containing `:` or quotes, multi-line plain/quoted scalars, block-scalar indentation indicators, a `uses` key in any spelling other than the lowercase
+one, a file without a top-level `jobs:`, a BOM, a lone CR, and - anywhere in the file, including comments and block scalars - U+0085, U+2028, U+2029 and every
+other control character except tab, LF and CR. Some YAML parsers treat U+0085/U+2028/U+2029 as line breaks; whether GitHub's hosted parser does is NOT
+established, so they are rejected conservatively rather than assumed harmless.
 
 Limits (read before trusting a green result):
   * This is a regression and CI quality gate, not tamper-proof protection. Anyone who can change this file, the allowlist and the workflow in the same commit
@@ -45,6 +48,26 @@ BLOCK_SCALAR = re.compile(r"^[|>][+-]?$")
 KEY_SPLIT = re.compile(r"^(.*?):(?: +|$)(.*)$")
 FLOW_LIST_BODY = re.compile(r"^\[[^\[\]{}:'\"#&*!|>%@`]*\]$")
 SPACE_HASH = re.compile(r"\s#")
+# C0 controls except TAB/LF/CR, DEL, all of C1 (includes U+0085 NEXT LINE), U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR.
+DISALLOWED_CHARS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u2028\u2029]")
+MAX_CONTROL_DIAGNOSTICS = 20
+
+
+def _safe(text: str) -> str:
+    """Printable-ASCII rendering of diagnostic text: a hostile or control-bearing value can neither crash printing under a restrictive output encoding
+    (for example Windows CP1254) nor inject extra lines into the report."""
+    out = []
+    for c in text:
+        o = ord(c)
+        if " " <= c <= "~":
+            out.append(c)
+        elif o < 0x100:
+            out.append(f"\\x{o:02x}")
+        elif o < 0x10000:
+            out.append(f"\\u{o:04x}")
+        else:
+            out.append(f"\\U{o:08x}")
+    return "".join(out)
 
 
 class Violation(NamedTuple):
@@ -53,7 +76,7 @@ class Violation(NamedTuple):
     message: str
 
     def render(self) -> str:
-        return f"{self.file}:{self.line}: {self.message}"
+        return _safe(f"{self.file}:{self.line}: {self.message}")
 
 
 class AllowlistError(Exception):
@@ -78,8 +101,8 @@ def load_allowlist(path: Path) -> Tuple[Dict[str, str], List[str]]:
         raise AllowlistError(f"cannot read allowlist {path}: {exc}") from exc
     if not isinstance(data, dict) or set(data) != {"schema_version", "approved_actions", "required_workflows"}:
         raise AllowlistError("allowlist must be an object with exactly: schema_version, approved_actions, required_workflows")
-    if data["schema_version"] != 1:
-        raise AllowlistError("unsupported allowlist schema_version")
+    if type(data["schema_version"]) is not int or data["schema_version"] != 1:  # exact integer 1: not True, 1.0, "1" or anything else
+        raise AllowlistError("unsupported allowlist schema_version (must be the integer 1)")
     approved = data["approved_actions"]
     if not isinstance(approved, dict) or not approved:
         raise AllowlistError("approved_actions must be a non-empty object")
@@ -181,10 +204,18 @@ def scan_workflow_text(text: str, name: str) -> Tuple[List[Violation], List[Tupl
     def bad(line: int, msg: str) -> None:
         violations.append(Violation(name, line, msg))
 
-    if text.startswith("﻿"):
+    if text.startswith("\ufeff"):
         bad(1, "byte order mark is unsupported")
-    if "\x00" in text or re.search(r"\r(?!\n)", text):
-        bad(1, "NUL or a lone carriage return is unsupported")
+    # File-level, before any comment, block-scalar or line handling can conceal a character: line-separator and control characters are rejected everywhere.
+    reported = set()
+    for m in DISALLOWED_CHARS.finditer(text):
+        line_no = text.count("\n", 0, m.start()) + 1
+        if (line_no, m.group()) in reported or len(reported) >= MAX_CONTROL_DIAGNOSTICS:
+            continue
+        reported.add((line_no, m.group()))
+        bad(line_no, f"disallowed control or Unicode line-separator character U+{ord(m.group()):04X} (YAML parsers differ on whether it ends a line, so it could hide a `uses` key)")
+    if re.search(r"\r(?!\n)", text):
+        bad(1, "a lone carriage return is unsupported")
     lines = text.replace("\r\n", "\n").split("\n")
     n = len(lines)
     saw_jobs = False
@@ -202,8 +233,10 @@ def scan_workflow_text(text: str, name: str) -> Tuple[List[Violation], List[Tupl
             i += 1
             continue
         stripped = raw.lstrip(" ")
-        if stripped[0] == "\t":
-            bad(lineno, "tab indentation is unsupported")
+        if "\t" in raw:
+            # A tab after `:` or `-` is whitespace to some YAML parsers; this reader only splits on spaces, so such a line would otherwise be read as plain text and its
+            # `uses` skipped (the Stage 1H P1). Rejected here, before any line classification. Block-scalar content and comment lines never reach this point.
+            bad(lineno, "tab character on a structural line is unsupported (indentation, separators and values must use spaces; tabs are allowed only in block-scalar script text and comments)")
             i += 1
             continue
         indent = len(raw) - len(stripped)
@@ -384,7 +417,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         violations, summary = check_repository(Path(args.root), Path(args.allowlist))
     except AllowlistError as exc:
-        print(f"ACTION_PINS_CONFIG_ERROR {exc}", file=sys.stderr)
+        print(_safe(f"ACTION_PINS_CONFIG_ERROR {exc}"), file=sys.stderr)
         return 2
     for v in violations:
         print(v.render())

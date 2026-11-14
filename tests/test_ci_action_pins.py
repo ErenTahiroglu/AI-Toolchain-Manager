@@ -231,9 +231,9 @@ class SyntaxThatCouldHideAReferenceIsRejected(unittest.TestCase):
     def test_document_markers_tabs_bom_and_control_characters(self):
         self.bad("---\n" + wf(""), "document marker")
         self.bad(wf("") + "---\nuses: x\n", "document marker")
-        self.bad(wf("      - name: x\n\t  uses: actions/checkout@v4\n"), "tab indentation")
+        self.bad(wf("      - name: x\n\t  uses: actions/checkout@v4\n"), "tab character")
         self.bad("\ufeff" + wf(f"      - uses: actions/checkout@{CHECKOUT}\n"), "byte order mark")
-        self.bad(wf(f"      - uses: actions/checkout@{CHECKOUT}\n") + "\x00", "NUL")
+        self.bad(wf(f"      - uses: actions/checkout@{CHECKOUT}\n") + "\x00", "U+0000")
         self.bad(wf(f"      - uses: actions/checkout@{CHECKOUT}\n").replace("\n", "\r", 1), "lone carriage return")
 
     def test_a_file_without_a_jobs_mapping_is_not_silently_accepted(self):
@@ -255,6 +255,157 @@ class SyntaxThatCouldHideAReferenceIsRejected(unittest.TestCase):
     def test_two_uses_in_one_step_are_both_checked(self):
         msgs = evaluate(wf(f"      - uses: actions/checkout@{CHECKOUT}\n        uses: actions/checkout@v4\n"))
         self.assertTrue(has(msgs, "mutable ref"))
+
+
+def structural(text: str):
+    """Only the structural/extraction violations (what the reader itself reports), not reference-policy violations."""
+    return [v.message for v in cap.scan_workflow_text(text, "w.yml")[0]]
+
+
+class TabPolicy(unittest.TestCase):
+    """Stage 1H-R2 P1: a tab after `:` or `-` made the line-based reader treat `- uses:<TAB>x` as plain text and skip the dependency. Tabs on structural lines are
+    now rejected before classification; tabs inside block-scalar script text and comment lines stay legal."""
+
+    def test_the_reported_case_is_not_extracted_so_only_the_tab_rule_can_reject_it(self):
+        text = wf("      - uses:\tactions/checkout@v4\n")
+        violations, refs = cap.scan_workflow_text(text, "w.yml")
+        self.assertEqual(refs, [])  # the reference is NOT extracted: rejecting on the reference rule alone is impossible
+        self.assertTrue(any("tab character on a structural line" in v.message for v in violations))
+
+    def test_tab_separated_dependencies_and_other_structural_tabs_are_rejected_by_the_tab_rule(self):
+        evil = "evil/action@v4"
+        fixtures = {
+            "tab after uses colon": f"      - uses:\t{evil}\n",
+            "tab after uses colon, approved pin (conservative)": f"      - uses:\tactions/checkout@{CHECKOUT}\n",
+            "tab after dash": f"      -\tuses: {evil}\n",
+            "space then tab after dash": f"      - \tuses: {evil}\n",
+            "two tabs after dash": f"      -\t\tuses: {evil}\n",
+            "mixed space and tab before value": f"      - uses: \t{evil}\n",
+            "tab then space before value": f"      - uses:\t {evil}\n",
+            "tab before trailing comment": f"      - uses: actions/checkout@{CHECKOUT}\t# c\n",
+            "tab after another mapping colon": "      - name: x\n        run:\techo hi\n",
+            "tab after key with no value": "      - name: x\n        with:\t\n          a: b\n",
+            "tab on a block-scalar header line": "      - run:\t|\n          echo hi\n",
+            "tab-indented key": f"      - name: x\n\t  uses: {evil}\n",
+        }
+        for label, steps in fixtures.items():
+            self.assertTrue(any("tab character on a structural line" in m for m in structural(wf(steps))), label)
+
+    def test_job_level_tab_separated_reusable_workflow_is_rejected(self):
+        text = "name: t\non:\n  push:\njobs:\n  call:\n    uses:\toctocat/repo/.github/workflows/w.yml@v1\n"
+        self.assertTrue(any("tab character" in m for m in structural(text)))
+
+    def test_a_new_fourth_workflow_with_a_tab_separated_dependency_fails_even_though_the_original_thirteen_are_all_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_repo(pathlib.Path(tmp))
+            (root / ".github" / "workflows" / "extra.yml").write_text(wf("      - uses:\tevil/action@v4\n"), encoding="utf-8")
+            violations, summary = cap.check_repository(root)
+            self.assertEqual(summary["uses"], 13)  # the count is unchanged, which is exactly why it cannot be the proof of complete extraction
+            self.assertEqual([v.file for v in violations], [".github/workflows/extra.yml"])
+            self.assertIn("tab character", violations[0].message)
+            self.assertEqual(cap.main(["--root", str(root)]), 1)
+
+    def test_an_existing_workflow_with_a_substituted_tab_separated_dependency_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_repo(pathlib.Path(tmp))
+            ci = root / ".github" / "workflows" / "ci.yml"
+            text = ci.read_text(encoding="utf-8")
+            old = f"uses: actions/checkout@{CHECKOUT} # v4.4.0"
+            self.assertIn(old, text)
+            ci.write_text(text.replace(old, "uses:\tactions/checkout@v4", 1), encoding="utf-8", newline="")
+            violations, summary = cap.check_repository(root)
+            self.assertEqual(summary["uses"], 12)  # one dependency silently not extracted: the rule above must reject, not the count
+            self.assertTrue(any(v.file.endswith("ci.yml") and "tab character" in v.message for v in violations))
+            self.assertEqual(cap.main(["--root", str(root)]), 1)
+
+    def test_tabs_inside_block_scalar_script_text_are_still_accepted(self):
+        text = wf(
+            "      - name: Demo\n"
+            "        run: |\n"
+            "          printf '\\tHello\\n'\n"  # the two characters backslash and t
+            "          printf 'a\tb'\n"  # an actual tab character inside the line
+            "          \techo \"uses: actions/checkout@v4\"\n"  # spaces, then an actual tab, then text
+            "          \t\n"  # a line holding only a tab
+            "          echo done\n"
+            f"      - uses: actions/checkout@{CHECKOUT}\n"
+        )
+        self.assertIn("\t", text)
+        violations, refs = cap.scan_workflow_text(text, "w.yml")
+        self.assertEqual(violations, [])
+        self.assertEqual([v for _l, v in refs], [f"actions/checkout@{CHECKOUT}"])
+        self.assertEqual(evaluate(text), [])
+
+    def test_tabs_after_spaces_in_a_full_line_comment_are_accepted(self):
+        text = wf(f"      # note\twith a tab\n      - uses: actions/checkout@{CHECKOUT}\n")
+        self.assertEqual(evaluate(text), [])
+
+    def test_a_uses_key_after_a_block_scalar_that_contains_tabs_is_still_scanned(self):
+        text = wf("      - run: |\n          echo\ta\n      - uses: actions/checkout@v4\n")
+        self.assertTrue(has(evaluate(text), "mutable ref"))
+
+
+class UnicodeSeparatorsAndControls(unittest.TestCase):
+    """Some YAML parsers treat U+0085, U+2028 and U+2029 as line breaks; GitHub's hosted parser behaviour is not established, so they are rejected everywhere
+    (comments and block scalars included), together with other control characters. Tabs, LF and CRLF stay legal."""
+
+    SEPARATORS = ("\x85", "\u2028", "\u2029")
+
+    def expect(self, text, needle):
+        msgs = structural(text)
+        self.assertTrue(any(needle in m for m in msgs), (needle, msgs))
+
+    def test_a_separator_that_would_start_a_hidden_step_is_rejected_in_every_position(self):
+        evil = "evil/action@v4"
+        for sep in self.SEPARATORS:
+            code = f"U+{ord(sep):04X}"
+            positions = {
+                "after a plain value": wf(f"      - name: x{sep}      - uses: {evil}\n"),
+                "after a run line": wf(f"      - run: echo hi{sep}      - uses: {evil}\n"),
+                "inside a comment": wf(f"      # c{sep}      - uses: {evil}\n      - run: echo\n"),
+                "inside block-scalar content": wf(f"      - run: |\n          echo a{sep}      - uses: {evil}\n"),
+                "inside a quoted value": wf(f"      - name: \"a{sep}b\"\n"),
+                "inside a key": wf(f"      - na{sep}me: x\n"),
+                "at the very end of the file": wf(f"      - run: echo\n") + sep,
+                "alone on a line": wf(f"      - run: echo\n{sep}\n      - uses: {evil}\n"),
+            }
+            for label, text in positions.items():
+                self.expect(text, code)
+
+    def test_the_diagnostic_reports_the_line_where_the_separator_is(self):
+        text = wf("      - run: echo\n      - name: x\u2028      - uses: evil/action@v4\n")
+        violations, _ = cap.scan_workflow_text(text, "w.yml")
+        hits = [v for v in violations if "U+2028" in v.message]
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0].line, text.split("\n").index("      - name: x\u2028      - uses: evil/action@v4") + 1)
+
+    def test_other_control_characters_are_rejected_but_tab_lf_and_crlf_are_not(self):
+        for ch in ("\x00", "\x01", "\x08", "\x0b", "\x0c", "\x0e", "\x1b", "\x1f", "\x7f", "\x80", "\x9b", "\x9f"):
+            self.expect(wf(f"      - run: echo{ch}hi\n"), f"U+{ord(ch):04X}")
+        ok = wf(f"      - run: |\n          echo\ta\n      - uses: actions/checkout@{CHECKOUT}\n")
+        self.assertEqual(structural(ok), [])
+        self.assertEqual(structural(ok.replace("\n", "\r\n")), [])
+
+    def test_legitimate_non_ascii_text_is_not_mistaken_for_a_separator(self):
+        # non-ASCII letters that are legitimate content (for example in the license script) must not be mistaken for separators
+        self.assertEqual(structural(wf("      - name: Eren Tahiro\u011flu\n        run: echo \xe7\u015f\u0131\n")), [])
+
+    def test_diagnostics_are_printable_ascii_and_survive_a_restrictive_output_encoding(self):
+        self.assertTrue(cap.Violation("f\u0430.yml", 3, "x\u2028y\u0430\x00z").render().isascii())
+        self.assertIn("\\u2028", cap.Violation("f.yml", 1, "a\u2028b").render())
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_repo(pathlib.Path(tmp))
+            body = wf("      - uses: \u0430ctions/checkout@" + CHECKOUT + "\n      - name: x\u2028y\n")  # Cyrillic lookalike identity and a separator
+            (root / ".github" / "workflows" / "extra.yml").write_text(body, encoding="utf-8")
+            import os
+
+            env = dict(os.environ, PYTHONIOENCODING="cp1254")
+            r = subprocess.run([sys.executable, str(TOOL), "--root", str(root)], capture_output=True, env=env)
+            self.assertEqual(r.returncode, 1, r.stderr.decode("ascii", "replace"))
+            self.assertNotIn(b"Traceback", r.stderr)
+            out = r.stdout.decode("ascii")  # raises if any non-ASCII byte was emitted
+            self.assertIn("\\u0430", out)
+            self.assertIn("U+2028", out)
+            self.assertRegex(out, r"extra\.yml:\d+: ")
 
 
 def make_repo(tmp: pathlib.Path) -> pathlib.Path:
@@ -320,6 +471,11 @@ class InventoryAndConfiguration(unittest.TestCase):
             "extra key": {**base, "extra": 1},
             "missing key": {"schema_version": 1, "approved_actions": {"a/b": "0" * 40}},
             "wrong version": {**base, "schema_version": 2},
+            "boolean true instead of 1": {**base, "schema_version": True},
+            "float 1.0 instead of 1": {**base, "schema_version": 1.0},
+            "string '1' instead of 1": {**base, "schema_version": "1"},
+            "null schema_version": {**base, "schema_version": None},
+            "list schema_version": {**base, "schema_version": [1]},
             "no required workflows": {**base, "required_workflows": []},
             "duplicate required": {**base, "required_workflows": ["ci.yml", "ci.yml"]},
             "required with directory": {**base, "required_workflows": ["x/ci.yml"]},
