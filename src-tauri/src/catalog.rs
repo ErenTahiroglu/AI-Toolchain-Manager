@@ -1059,7 +1059,7 @@ mod tests {
             add_entry(&conn, "https://github.com/vercel-labs/Agent-Browser", "executable_tool", "").unwrap_err().code,
             "ENTRY_DUPLICATE"
         );
-        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 24);
+        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 25);
         let preview = preview_url(&conn, "https://github.com/acme/WIDGET").unwrap();
         assert!(!preview.ok && preview.duplicate_of.is_some());
     }
