@@ -1,7 +1,8 @@
 //! ATM-GOV-02 P2A: adding the ECE dependency must not change ANY existing ATM JSON contract.
 //!
-//! The expected values below were produced by the BASELINE build (dd37b04, before ECE was a dependency) and are written out as
-//! literals. They fail if a dependency, or a feature a dependency switches on, changes how ATM's own JSON text is produced.
+//! The first 23 expected values below were produced by the BASELINE build (dd37b04, before ECE was a dependency) and are written out as
+//! literals. The 24th (CATALOG-05, `heydamir-unslop`) was NOT in that baseline: it was computed later, when the record was introduced, and is
+//! pinned the same way so that it is protected from now on. They fail if a dependency, or a feature a dependency switches on, changes how ATM's own JSON text is produced.
 //! The case that motivated them: ECE-LIB-01 switched `serde_json/preserve_order` on for every consumer; ATM's startup
 //! `catalog::seed_all` compares stored `record_json` TEXT with freshly serialized text, so all 23 seed rows would have been
 //! rewritten at the first start after an upgrade. ECE-LIB-02 moved that behind a feature that `default-features = false` leaves off.
@@ -16,8 +17,9 @@ fn sha256_hex(text: &str) -> String {
     Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// (data file, toolId, SHA-256 of `record.to_string()`), computed on the baseline build.
-const SEED_RECORD_TEXT_SHA256: [(&str, &str, &str); 23] = [
+/// (data file, toolId, SHA-256 of `record.to_string()`). The 23 rows before CATALOG-05 were computed on the historical baseline build; the
+/// CATALOG-05 row (last, data/catalog-candidates-c05.json) was computed when that record was added and was never part of that baseline.
+const SEED_RECORD_TEXT_SHA256: [(&str, &str, &str); 24] = [
     ("data/catalog-seed.json", "ponytail", "3b2b88196bde2b9795f4635a42e2b69841ae67d1c325d288d5672f428abbd8aa"),
     ("data/catalog-seed.json", "codebase-memory-mcp", "c862d3643793daf2e50aeeac224c6ec2ecac8687fd33ece1d0095752cc5cc1dd"),
     ("data/catalog-seed.json", "graphify", "c496966282d25e119e637b1ababef71c383b7302f1fd56f4376dbb9401aefe09"),
@@ -53,15 +55,18 @@ const SEED_RECORD_TEXT_SHA256: [(&str, &str, &str); 23] = [
         "google-elephant-goldfish-model",
         "8505637343ebbbc461dddd44531a03b288705d923b8846b52bdfc8d87a575e40",
     ),
+    // CATALOG-05: introduced after the baseline; not a historical value.
+    ("data/catalog-candidates-c05.json", "heydamir-unslop", "40719542eebe48f4d1191fe8ba947fb31f9627014df16651a2e2a8d25f21bfc8"),
 ];
 
-const SEED_FILES: [(&str, &str); 6] = [
+const SEED_FILES: [(&str, &str); 7] = [
     ("data/catalog-seed.json", include_str!("../../data/catalog-seed.json")),
     ("data/catalog-candidates-1b.json", include_str!("../../data/catalog-candidates-1b.json")),
     ("data/catalog-candidates-c01.json", include_str!("../../data/catalog-candidates-c01.json")),
     ("data/catalog-candidates-c02.json", include_str!("../../data/catalog-candidates-c02.json")),
     ("data/catalog-candidates-c03.json", include_str!("../../data/catalog-candidates-c03.json")),
     ("data/catalog-candidates-c04.json", include_str!("../../data/catalog-candidates-c04.json")),
+    ("data/catalog-candidates-c05.json", include_str!("../../data/catalog-candidates-c05.json")),
 ];
 
 #[test]
@@ -77,7 +82,7 @@ fn serde_json_objects_still_serialize_with_sorted_keys() {
 }
 
 #[test]
-fn all_23_seed_records_serialize_byte_identically_to_the_baseline() {
+fn all_seed_records_match_their_pinned_serialization_digests() {
     let mut seen = 0;
     for (file, raw) in SEED_FILES {
         let root: Value = serde_json::from_str(raw).unwrap();
@@ -92,7 +97,7 @@ fn all_23_seed_records_serialize_byte_identically_to_the_baseline() {
             seen += 1;
         }
     }
-    assert_eq!(seen, 23);
+    assert_eq!(seen, 24);
 }
 
 fn seeded() -> Connection {

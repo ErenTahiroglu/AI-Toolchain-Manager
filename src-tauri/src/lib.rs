@@ -26,6 +26,8 @@ mod catalog_c03_tests;
 #[cfg(test)]
 mod catalog_c04_tests;
 #[cfg(test)]
+mod catalog_c05_tests;
+#[cfg(test)]
 mod closure_tests;
 #[cfg(windows)]
 mod cng_verify;

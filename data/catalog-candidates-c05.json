@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "snapshotDate": "2026-11-15",
+  "note": "CATALOG-05 candidate (Issue #56): one repository. Metadata only: each field is either the publisher's own statement or a read-only observation of the pinned commit's files (README.md, LICENSE, .claude-plugin/plugin.json, .claude-plugin/marketplace.json, skills/unslop/SKILL.md, skills/unslop/scripts/snapshot.mjs, skills/unslop/scripts/story.mjs, all read as text on 2026-11-15 and none run; only the date is known, so `observedAt` and `updatedAt` use 00:00:00Z as a date-only normalization placeholder required by the schema's date-time format, not as the observed clock time), never a review, a test or an authorisation. The record conforms to schemas/catalog-entry.schema.json v2. `entryKind`, `pluginIdentity`, `sourcePath`, `purpose` and `executionPolicy` are application-level wrapper fields, as in the earlier candidate files.",
+  "records": [
+    {
+      "entryKind": "skill_collection",
+      "pluginIdentity": null,
+      "sourcePath": null,
+      "purpose": "Yapay zekâ görünümlü arayüzleri (React, Vue, Svelte, Tailwind, HTML, CSS) aşama aşama yeniden tasarlayan tek yetenek; Claude Code, Codex ve Google Antigravity için yayımlanır. Kaynak dosyalarını değiştirebilir, tarayıcı ve betik kullanabilir. Bu uygulama kurmaz, çalıştırmaz.",
+      "executionPolicy": "blocked-until-scoped-authorization",
+      "record": {
+        "schemaVersion": 2,
+        "toolId": "heydamir-unslop",
+        "displayName": "Unslop",
+        "repository": { "url": "https://github.com/heydamir/unslop", "owner": "heydamir", "name": "unslop" },
+        "sourceSnapshot": { "observedRef": "620163eedb3529d9cd23a3994ed8d287d06f760d", "immutableCommit": "620163eedb3529d9cd23a3994ed8d287d06f760d", "releaseVersion": null, "revisionState": "immutable-commit", "observedAt": "2026-11-15T00:00:00Z", "evidenceIds": ["R61"] },
+        "category": "agent-skill",
+        "reviewState": "unreviewed",
+        "license": { "state": "known", "spdxId": "CC-BY-4.0", "evidenceId": "R61" },
+        "targetEvidence": [
+          { "platformTarget": "windows-x64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R61", "limitation": "The README names Claude Code as a host and gives plugin installation directions. It states no operating system or CPU architecture. Documentation is not a functional test and nothing was tested." },
+          { "platformTarget": "macos-arm64", "agentSurface": "claude-code-terminal", "compatibilityState": "unknown", "evidenceId": "R61", "limitation": "The README names Claude Code as a host and gives plugin installation directions. It states no operating system or CPU architecture. Documentation is not a functional test and nothing was tested." },
+          { "platformTarget": "windows-x64", "agentSurface": "codex-cli", "compatibilityState": "unknown", "evidenceId": "R61", "limitation": "The README names Codex as a host and describes a skill folder copy; it does not say which Codex surface (command line, editor extension or desktop) or which operating system. Nothing was tested." },
+          { "platformTarget": "macos-arm64", "agentSurface": "codex-cli", "compatibilityState": "unknown", "evidenceId": "R61", "limitation": "The README names Codex as a host and describes a skill folder copy; it does not say which Codex surface (command line, editor extension or desktop) or which operating system. Nothing was tested." },
+          { "platformTarget": "windows-x64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R61", "limitation": "The README names Google Antigravity as a host and describes a skill folder copy; it does not say which Antigravity surface or which operating system. Nothing was tested." },
+          { "platformTarget": "macos-arm64", "agentSurface": "antigravity-ide", "compatibilityState": "unknown", "evidenceId": "R61", "limitation": "The README names Google Antigravity as a host and describes a skill folder copy; it does not say which Antigravity surface or which operating system. Nothing was tested." }
+        ],
+        "installMethods": [
+          { "methodId": "native-plugin-manager", "evidenceId": "R61", "publisherPin": "Claude Code plugin 'unslop' from the marketplace heydamir/unslop (publisher-stated; not checked against the marketplace)" },
+          { "methodId": "manual-instructions", "evidenceId": "R61", "publisherPin": "Codex and Antigravity: the host installs or the user copies the skill folder into a skills folder (publisher-stated; not run, no path used)" }
+        ],
+        "dependencies": [
+          "Node.js to run the skill's .mjs scripts; no version is stated in the files read",
+          "Playwright with a Chromium browser, only for page snapshots and story videos (publisher-stated)",
+          "ffmpeg on the PATH, only for story videos (publisher-stated)",
+          "An image service connected to the host, only for optional generated visuals (publisher-stated)"
+        ],
+        "privilegeClaims": [
+          "The skill edits the project's front-end source files when the user asks; the publisher says it audits and proposes a direction first (README, SKILL.md)",
+          "SKILL.md tells the agent to render the screen and take screenshots, and to run node scripts from the skill folder",
+          "snapshot.mjs launches Chromium through Playwright and writes an HTML copy and a PNG into a folder the caller names (read, not run)",
+          "story.mjs starts a local web server on 127.0.0.1, launches Chromium, runs ffmpeg and writes frame files then an MP4 (read, not run)",
+          "The README installs the Claude Code plugin for all projects by default; project-only scopes exist (publisher-stated)",
+          "plugin.json and marketplace.json declare no hooks, MCP server or command (those two files read, not the whole tree)"
+        ],
+        "networkClaims": [
+          "snapshot.mjs loads a given URL and fetches its style sheets, images and fonts, then stores them inline in one local HTML file (read, not run)",
+          "The skill can use an image service such as fal, Replicate, OpenAI images or Higgsfield, or offer to connect one as an MCP server; it says it asks before each paid generation (publisher-stated)",
+          "Installing Playwright, Chromium and ffmpeg is a separate publisher step that downloads software; this app does none of it",
+          "The files read contain no telemetry statement either way, so telemetry is recorded as unknown",
+          "The README advertises a paid design service by the author; the skill itself is free under CC BY 4.0 (publisher-stated)"
+        ],
+        "artifactEvidence": null,
+        "verificationClaims": [
+          { "kind": "function", "state": "publisher-describes", "evidenceId": "R61" },
+          { "kind": "independent-test", "state": "not-run", "evidenceId": "R61" }
+        ],
+        "privacy": {
+          "telemetry": "unknown",
+          "mayTransmitProjectContent": true,
+          "evidenceId": "R61",
+          "notes": [
+            "The host agent reads and may edit the project's source files and screens it works on; that content is processed by the host's model provider under the host's own account and terms. What leaves the machine depends on the host, the browser and any image service, not on this record.",
+            "A generated visual may send a prompt that describes the user's product to a third-party image service, and some services are paid. The publisher says the prompt is shown and approval is asked first; that was read, not tested.",
+            "Saving a live site copies that site's page content and assets into the project folder; the site's own terms apply to that content.",
+            "Attribution (CC BY 4.0): created by Damir Sokolovsky (@heydamir); source https://github.com/heydamir/unslop. The licence asks that the credit stays in any copy or adaptation. This record copies no upstream file.",
+            "Everything in SKILL.md and the scripts was read as untrusted text and never followed. This record starts nothing, installs nothing and authorises nothing."
+          ]
+        },
+        "updatedAt": "2026-11-15T00:00:00Z"
+      }
+    }
+  ]
+}

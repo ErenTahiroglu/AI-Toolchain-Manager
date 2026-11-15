@@ -24,14 +24,17 @@ const CATALOG02_JSON: &str = include_str!("../../data/catalog-candidates-c02.jso
 const CATALOG03_JSON: &str = include_str!("../../data/catalog-candidates-c03.json");
 /// CATALOG-04 candidate (one entry: the Elephant-Goldfish Model, metadata only) — an additive file in the same wrapper shape; the files above are untouched.
 const CATALOG04_JSON: &str = include_str!("../../data/catalog-candidates-c04.json");
+/// CATALOG-05 candidate (one entry, Issue #56: Unslop, metadata only, blocked-until-scoped-authorization) — an additive file in the same wrapper shape; the files above are untouched.
+const CATALOG05_JSON: &str = include_str!("../../data/catalog-candidates-c05.json");
 pub const PHASE0_TOOL_COUNT: usize = 9;
 pub const CANDIDATE_COUNT: usize = 4;
 pub const CATALOG01_COUNT: usize = 3;
 pub const CATALOG02_COUNT: usize = 2;
 pub const CATALOG03_COUNT: usize = 4;
 pub const CATALOG04_COUNT: usize = 1;
+pub const CATALOG05_COUNT: usize = 1;
 pub const SEED_ENTRY_COUNT: usize =
-    PHASE0_TOOL_COUNT + CANDIDATE_COUNT + CATALOG01_COUNT + CATALOG02_COUNT + CATALOG03_COUNT + CATALOG04_COUNT;
+    PHASE0_TOOL_COUNT + CANDIDATE_COUNT + CATALOG01_COUNT + CATALOG02_COUNT + CATALOG03_COUNT + CATALOG04_COUNT + CATALOG05_COUNT;
 
 pub const KINDS: &[&str] = &["executable_tool", "agent_plugin", "skill_collection", "prompt_source"];
 const EXECUTION_POLICIES: &[&str] = &["manual-only", "blocked-until-scoped-authorization"];
@@ -222,6 +225,10 @@ fn catalog04_seed_entries() -> AppResult<Vec<SeedEntry>> {
     wrapped_seed_entries(CATALOG04_JSON, CATALOG04_COUNT, "bir aday bekleniyordu")
 }
 
+fn catalog05_seed_entries() -> AppResult<Vec<SeedEntry>> {
+    wrapped_seed_entries(CATALOG05_JSON, CATALOG05_COUNT, "bir aday bekleniyordu")
+}
+
 /// Rewrites only the displayed purpose of entries that come from EARLIER data files, so those files can stay byte-identical. A refinement for an
 /// unknown id, an empty text or one over the purpose cap is a build-time data error, not something to guess around.
 fn apply_purpose_refinements(all: &mut [SeedEntry]) -> AppResult<()> {
@@ -274,6 +281,7 @@ fn all_seed_entries() -> AppResult<Vec<SeedEntry>> {
     all.extend(catalog02_seed_entries()?);
     all.extend(catalog03_seed_entries()?);
     all.extend(catalog04_seed_entries()?);
+    all.extend(catalog05_seed_entries()?);
     apply_purpose_refinements(&mut all)?;
     let mut ids = std::collections::BTreeSet::new();
     let mut keys = std::collections::BTreeSet::new();
@@ -993,14 +1001,14 @@ mod tests {
             )
         };
         let first = snapshot(&conn);
-        assert_eq!(first, (23, 3, 6, 3, 6)); // 9 Phase 0 + 4 Phase 1B + 3 CATALOG-01 + 2 CATALOG-02 + 4 CATALOG-03 + 1 CATALOG-04
+        assert_eq!(first, (24, 3, 6, 3, 6)); // 9 Phase 0 + 4 Phase 1B + 3 CATALOG-01 + 2 CATALOG-02 + 4 CATALOG-03 + 1 CATALOG-04 + 1 CATALOG-05
         set_enabled(&conn, "agent-browser", false).unwrap();
         remove_entry(&conn, "gitleaks").unwrap();
         // The user resets a demonstration decision; a restart must not bring it back.
         conn.execute("DELETE FROM project_preferences WHERE entry_id = 'graphify'", []).unwrap();
         seed_all(&conn).unwrap();
         seed_all(&conn).unwrap();
-        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 23);
+        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 24);
         assert_eq!(count(&conn, "SELECT count(*) FROM project_preferences"), 5);
         assert!(!get_entry(&conn, "agent-browser").unwrap().enabled);
         assert!(get_entry(&conn, "gitleaks").unwrap().removed_at.is_some());
@@ -1076,7 +1084,7 @@ mod tests {
             assert!(add_entry(&conn, bad, "executable_tool", "").is_err(), "accepted {bad}");
             assert!(!preview_url(&conn, bad).unwrap().ok, "preview ok for {bad}");
         }
-        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 23);
+        assert_eq!(count(&conn, "SELECT count(*) FROM catalog_entries"), 24);
         assert_eq!(add_entry(&conn, "https://github.com/acme/widget", "everything", "").unwrap_err().code, "KIND_INVALID");
     }
 

@@ -8,6 +8,7 @@ use serde_json::Value;
 
 const C03: [&str; 4] = ["egonex-ai-understand-anything", "thedotmack-claude-mem", "multica-ai-andrej-karpathy-skills", "ruvnet-ruflo"];
 const C04: [&str; 1] = ["google-elephant-goldfish-model"];
+const C05: [&str; 1] = ["heydamir-unslop"];
 const EARLIER: [&str; 18] = [
     "ponytail",
     "codebase-memory-mcp",
@@ -69,19 +70,19 @@ fn taken(conn: &Connection, id: &str) -> i64 {
 }
 
 #[test]
-fn a_fresh_database_has_the_twenty_two_earlier_entries_plus_exactly_the_egm_entry() {
+fn a_fresh_database_has_the_twenty_three_earlier_entries_plus_exactly_the_unslop_entry_and_still_the_egm_entry() {
     let conn = seeded();
     let all = catalog::list_catalog(&conn).unwrap();
-    assert_eq!(SEED_ENTRY_COUNT, 23, "9 Phase 0 + 4 Phase 1B + 3 CATALOG-01 + 2 CATALOG-02 + 4 CATALOG-03 + 1 CATALOG-04");
-    assert_eq!(all.len(), 23, "count(*) of all rows");
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries WHERE origin = 'seed'"), 23, "count(*) of the seed rows");
+    assert_eq!(SEED_ENTRY_COUNT, 24, "9 Phase 0 + 4 Phase 1B + 3 CATALOG-01 + 2 CATALOG-02 + 4 CATALOG-03 + 1 CATALOG-04 + 1 CATALOG-05");
+    assert_eq!(all.len(), 24, "count(*) of all rows");
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries WHERE origin = 'seed'"), 24, "count(*) of the seed rows");
     let mut ids: Vec<&str> = all.iter().map(|e| e.entry_id.as_str()).collect();
     ids.sort_unstable();
-    let mut expected: Vec<&str> = EARLIER.iter().chain(C03.iter()).chain(C04.iter()).copied().collect();
+    let mut expected: Vec<&str> = EARLIER.iter().chain(C03.iter()).chain(C04.iter()).chain(C05.iter()).copied().collect();
     expected.sort_unstable();
     assert_eq!(ids, expected);
     let keys: std::collections::BTreeSet<&str> = all.iter().map(|e| e.source_key.as_str()).collect();
-    assert_eq!(keys.len(), 23, "no duplicate source key");
+    assert_eq!(keys.len(), 24, "no duplicate source key");
     assert_eq!(health(&conn), "passed");
 }
 
@@ -134,7 +135,7 @@ fn upgrading_a_twenty_two_entry_database_adds_exactly_the_egm_row_and_keeps_ever
     let conn = seeded();
     // the state of a database seeded by CATALOG-03: the EGM row is not there yet
     conn.execute_batch("DELETE FROM catalog_entries WHERE entry_id = 'google-elephant-goldfish-model'").unwrap();
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 22);
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 23);
     catalog::set_enabled(&conn, "agent-browser", false).unwrap();
     catalog::remove_entry(&conn, "gitleaks").unwrap();
     crate::projects::add_reference(&conn, "proje", "Proje", "").unwrap();
@@ -147,7 +148,7 @@ fn upgrading_a_twenty_two_entry_database_adds_exactly_the_egm_row_and_keeps_ever
     catalog::seed_all(&conn).unwrap();
     catalog::seed_all(&conn).unwrap();
 
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 23, "count(*) of all rows");
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 24, "count(*) of all rows");
     let egm = entry(&conn, "google-elephant-goldfish-model");
     assert_eq!((egm.origin.as_str(), egm.enabled, egm.removed_at.is_none()), ("seed", true, true));
     assert_eq!(n(&conn, "SELECT count(*) FROM project_preferences"), prefs);
@@ -167,8 +168,8 @@ fn an_egm_link_the_user_added_earlier_wins_and_is_never_duplicated() {
     catalog::seed_all(&conn).unwrap();
     catalog::seed_all(&conn).unwrap();
 
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 23, "count(*) of all rows");
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries WHERE origin = 'seed'"), 22, "count(*) of the seed rows");
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 24, "count(*) of all rows");
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries WHERE origin = 'seed'"), 23, "count(*) of the seed rows");
     let e = entry(&conn, "google-elephant-goldfish-model");
     assert_eq!((e.origin.as_str(), e.revision.as_str(), e.purpose.as_str()), ("user", "user-added", "benim notum"));
     assert_eq!(e.record["userAdded"], Value::Bool(true));
@@ -202,7 +203,7 @@ fn an_egm_link_added_after_the_seed_is_refused_or_restores_the_removed_seed() {
         "https://github.com/google/elephant-goldfish-model/",
     ] {
         assert_eq!(catalog::add_entry(&conn, link, "agent_plugin", "").unwrap_err().code, "ENTRY_DUPLICATE", "{link}");
-        assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 23, "count(*) of all rows after {link}");
+        assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 24, "count(*) of all rows after {link}");
     }
     catalog::remove_entry(&conn, "google-elephant-goldfish-model").unwrap();
     let restored = catalog::add_entry(&conn, EGM_LINK, "agent_plugin", "").unwrap();

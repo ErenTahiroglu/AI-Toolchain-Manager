@@ -111,6 +111,60 @@ function ExecutionNote({ entryId }: { entryId: string }) {
   return <UnavailableButton label="Kur / çalıştır" reason={block?.message ?? "Faz 1B'de araç kurulumu ve çalıştırma yoktur."} />;
 }
 
+/** Untrusted record text: keep only real, non-empty strings; they are rendered as plain React text nodes and never as markup, links or actions. */
+const textList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim() !== "") : []);
+
+const TELEMETRY_UNKNOWN = "bilinmiyor (kayıt bir şey belirtmiyor)";
+// A Map has no inherited keys ("__proto__", "constructor", "toString" ... are simply absent), so a lookup can only return one of these four strings.
+const TELEMETRY_LABEL: ReadonlyMap<string, string> = new Map([
+  ["unknown", TELEMETRY_UNKNOWN],
+  ["none-declared", "yayıncı telemetri beyan etmiyor"],
+  ["opt-in", "yayıncıya göre isteğe bağlı (açık onayla)"],
+  ["opt-out", "yayıncıya göre varsayılan olarak açık"],
+]);
+/** Record metadata is untrusted at run time whatever the type says: only a string that is one of the four enum values gets its own label; everything else is "unknown". */
+const telemetryLabel = (v: unknown): string => (typeof v === "string" ? TELEMETRY_LABEL.get(v) ?? TELEMETRY_UNKNOWN : TELEMETRY_UNKNOWN);
+
+/** Passive display of what the record's publisher-stated fields say. Showing it starts, installs and contacts nothing. Generic: no entry is named here. */
+function RiskDisclosure({ record }: { record: CatalogEntry["record"] }) {
+  const privileges = textList(record.privilegeClaims);
+  const network = textList(record.networkClaims);
+  const deps = textList(record.dependencies);
+  const privacy: unknown = record.privacy;
+  const privacyObj = privacy !== null && typeof privacy === "object" && !Array.isArray(privacy) ? (privacy as Record<string, unknown>) : undefined;
+  const notes = textList(privacyObj?.notes);
+  const telemetryRaw = privacyObj && Object.prototype.hasOwnProperty.call(privacyObj, "telemetry") ? privacyObj.telemetry : undefined;
+  const transmit = privacyObj && Object.prototype.hasOwnProperty.call(privacyObj, "mayTransmitProjectContent") ? privacyObj.mayTransmitProjectContent : undefined;
+  if (!privileges.length && !network.length && !notes.length && !deps.length && telemetryRaw === undefined && transmit === undefined) return null;
+  const groups: { title: string; items: string[] }[] = [
+    { title: "Yetkiler: dosya, süreç ve tarayıcı davranışı", items: privileges },
+    { title: "Ağ erişimi ve dış hizmetler", items: network },
+    { title: "Gizlilik ve proje içeriğinin iletilmesi", items: notes },
+    { title: "Gerekli yan araçlar (bu uygulama kurmaz)", items: deps },
+  ].filter((g) => g.items.length > 0);
+  return (
+    <div className="risk-disclosure">
+      <h3>Güvenlik ve gizlilik açıklamaları</h3>
+      <p className="small">
+        <strong>Telemetri:</strong> {telemetryLabel(telemetryRaw)}.{" "}
+        <strong>Proje içeriği iletilebilir mi:</strong> {transmit === true ? "evet, olabilir" : transmit === false ? "hayır (yayıncı beyanı)" : "bilinmiyor"}.
+      </p>
+      <p className="small">Bu güvenlik bilgileri aracın olası kullanım risklerini açıklar. Katalog kaydını görüntülemek kurulum veya çalıştırma başlatmaz. Mevcut kurulum durumunu Kurulum bölümünden kontrol edin.</p>
+      {groups.length > 0 && (
+        <details>
+          <summary>Yetki, ağ ve gizlilik ayrıntıları ({groups.reduce((n, g) => n + g.items.length, 0)})</summary>
+          {groups.map((g) => (
+            <section key={g.title} aria-label={g.title}>
+              <h4>{g.title}</h4>
+              <ul className="small">{g.items.map((t, i) => <li key={`${i}-${t}`}>{t}</li>)}</ul>
+            </section>
+          ))}
+        </details>
+      )}
+    </div>
+  );
+}
+
 function EntryCard({ entry, onChanged, install, onInstallChanged }: { entry: CatalogEntry; onChanged: () => void; install?: ToolState; onInstallChanged: () => void }) {
   const [error, setError] = useState<AppError | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -152,6 +206,7 @@ function EntryCard({ entry, onChanged, install, onInstallChanged }: { entry: Cat
         <dt>Çalıştırma ilkesi</dt><dd>{policyLabel(entry.executionPolicy)}</dd>
         {entry.kind === "skill_collection" && (<><dt>Yetenek dizini</dt><dd>{entry.skillCount === 0 ? "Boş: henüz içe aktarılmadı (hiçbir yetenek kurulmaz)" : `${entry.skillCount} yetenek (yalnızca kimlik ve kaynak bilgisi)`}</dd></>)}
       </dl>
+      <RiskDisclosure record={entry.record} />
       <details>
         <summary>Sınırlamalar ve bilinmeyenler ({entry.limitations.length})</summary>
         <ul className="small">{entry.limitations.map((l) => <li key={l}>{l}</li>)}</ul>

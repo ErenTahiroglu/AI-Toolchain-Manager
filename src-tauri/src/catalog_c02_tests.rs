@@ -12,6 +12,7 @@ const C02: [&str; 2] = ["microsoft-playwright-cli", "microsoft-playwright-mcp"];
 const C03: [&str; 4] = ["egonex-ai-understand-anything", "thedotmack-claude-mem", "multica-ai-andrej-karpathy-skills", "ruvnet-ruflo"];
 /// CATALOG-04: part of every full-catalog expectation below.
 const C04: [&str; 1] = ["google-elephant-goldfish-model"];
+const C05: [&str; 1] = ["heydamir-unslop"];
 const SIXTEEN: [&str; 16] = [
     "ponytail",
     "codebase-memory-mcp",
@@ -76,14 +77,15 @@ fn state(conn: &Connection) -> Vec<(String, String, String, String, bool, bool)>
 #[test]
 fn a_fresh_database_has_the_sixteen_earlier_entries_plus_exactly_the_two_siblings() {
     let conn = seeded();
-    assert_eq!(SEED_ENTRY_COUNT, 23, "9 Phase 0 + 4 Phase 1B + 3 CATALOG-01 + 2 CATALOG-02 + 4 CATALOG-03 + 1 CATALOG-04");
+    assert_eq!(SEED_ENTRY_COUNT, 24, "9 Phase 0 + 4 Phase 1B + 3 CATALOG-01 + 2 CATALOG-02 + 4 CATALOG-03 + 1 CATALOG-04 + 1 CATALOG-05");
     let mut ids: Vec<String> = catalog::list_catalog(&conn).unwrap().into_iter().map(|e| e.entry_id).collect();
     ids.sort();
-    let mut expected: Vec<String> = SIXTEEN.iter().chain(C02.iter()).chain(C03.iter()).chain(C04.iter()).map(|s| s.to_string()).collect();
+    let mut expected: Vec<String> =
+        SIXTEEN.iter().chain(C02.iter()).chain(C03.iter()).chain(C04.iter()).chain(C05.iter()).map(|s| s.to_string()).collect();
     expected.sort();
     assert_eq!(ids, expected);
     let keys: std::collections::BTreeSet<String> = catalog::list_catalog(&conn).unwrap().into_iter().map(|e| e.source_key).collect();
-    assert_eq!(keys.len(), 23, "no duplicate source key");
+    assert_eq!(keys.len(), 24, "no duplicate source key");
     assert_eq!(health(&conn), "passed");
 }
 
@@ -355,7 +357,7 @@ fn upgrading_a_sixteen_entry_database_adds_exactly_the_two_and_keeps_every_choic
         "DELETE FROM catalog_entries WHERE entry_id IN ('microsoft-playwright-cli','microsoft-playwright-mcp','egonex-ai-understand-anything','thedotmack-claude-mem','multica-ai-andrej-karpathy-skills','ruvnet-ruflo')",
     )
     .unwrap();
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 17);
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 18);
     catalog::set_enabled(&conn, "exa-mcp-server", false).unwrap();
     catalog::remove_entry(&conn, "apify-mcp-server").unwrap();
     crate::projects::add_reference(&conn, "proje", "Proje", "").unwrap();
@@ -369,7 +371,7 @@ fn upgrading_a_sixteen_entry_database_adds_exactly_the_two_and_keeps_every_choic
     catalog::seed_all(&conn).unwrap();
     catalog::seed_all(&conn).unwrap();
 
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 23);
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 24);
     assert_eq!(n(&conn, "SELECT count(*) FROM project_preferences"), prefs);
     assert_eq!(n(&conn, "SELECT count(*) FROM preference_history"), history);
     assert_eq!(n(&conn, "SELECT coalesce(max(sequence), 0) FROM audit_events"), audit, "seeding writes no audit event");
@@ -399,7 +401,7 @@ fn repeat_seeding_is_idempotent_and_never_resurrects_a_removed_or_disabled_sibli
     catalog::seed_all(&conn).unwrap();
     assert!(!entry(&conn, "microsoft-playwright-cli").enabled);
     assert!(entry(&conn, "microsoft-playwright-mcp").removed_at.is_some());
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 23);
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 24);
     assert_eq!(health(&conn), "passed");
 }
 
@@ -423,8 +425,8 @@ fn user_added_links_to_the_siblings_win_are_reported_and_never_duplicated_or_ref
     catalog::seed_all(&conn).unwrap();
     catalog::seed_all(&conn).unwrap();
 
-    // 13 earlier + Apify + Exa + the EGM seed + the three user rows; the three colliding seeds were not inserted
-    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 23);
+    // 13 earlier + Apify + Exa + the EGM and Unslop seeds + the three user rows; the three colliding seeds were not inserted
+    assert_eq!(n(&conn, "SELECT count(*) FROM catalog_entries"), 24);
     for source in ["microsoft/playwright", "microsoft/playwright-cli", "microsoft/playwright-mcp"] {
         assert_eq!(n(&conn, &format!("SELECT count(*) FROM catalog_entries WHERE source_key = '{source}'")), 1, "{source}");
     }

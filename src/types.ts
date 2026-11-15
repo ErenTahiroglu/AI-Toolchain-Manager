@@ -71,6 +71,7 @@ export interface ToolRecord {
   installMethods?: { methodId: string; publisherPin: string | null }[];
   privacy?: { telemetry?: string; mayTransmitProjectContent?: boolean | null; notes?: string[] };
   networkClaims?: string[];
+  privilegeClaims?: string[];
   dependencies?: string[];
 }
 
