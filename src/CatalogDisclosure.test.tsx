@@ -1,7 +1,7 @@
 // CATALOG-UNSLOP-01 R1 - the Catalog card must SHOW the security and privacy statements that a record carries (privilegeClaims, networkClaims,
 // privacy.notes, privacy.telemetry), not only keep them in metadata. The fixture is the REAL CATALOG-05 record read from the data file (no
 // hand-written warning text), mocked IPC and jsdom only: no real window, no real database, nothing installed, fetched or run.
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import candidateSource from "../data/catalog-candidates-c05.json?raw";
@@ -69,6 +69,8 @@ describe("default state: a visible heading and summary, details still folded", (
 
   it("describes passive viewing, not an installation history", async () => {
     const c = await card(unslop());
+    // the pointer sentence appears together with the install panel (it needs the installation state), so wait for the panel, not for luck
+    await waitFor(() => expect(c.getByRole("group", { name: `Kurulum: ${rec.toolId}` })).toBeInTheDocument());
     const box = c.getByRole("heading", { level: 3, name: HEADING }).parentElement as HTMLElement;
     expect(within(box).getByText(PASSIVE)).toBeInTheDocument();
     expect(within(box).queryByText(DENIAL)).toBeNull();
@@ -227,6 +229,7 @@ describe("R2 P2-B: telemetry lookup is safe for every inherited-property key and
     ['"bilinmeyen-değer"'], ['""'], ['"UNKNOWN"'], ["null"], ["42"], ["true"], ["[]"], ['["opt-in"]'], ["{}"], ['{"unknown":1}'], ['{"__proto__":{}}'],
   ])("telemetry %s: the page keeps rendering, the disclosure stays and the label is the unknown label", async (json) => {
     const c = await card(unslop(withTelemetry(json)));
+    await waitFor(() => expect(c.getByRole("group", { name: `Kurulum: ${rec.toolId}` })).toBeInTheDocument());
     const box = c.getByRole("heading", { level: 3, name: HEADING }).parentElement as HTMLElement;
     expect(within(box).getByText("Telemetri:").parentElement).toHaveTextContent(`Telemetri: ${UNKNOWN_TELEMETRY}.`);
     expect(within(box).getByText(PASSIVE)).toBeInTheDocument();
@@ -252,5 +255,217 @@ describe("R2 P2-B: telemetry lookup is safe for every inherited-property key and
 
   it("the source has no object-literal label table that a key could index", () => {
     expect(catalogSource).not.toMatch(/TELEMETRY_LABEL\[/);
+  });
+});
+
+// CATALOG-UX-P3 (#57): the pointer to the "Kurulum" section must exist exactly when that section is on the card.
+// `entry.removedAt !== null` = the CATALOG ENTRY was removed (the install panel is not rendered); `install.status === "removed"` = an INSTALLATION
+// was removed (the entry is still live and its install panel is shown). The two must never be confused.
+describe("#57: the installation pointer follows the installation panel", () => {
+  const GUIDE = "Mevcut kurulum durumunu Kurulum bölümünden kontrol edin.";
+  const PASSIVE_CORE = "Bu güvenlik bilgileri aracın olası kullanım risklerini açıklar. Katalog kaydını görüntülemek kurulum veya çalıştırma başlatmaz.";
+  const REMOVED_AT = "2026-11-01T10:00:00Z";
+  const disclosureOf = (c: ReturnType<typeof within>) => c.getByRole("heading", { level: 3, name: HEADING }).parentElement as HTMLElement;
+  const installPanel = (c: ReturnType<typeof within>) => c.queryByRole("group", { name: `Kurulum: ${rec.toolId}` });
+  /** the fixture entry rendered under the "removed entries" section, as the page really does it */
+  const removedCard = async (over: Partial<CatalogEntry> = {}) => {
+    backend.entries = [unslop(rec, { removedAt: REMOVED_AT, enabled: false, ...over })];
+    render(<CatalogPage />);
+    const section = (await screen.findByRole("heading", { level: 2, name: /Katalogdan kaldırılanlar \(1\)/ })).closest("section") as HTMLElement;
+    return within(within(section).getByRole("heading", { level: 2, name: rec.displayName }).closest("section") as HTMLElement);
+  };
+  const expectDisclosureComplete = async (c: ReturnType<typeof within>) => {
+    const box = disclosureOf(c);
+    expect(within(box).getByText("Telemetri:").parentElement).toHaveTextContent(UNKNOWN_TELEMETRY);
+    expect(within(box).getByText("Proje içeriği iletilebilir mi:").parentElement).toHaveTextContent("evet, olabilir");
+    const summary = within(box).getByText(/Yetki, ağ ve gizlilik ayrıntıları/);
+    expect(summary.tagName).toBe("SUMMARY");
+    expect(summary.closest("details")).not.toHaveAttribute("open");
+    await userEvent.click(summary);
+    expect(summary.closest("details")).toHaveAttribute("open");
+    for (const g of ["Yetkiler: dosya, süreç ve tarayıcı davranışı", "Ağ erişimi ve dış hizmetler", "Gizlilik ve proje içeriğinin iletilmesi", "Gerekli yan araçlar (bu uygulama kurmaz)"]) {
+      expect(within(box).getByRole("region", { name: g })).toBeInTheDocument();
+    }
+    for (const text of [claim(rec.privilegeClaims, /edits the project's front-end source files/), claim(rec.privilegeClaims, /Chromium through Playwright/), claim(rec.privilegeClaims, /127\.0\.0\.1/), claim(rec.privilegeClaims, /ffmpeg/), claim(rec.networkClaims, /fetches its style sheets/), claim(rec.networkClaims, /paid generation/), claim(rec.privacy?.notes, /model provider/), ...(rec.dependencies ?? [])]) {
+      expect(within(box).getByText(text)).toBeInTheDocument();
+    }
+    expect(within(box).queryByText(DENIAL)).toBeNull();
+    expect(box.querySelectorAll("button, a, input, select, textarea, form, img, script, [onclick]").length).toBe(0);
+    expect(backend.calls.filter((x) => FORBIDDEN.includes(x.cmd))).toEqual([]);
+  };
+
+  it("A: a normal catalog card shows its install panel, the pointer to it, the passive statement and the full disclosure", async () => {
+    const c = await card(unslop());
+    await waitFor(() => expect(installPanel(c)).not.toBeNull());
+    expect(c.getByRole("heading", { level: 3, name: "Kurulum" })).toBeInTheDocument();
+    expect(within(disclosureOf(c)).getByText(PASSIVE)).toBeInTheDocument();
+    expect(disclosureOf(c)).toHaveTextContent(GUIDE);
+    expect(c.queryByText("Katalogdan kaldırıldı")).toBeNull();
+    await expectDisclosureComplete(c);
+  });
+
+  it("B: a removed catalog card sits under the removed section with no install panel, no pointer to one, and the full disclosure", async () => {
+    const c = await removedCard();
+    expect(c.getByText("Katalogdan kaldırıldı")).toBeInTheDocument();
+    expect(installPanel(c)).toBeNull();
+    expect(c.queryByRole("heading", { level: 3, name: "Kurulum" })).toBeNull();
+    const box = disclosureOf(c);
+    expect(within(box).getByText(PASSIVE_CORE)).toBeInTheDocument();
+    expect(box).not.toHaveTextContent("Kurulum bölümünden");
+    expect(box).not.toHaveTextContent(GUIDE);
+    expect(c.getByRole("button", { name: "Geri ekle (kapalı olarak)" })).toBeEnabled();
+    expect(c.queryByRole("checkbox", { name: /Katalogda etkin/ })).toBeNull();
+    await expectDisclosureComplete(c);
+  });
+
+  it("B2: the removed card says nothing about a Kurulum section even when an installation exists for the entry", async () => {
+    backend.install.states.set(rec.toolId, toolState(rec.toolId, "installed_verified"));
+    const c = await removedCard();
+    expect(installPanel(c)).toBeNull();
+    expect(disclosureOf(c)).not.toHaveTextContent("Kurulum bölümünden");
+    expect(within(disclosureOf(c)).getByText(PASSIVE_CORE)).toBeInTheDocument();
+  });
+
+  it("C: a live card with an installed_verified installation shows that status, its panel, the pointer and no denial", async () => {
+    backend.install.states.set(rec.toolId, toolState(rec.toolId, "installed_verified"));
+    const c = await card(unslop());
+    await waitFor(() => expect(c.getAllByText("Kurulu ve doğrulandı", { exact: false }).length).toBeGreaterThan(0));
+    expect(installPanel(c)).not.toBeNull();
+    expect(within(disclosureOf(c)).getByText(PASSIVE)).toBeInTheDocument();
+    expect(disclosureOf(c)).not.toHaveTextContent(DENIAL);
+    await expectDisclosureComplete(c);
+  });
+
+  it("D: an installation with status \"removed\" is not a removed catalog entry: the card stays live with its panel and its pointer", async () => {
+    backend.install.states.set(rec.toolId, toolState(rec.toolId, "removed"));
+    const entry = unslop();
+    expect(entry.removedAt).toBeNull();
+    const c = await card(entry);
+    await waitFor(() => expect(c.getAllByText("Kaldırıldı", { exact: false }).length).toBeGreaterThan(0));
+    expect(installPanel(c)).not.toBeNull();
+    expect(screen.queryByRole("heading", { level: 2, name: /Katalogdan kaldırılanlar/ })).toBeNull();
+    expect(c.queryByText("Katalogdan kaldırıldı")).toBeNull();
+    expect(c.getByRole("checkbox", { name: /Katalogda etkin/ })).toBeInTheDocument();
+    expect(within(disclosureOf(c)).getByText(PASSIVE)).toBeInTheDocument();
+    expect(disclosureOf(c)).toHaveTextContent(GUIDE);
+  });
+
+  it("E: changing only the catalog-removal flag changes nothing in the risk information, only the pointer sentence", async () => {
+    const live = await card(unslop());
+    await waitFor(() => expect(installPanel(live)).not.toBeNull());
+    const liveBox = disclosureOf(live);
+    await userEvent.click(within(liveBox).getByText(/Yetki, ağ ve gizlilik ayrıntıları/));
+    const liveText = (liveBox.textContent ?? "").replace(` ${GUIDE}`, "").replace(/\s+/g, " ").trim();
+    document.body.innerHTML = "";
+    const gone = await removedCard();
+    const goneBox = disclosureOf(gone);
+    await userEvent.click(within(goneBox).getByText(/Yetki, ağ ve gizlilik ayrıntıları/));
+    expect((goneBox.textContent ?? "").replace(/\s+/g, " ").trim()).toBe(liveText.replace(/\s+/g, " ").trim().replace(/\s{2,}/g, " "));
+  });
+});
+
+// CATALOG-UX-P3 R2: InstallPanel renders nothing without a state object, so the pointer needs `!removed && !!install`. An entry can be live and
+// still have no state: the list was read while the entry was removed (the list holds live entries only) and a restore does not re-read it.
+describe("#57 R2: no pointer to an install panel that cannot render", () => {
+  const GUIDE = "Mevcut kurulum durumunu Kurulum bölümünden kontrol edin.";
+  const PASSIVE_CORE = "Bu güvenlik bilgileri aracın olası kullanım risklerini açıklar. Katalog kaydını görüntülemek kurulum veya çalıştırma başlatmaz.";
+  const REMOVED_AT = "2026-11-01T10:00:00Z";
+  const panel = (c: ReturnType<typeof within>) => c.queryByRole("group", { name: `Kurulum: ${rec.toolId}` });
+  const boxOf = (c: ReturnType<typeof within>) => c.getByRole("heading", { level: 3, name: HEADING }).parentElement as HTMLElement;
+  const installReads = () => backend.calls.filter((x) => x.cmd === "list_install_states").length;
+  /** the IPC answer for the installation-state list is empty: a COMPLETED read with no matching entry (not a loading state) */
+  const noInstallStates = () => {
+    const original = backend.handle.bind(backend);
+    backend.handle = async (cmd, args) => (cmd === "list_install_states" ? (backend.calls.push({ cmd, args }), []) : original(cmd, args));
+  };
+  /** wait until the read has really finished and React applied it: a call was made AND a following tick has run */
+  const settled = async () => {
+    await waitFor(() => expect(installReads()).toBeGreaterThan(0));
+    await act(async () => { await Promise.resolve(); await new Promise((r) => setTimeout(r, 0)); });
+  };
+  const disclosureComplete = async (c: ReturnType<typeof within>) => {
+    const box = boxOf(c);
+    expect(within(box).getByText(PASSIVE_CORE)).toBeInTheDocument();
+    expect(within(box).getByText("Telemetri:").parentElement).toHaveTextContent(UNKNOWN_TELEMETRY);
+    expect(within(box).getByText("Proje içeriği iletilebilir mi:").parentElement).toHaveTextContent("evet, olabilir");
+    await userEvent.click(within(box).getByText(/Yetki, ağ ve gizlilik ayrıntıları/));
+    for (const t of [claim(rec.privilegeClaims, /edits the project's front-end source files/), claim(rec.privilegeClaims, /Chromium through Playwright/), claim(rec.privilegeClaims, /ffmpeg/), claim(rec.networkClaims, /fetches its style sheets/), claim(rec.privacy?.notes, /model provider/), ...(rec.dependencies ?? [])]) {
+      expect(within(box).getByText(t)).toBeInTheDocument();
+    }
+    expect(within(box).queryByText(DENIAL)).toBeNull();
+    expect(box).not.toHaveTextContent("Kurulum bölümünden");
+    expect(box.querySelectorAll("button, a, input, select, textarea, form, img, script, [onclick]").length).toBe(0);
+  };
+  const removedCardIn = async () => {
+    render(<CatalogPage />);
+    return (await screen.findByRole("heading", { level: 2, name: /Katalogdan kaldırılanlar \(1\)/ })).closest("section") as HTMLElement;
+  };
+
+  it("R2-A: a live card whose installation-state read found no entry shows no panel and no pointer, and the full disclosure", async () => {
+    noInstallStates();
+    const entry = unslop();
+    expect(entry.removedAt).toBeNull();
+    const c = await card(entry);
+    await settled();
+    expect(c.getByRole("checkbox", { name: /Katalogda etkin/ })).toBeInTheDocument();
+    expect(c.queryByText("Katalogdan kaldırıldı")).toBeNull();
+    expect(panel(c)).toBeNull();
+    await disclosureComplete(c);
+    expect(backend.calls.filter((x) => FORBIDDEN.includes(x.cmd))).toEqual([]);
+  });
+
+  it("R2-B: restoring a removed entry in the same mounted page leaves a live card with no panel and no pointer", async () => {
+    backend.entries = [unslop(rec, { removedAt: REMOVED_AT, enabled: false })];
+    const removedSection = await removedCardIn();
+    await settled();
+    // the list the page read holds live entries only, so it has no state for this (then removed) entry
+    expect(backend.entries.filter((e) => e.removedAt === null)).toHaveLength(0);
+    const reads = installReads();
+    await userEvent.click(within(removedSection).getByRole("button", { name: "Geri ekle (kapalı olarak)" }));
+    // same mounted page: the catalog reloads and the entry becomes a live card
+    const live = await waitFor(() => {
+      expect(screen.queryByRole("heading", { level: 2, name: /Katalogdan kaldırılanlar/ })).toBeNull();
+      return within(screen.getByRole("heading", { level: 2, name: rec.displayName }).closest("section") as HTMLElement);
+    });
+    expect(backend.calls.filter((x) => x.cmd === "restore_catalog_entry")).toHaveLength(1);
+    expect(installReads()).toBe(reads); // the state list was NOT re-read: the stale-state situation the reviewer found
+    expect(live.getByRole("checkbox", { name: /Katalogda etkin/ })).not.toBeChecked();
+    expect(live.queryByText("Katalogdan kaldırıldı")).toBeNull();
+    expect(panel(live)).toBeNull();
+    await disclosureComplete(live);
+    expect(backend.calls.filter((x) => FORBIDDEN.includes(x.cmd) && x.cmd !== "restore_catalog_entry")).toEqual([]);
+    expect(backend.calls.filter((x) => /install|run|execute|apply|confirm/i.test(x.cmd) && x.cmd !== "list_install_states")).toEqual([]);
+  });
+
+  it("R2-C: when the state IS present on a fresh page load, the panel and the pointer appear together (the page has no refresh path to test in place)", async () => {
+    backend.entries = [unslop()];
+    backend.install.states.set(rec.toolId, toolState(rec.toolId, "available"));
+    const c = await card(backend.entries[0]);
+    await waitFor(() => expect(panel(c)).not.toBeNull());
+    await waitFor(() => expect(boxOf(c)).toHaveTextContent(GUIDE));
+    expect(within(boxOf(c)).getByText(PASSIVE)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["installed_verified", "Kurulu ve doğrulandı"],
+    ["removed", "Kaldırıldı"],
+  ] as const)("R2-D: a live entry with installation status %s keeps its panel and its pointer", async (status, label) => {
+    backend.install.states.set(rec.toolId, toolState(rec.toolId, status));
+    const c = await card(unslop());
+    await waitFor(() => expect(panel(c)).not.toBeNull());
+    expect(c.getAllByText(label, { exact: false }).length).toBeGreaterThan(0);
+    await waitFor(() => expect(boxOf(c)).toHaveTextContent(GUIDE));
+    expect(within(boxOf(c)).getByText(PASSIVE)).toBeInTheDocument();
+    expect(c.queryByText("Katalogdan kaldırıldı")).toBeNull();
+  });
+
+  it("R2-D: a removed catalog entry shows no panel and no pointer even if an installation state object exists for it", async () => {
+    backend.install.states.set(rec.toolId, toolState(rec.toolId, "installed_verified"));
+    backend.entries = [unslop(rec, { removedAt: REMOVED_AT, enabled: false })];
+    const section = await removedCardIn();
+    await settled();
+    const c = within(within(section).getByRole("heading", { level: 2, name: rec.displayName }).closest("section") as HTMLElement);
+    expect(panel(c)).toBeNull();
+    await disclosureComplete(c);
   });
 });

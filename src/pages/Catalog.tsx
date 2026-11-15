@@ -126,7 +126,7 @@ const TELEMETRY_LABEL: ReadonlyMap<string, string> = new Map([
 const telemetryLabel = (v: unknown): string => (typeof v === "string" ? TELEMETRY_LABEL.get(v) ?? TELEMETRY_UNKNOWN : TELEMETRY_UNKNOWN);
 
 /** Passive display of what the record's publisher-stated fields say. Showing it starts, installs and contacts nothing. Generic: no entry is named here. */
-function RiskDisclosure({ record }: { record: CatalogEntry["record"] }) {
+function RiskDisclosure({ record, showInstallGuidance }: { record: CatalogEntry["record"]; showInstallGuidance: boolean }) {
   const privileges = textList(record.privilegeClaims);
   const network = textList(record.networkClaims);
   const deps = textList(record.dependencies);
@@ -149,7 +149,7 @@ function RiskDisclosure({ record }: { record: CatalogEntry["record"] }) {
         <strong>Telemetri:</strong> {telemetryLabel(telemetryRaw)}.{" "}
         <strong>Proje içeriği iletilebilir mi:</strong> {transmit === true ? "evet, olabilir" : transmit === false ? "hayır (yayıncı beyanı)" : "bilinmiyor"}.
       </p>
-      <p className="small">Bu güvenlik bilgileri aracın olası kullanım risklerini açıklar. Katalog kaydını görüntülemek kurulum veya çalıştırma başlatmaz. Mevcut kurulum durumunu Kurulum bölümünden kontrol edin.</p>
+      <p className="small">{`Bu güvenlik bilgileri aracın olası kullanım risklerini açıklar. Katalog kaydını görüntülemek kurulum veya çalıştırma başlatmaz.${showInstallGuidance ? " Mevcut kurulum durumunu Kurulum bölümünden kontrol edin." : ""}`}</p>
       {groups.length > 0 && (
         <details>
           <summary>Yetki, ağ ve gizlilik ayrıntıları ({groups.reduce((n, g) => n + g.items.length, 0)})</summary>
@@ -206,7 +206,8 @@ function EntryCard({ entry, onChanged, install, onInstallChanged }: { entry: Cat
         <dt>Çalıştırma ilkesi</dt><dd>{policyLabel(entry.executionPolicy)}</dd>
         {entry.kind === "skill_collection" && (<><dt>Yetenek dizini</dt><dd>{entry.skillCount === 0 ? "Boş: henüz içe aktarılmadı (hiçbir yetenek kurulmaz)" : `${entry.skillCount} yetenek (yalnızca kimlik ve kaynak bilgisi)`}</dd></>)}
       </dl>
-      <RiskDisclosure record={entry.record} />
+      {/* the pointer to the "Kurulum" section is shown exactly when that section is rendered: InstallPanel below needs `!removed` AND a state object (it returns null without one) */}
+      <RiskDisclosure record={entry.record} showInstallGuidance={!removed && !!install} />
       <details>
         <summary>Sınırlamalar ve bilinmeyenler ({entry.limitations.length})</summary>
         <ul className="small">{entry.limitations.map((l) => <li key={l}>{l}</li>)}</ul>
