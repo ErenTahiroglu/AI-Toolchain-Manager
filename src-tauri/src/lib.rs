@@ -7,6 +7,8 @@ compile_error!("`jq-pilot` and `synthetic-pilot` are separate pilot configuratio
 mod adapter;
 #[cfg(test)]
 mod agent01_tests;
+#[cfg(test)]
+mod agent02_tests;
 mod approval;
 mod approval_store;
 mod archive_check;

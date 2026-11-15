@@ -150,7 +150,7 @@ describe("Codex CLI in the real matrix: its own target, its own decisions, never
     return r;
   };
 
-  it("lists Codex CLI as a fifth, separate surface next to the existing four", async () => {
+  it("lists Codex CLI as its own surface next to the existing four (AGENT-02 appends six more; see Agent02.test.ts)", async () => {
     render(<ProjectsPage />);
     const r = await region();
     const options = within(r.getByLabelText("Ajan yüzeyi")).getAllByRole("option").map((o) => [o.getAttribute("value"), o.textContent]);
@@ -159,6 +159,12 @@ describe("Codex CLI in the real matrix: its own target, its own decisions, never
       ["claude-desktop-code", "Claude Desktop (Code)"],
       [AG, "Antigravity IDE"],
       [CODEX, "Codex CLI"],
+      ["codex-vscode", "Codex VS Code"],
+      ["cline-cli", "Cline CLI"],
+      ["cline-vscode", "Cline VS Code"],
+      ["cline-jetbrains", "Cline JetBrains"],
+      ["kiro-cli", "Kiro CLI"],
+      ["kiro-ide", "Kiro IDE"],
       [CLI, "Yerel komut satırı"],
     ]);
   });
@@ -283,7 +289,7 @@ describe("the shared manual guide on the Projects page", () => {
       expect(steps.some((s) => s.includes(needle)), needle).toBe(true);
     }
     const managed = g.getByRole("list", { name: /Seçilebilir ajan yüzeyleri/ });
-    expect(within(managed).getAllByRole("listitem")).toHaveLength(4); // claude-code, desktop, antigravity, codex (the generic program lookup is not an agent)
+    expect(within(managed).getAllByRole("listitem")).toHaveLength(10); // every agent surface (the generic program lookup is not an agent)
     expect(within(managed).getByText(".codex/config.toml")).toBeInTheDocument();
     expect(within(managed).getByText("TOML")).toBeInTheDocument();
     expect(within(managed).getAllByText(/TOML önizlemesi uygulanmadı/).length).toBe(1);

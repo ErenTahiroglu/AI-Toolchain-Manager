@@ -44,6 +44,8 @@ fn migrate_7(tx: &Transaction) -> AppResult<()> {
 /// 8 = Phase 2C: `discovery_scans.authorized_fingerprint` and the (always unauthenticated) `reference_digests` table.
 /// 9 = Phase 3C: `managed_roots`, the manager's own record of the identity of the folder it owns (additive; nothing inserts yet).
 /// 10 = AGENT-01: `project_preferences.agent_surface` accepts `codex-cli`. Table rebuild; every row is copied unchanged, no row is created or re-mapped.
+/// 11 = AGENT-02: `project_preferences.agent_surface` also accepts `codex-vscode`, `cline-cli`, `cline-vscode`, `cline-jetbrains`, `kiro-cli`, `kiro-ide`. Table rebuild;
+///      every row is copied unchanged, no row is created or re-mapped; the install-plan, discovery and write layers are untouched.
 const MIGRATIONS: &[Migration] = &[
     Migration::Sql(include_str!("../migrations/0001_init.sql")),
     Migration::Rust(migrate_2),
@@ -55,6 +57,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Sql(include_str!("../migrations/0008_artifact_provenance.sql")),
     Migration::Sql(include_str!("../migrations/0009_managed_roots.sql")),
     Migration::Sql(include_str!("../migrations/0010_codex_cli_surface.sql")),
+    Migration::Sql(include_str!("../migrations/0011_agent02_surfaces.sql")),
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

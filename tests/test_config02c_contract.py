@@ -295,7 +295,7 @@ class Reach(unittest.TestCase):
         for path in (ROOT / "src").rglob("*.ts*"):
             self.assertIsNone(forbidden.search(path.read_text(encoding="utf-8")), str(path))
         migrations = sorted(p.name for p in (ROOT / "src-tauri" / "migrations").glob("*.sql"))
-        self.assertEqual((len(migrations), migrations[-1]), (10, "0010_codex_cli_surface.sql"))
+        self.assertEqual((len(migrations), migrations[-2:]), (11, ["0010_codex_cli_surface.sql", "0011_agent02_surfaces.sql"]))  # AGENT-02 (Issue #53) appended 0011
         cargo = read("src-tauri/Cargo.toml")
         deps = re.search(r"\[dependencies\]\r?\n(.*?)\r?\n\r?\n", cargo, re.S).group(1)
         self.assertEqual(

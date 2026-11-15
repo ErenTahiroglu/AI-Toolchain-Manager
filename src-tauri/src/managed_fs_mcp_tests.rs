@@ -438,7 +438,18 @@ fn a_plan_for_another_project_os_or_surface_is_refused() {
     assert_eq!(commit_with(&b, &p, "baska-proje", Some(&a), &mut Ledger::default(), NOW).err().unwrap().refusal, Refusal::WrongProject);
     let other_os = if host() == Platform::WindowsX64 { Platform::MacosArm64 } else { Platform::WindowsX64 };
     assert_eq!(b.root.prepare(&Request { platform: other_os, ..request(&b, NOW) }, Some(host())).err(), Some(Refusal::WrongOs));
-    for surface in ["antigravity-ide", "codex-cli", "claude-desktop-code", "local-cli"] {
+    for surface in [
+        "antigravity-ide",
+        "codex-cli",
+        "claude-desktop-code",
+        "local-cli",
+        "codex-vscode",
+        "cline-cli",
+        "cline-vscode",
+        "cline-jetbrains",
+        "kiro-cli",
+        "kiro-ide",
+    ] {
         assert_eq!(b.root.prepare(&Request { surface, ..request(&b, NOW) }, Some(host())).err(), Some(Refusal::WrongSurface), "{surface}");
     }
     assert!(names(&b).is_empty(), "nothing was written for any of them");

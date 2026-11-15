@@ -34,8 +34,8 @@ class FrontendOnly(unittest.TestCase):
         for p in [p for p in perms if p != "allow-assess-atm-checkpoint"]:
             self.assertIsNone(re.search(r"fs|shell|http|opener|dialog|clipboard|process|os:|path|window|checkpoint", p, re.I), p)  # (the pre-existing catalog command permission "allow-preview-github-url" is not new)
         names = sorted(p.name for p in (ROOT / "src-tauri" / "migrations").glob("*.sql"))
-        self.assertEqual(len(names), 10)
-        self.assertEqual(names[-1], "0010_codex_cli_surface.sql")
+        self.assertEqual(len(names), 11)  # AGENT-02 (Issue #53, owner-approved) appended exactly one migration (0011)
+        self.assertEqual(names[-2:], ["0010_codex_cli_surface.sql", "0011_agent02_surfaces.sql"])
         pkg = json.loads(read("package.json"))
         every = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
         self.assertFalse([n for n in every if re.search(r"octokit|github|zod|ajv|yup|joi|markdown|marked|remark|dompurify|sanitize|html", n, re.I)], every)

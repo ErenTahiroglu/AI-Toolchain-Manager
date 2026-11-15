@@ -65,8 +65,8 @@ class Reach(unittest.TestCase):
         for p in json.loads(read("src-tauri/capabilities/default.json"))["permissions"]:
             self.assertIsNone(re.search(r"fs|shell|http|opener|dialog|clipboard|process|os:|path", p, re.I), p)
         migrations = sorted(p.name for p in (ROOT / "src-tauri" / "migrations").glob("*.sql"))
-        self.assertEqual(len(migrations), 10)
-        self.assertEqual(migrations[-1], "0010_codex_cli_surface.sql")
+        self.assertEqual(len(migrations), 11)  # AGENT-02 (Issue #53, owner-approved) appended exactly one migration (0011)
+        self.assertEqual(migrations[-2:], ["0010_codex_cli_surface.sql", "0011_agent02_surfaces.sql"])
         for rel in ("src-tauri/src/commands.rs", "src-tauri/src/lib.rs"):
             # CONFIG-02C (Issue #40, owner-authorized): exactly one command, `read_project_mcp_config`, and its single permission are allowed; tests/test_config02c_contract.py pins that they are the only ones.
             self.assertNotRegex(read(rel).replace("read_project_mcp_config", ""), r"(?i)fn\s+\w*(mcp_config|config_preview|config_plan|write_config|apply_config|exa)\w*")

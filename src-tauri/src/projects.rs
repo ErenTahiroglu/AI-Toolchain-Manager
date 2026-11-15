@@ -14,7 +14,19 @@ use crate::{
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 
-pub const SURFACES: &[&str] = &["claude-code-terminal", "claude-desktop-code", "antigravity-ide", "codex-cli", "local-cli"];
+pub const SURFACES: &[&str] = &[
+    "claude-code-terminal",
+    "claude-desktop-code",
+    "antigravity-ide",
+    "codex-cli",
+    "codex-vscode",
+    "cline-cli",
+    "cline-vscode",
+    "cline-jetbrains",
+    "kiro-cli",
+    "kiro-ide",
+    "local-cli",
+];
 pub const PLATFORMS: &[&str] = &["windows-x64", "macos-arm64"];
 pub const DECISIONS: &[&str] = &["accepted", "rejected", "postponed", "disabled"];
 const DEFAULT_POSTPONE_DAYS: i64 = 7;

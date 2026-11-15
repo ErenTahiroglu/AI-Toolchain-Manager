@@ -51,6 +51,12 @@ const SURFACE: Record<string, string> = {
   "antigravity-ide": "Antigravity IDE",
   "claude-desktop-code": "Claude Desktop (Code)",
   "codex-cli": "Codex CLI",
+  "codex-vscode": "Codex VS Code",
+  "cline-cli": "Cline CLI",
+  "cline-vscode": "Cline VS Code",
+  "cline-jetbrains": "Cline JetBrains",
+  "kiro-cli": "Kiro CLI",
+  "kiro-ide": "Kiro IDE",
 };
 export const surfaceLabel = (s: string) => SURFACE[s] ?? s;
 

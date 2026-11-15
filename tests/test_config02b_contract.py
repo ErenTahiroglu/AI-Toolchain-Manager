@@ -46,7 +46,7 @@ class Isolation(unittest.TestCase):
         for p in [x for x in json.loads(read("src-tauri/capabilities/default.json"))["permissions"] if x not in ("allow-read-project-mcp-config", "allow-assess-atm-checkpoint")]:
             self.assertIsNone(re.search(r"fs|shell|http|opener|dialog|clipboard|process|os:|path", p, re.I), p)
         migrations = sorted(p.name for p in (ROOT / "src-tauri" / "migrations").glob("*.sql"))
-        self.assertEqual((len(migrations), migrations[-1]), (10, "0010_codex_cli_surface.sql"))
+        self.assertEqual((len(migrations), migrations[-2:]), (11, ["0010_codex_cli_surface.sql", "0011_agent02_surfaces.sql"]))  # AGENT-02 (Issue #53) appended 0011
         cargo = read("src-tauri/Cargo.toml")
         deps = re.search(r"\[dependencies\]\r?\n(.*?)\r?\n\r?\n", cargo, re.S).group(1)
         self.assertEqual(

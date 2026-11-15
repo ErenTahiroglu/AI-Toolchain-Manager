@@ -41,8 +41,14 @@ fn rows(conn: &Connection, sql: &str) -> Vec<String> {
 }
 
 #[test]
-fn the_surface_allowlist_is_the_four_historic_values_plus_codex_cli_and_the_install_plan_layer_is_untouched() {
-    assert_eq!(projects::SURFACES, ["claude-code-terminal", "claude-desktop-code", "antigravity-ide", "codex-cli", "local-cli"]);
+fn the_surface_allowlist_keeps_the_four_historic_values_plus_codex_cli_and_the_install_plan_layer_is_untouched() {
+    // AGENT-02 appended six more ids (exact list pinned in agent02_tests.rs); these five must stay valid and in this relative order.
+    let kept: Vec<&str> = projects::SURFACES
+        .iter()
+        .copied()
+        .filter(|s| ["claude-code-terminal", "claude-desktop-code", "antigravity-ide", "codex-cli", "local-cli"].contains(s))
+        .collect();
+    assert_eq!(kept, ["claude-code-terminal", "claude-desktop-code", "antigravity-ide", "codex-cli", "local-cli"]);
     for s in OLD_SURFACES {
         assert!(projects::SURFACES.contains(&s), "{s} must stay a valid target");
     }

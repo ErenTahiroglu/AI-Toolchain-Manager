@@ -206,7 +206,19 @@ fn a_plan_is_bound_to_the_project_os_surface_entry_pin_and_a_bounded_lifetime() 
     assert_eq!(ok(&base, None).err(), Some(Refusal::UnsupportedHost));
     assert_eq!(ok(&Request { alias: "Bad Alias!", ..base.clone() }, Some(Platform::WindowsX64)).err(), Some(Refusal::InvalidProject));
     assert_eq!(ok(&Request { alias: "", ..base.clone() }, Some(Platform::WindowsX64)).err(), Some(Refusal::InvalidProject));
-    for surface in ["antigravity-ide", "codex-cli", "claude-desktop-code", "local-cli", ""] {
+    for surface in [
+        "antigravity-ide",
+        "codex-cli",
+        "claude-desktop-code",
+        "local-cli",
+        "",
+        "codex-vscode",
+        "cline-cli",
+        "cline-vscode",
+        "cline-jetbrains",
+        "kiro-cli",
+        "kiro-ide",
+    ] {
         assert_eq!(ok(&Request { surface, ..base.clone() }, Some(Platform::WindowsX64)).err(), Some(Refusal::WrongSurface), "{surface}");
     }
     assert_eq!(ok(&Request { entry_id: "playwright-mcp", ..base.clone() }, Some(Platform::WindowsX64)).err(), Some(Refusal::WrongEntry));

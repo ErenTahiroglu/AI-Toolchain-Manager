@@ -142,7 +142,7 @@ describe("the shared guide: classification is an exact lookup of documented exam
       if (e.kind === "model-api-provider") expect(e.note, e.id).not.toMatch(/\.mcp\.json|mcp_config|settings\.json/);
     }
     const managed = GUIDE_EXAMPLES.filter((e) => e.kind === "managed-agent-host").map((e) => e.id).sort();
-    expect(managed).toEqual(["antigravity", "claude-code", "codex"]);
+    expect(managed).toEqual(["antigravity", "claude-code", "cline", "codex", "kiro"]);
     // Gemini CLI is only an example: it is not a selectable surface
     expect(TARGET_SURFACES as readonly string[]).not.toContain("gemini-cli");
     expect(GUIDE_EXAMPLES.find((e) => e.id === "gemini-cli")!.note).toMatch(/yönetmez/);

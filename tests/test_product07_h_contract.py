@@ -115,11 +115,11 @@ class NothingNewIsGranted(unittest.TestCase):
         db = read("src-tauri/src/db.rs")
         block = db[db.index("const MIGRATIONS: &[Migration] = &[") :]
         block = block[: block.index("];")]
-        self.assertEqual(block.count("Migration::"), 10)
+        self.assertEqual(block.count("Migration::"), 11)  # AGENT-02 (Issue #53, owner-approved) appended exactly one migration (0011)
         self.assertIn("0010_codex_cli_surface.sql", block)
         names = sorted(p.name for p in (ROOT / "src-tauri" / "migrations").glob("*.sql"))
-        self.assertEqual(names[-1], "0010_codex_cli_surface.sql")
-        self.assertEqual(len(names), 10)
+        self.assertEqual(names[-2:], ["0010_codex_cli_surface.sql", "0011_agent02_surfaces.sql"])
+        self.assertEqual(len(names), 11)
 
     def test_no_ipc_command_or_permission_or_dependency_was_added(self):
         for rel in ("src-tauri/src/commands.rs", "src-tauri/src/lib.rs"):

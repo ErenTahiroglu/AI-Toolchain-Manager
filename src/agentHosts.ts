@@ -120,6 +120,111 @@ export const AGENT_HOST_SURFACES: readonly AgentHostSurface[] = [
       "ChatGPT masaüstü uygulaması / IDE eklentisi ayarları (bu hedef değildir)",
     ],
   },
+  // AGENT-02 (Issue #53). Six more surfaces, each a SEPARATE row: a publisher statement about one surface of a client is never copied to another surface of the
+  // same client (Codex CLI vs Codex VS Code, Cline CLI vs Cline VS Code vs Cline JetBrains, Kiro CLI vs Kiro IDE). Nothing here is runtime evidence: "documented" means a
+  // publisher page read on 2026-11-14 says it (docs/agent-02/SOURCE_EVIDENCE.md); no program was installed, started or probed. No new surface has a preview: the
+  // configuration preview (src/configPlan.ts) answers UNSUPPORTED_SURFACE for every one of them, and none is a member of the install-plan list (plan.rs `SURFACES`).
+  {
+    agentSurface: "codex-vscode",
+    clientHostId: "codex",
+    kind: "agent-host",
+    configScope: "none-documented",
+    configFormat: null,
+    relativeTargetPath: null,
+    scopeCondition: null,
+    previewKind: "none",
+    capabilities: NOT_ASSESSED,
+    planSupported: false,
+    evidenceIds: ["R58"],
+    untouched: [
+      "~/.codex/config.toml ve .codex/config.toml (Codex CLI hedefinin dosyaları; bu yüzeyin proje dosyası belgelenmiş sayılmaz)",
+      "~/.codex/auth.json ve işletim sistemi anahtar zinciri",
+      "VS Code kullanıcı ve çalışma alanı ayarları",
+      "Cursor, Windsurf ve diğer VS Code uyumlu düzenleyiciler (bu hedef değildir), Xcode ve JetBrains bütünleştirmeleri",
+    ],
+  },
+  {
+    agentSurface: "cline-cli",
+    clientHostId: "cline",
+    kind: "agent-host",
+    configScope: "none-documented",
+    configFormat: null,
+    relativeTargetPath: null,
+    scopeCondition: null,
+    previewKind: "none",
+    capabilities: { ...NOT_ASSESSED, mcp_stdio: "documented", mcp_http: "documented" },
+    planSupported: false,
+    evidenceIds: ["R59"],
+    untouched: ["~/.cline/data/settings/cline_mcp_settings.json (kullanıcı düzeyi; CLINE_MCP_SETTINGS_PATH ile değiştirilebilir; proje dosyası DEĞİLDİR)", "Cline kimlik bilgileri ve sağlayıcı anahtarları"],
+  },
+  {
+    agentSurface: "cline-vscode",
+    clientHostId: "cline",
+    kind: "agent-host",
+    configScope: "none-documented",
+    configFormat: null,
+    relativeTargetPath: null,
+    scopeCondition: null,
+    previewKind: "none",
+    capabilities: NOT_ASSESSED,
+    planSupported: false,
+    evidenceIds: [],
+    untouched: ["Cline CLI dosyaları (başka bir yüzey)", "VS Code kullanıcı ve çalışma alanı ayarları", "Cline eklentisinin MCP ayar dosyası (yolu bu çalışmada okunmadı)"],
+  },
+  {
+    agentSurface: "cline-jetbrains",
+    clientHostId: "cline",
+    kind: "agent-host",
+    configScope: "none-documented",
+    configFormat: null,
+    relativeTargetPath: null,
+    scopeCondition: null,
+    previewKind: "none",
+    capabilities: NOT_ASSESSED,
+    planSupported: false,
+    evidenceIds: [],
+    untouched: ["Cline CLI ve Cline VS Code dosyaları (başka yüzeyler)", "JetBrains IDE ayarları", "Cline JetBrains bütünleştirmesinin MCP ayar dosyası (yolu bu çalışmada okunmadı)"],
+  },
+  {
+    agentSurface: "kiro-cli",
+    clientHostId: "kiro",
+    kind: "agent-host",
+    configScope: "project",
+    configFormat: "json",
+    relativeTargetPath: ".kiro/settings/mcp.json",
+    scopeCondition:
+      "Yayıncı sayfası bu dosyayı çalışma alanı düzeyi olarak belgeler; sayfa IDE, CLI ve Web için ortaktır. Öncelik: aracı yapılandırması > çalışma alanı > kullanıcı. Dosya kaydedilince sunucular otomatik yeniden bağlanır; “autoApprove” içindeki “*” tüm araçları sormadan onaylar; kimlik bilgileri dosyada bulunabilir.",
+    previewKind: "none",
+    capabilities: { ...NOT_ASSESSED, mcp_stdio: "documented", mcp_http: "documented" },
+    planSupported: false,
+    evidenceIds: ["R60"],
+    untouched: [
+      "~/.kiro/settings/mcp.json (kullanıcı düzeyi)",
+      "Kiro aracı (agent) JSON dosyaları ve içindeki mcpServers alanı",
+      "autoApprove, oauth ve headers alanları (hiçbir zaman okunmaz, önizlenmez, yazılmaz)",
+      "Kiro IDE ayarları (başka bir yüzey)",
+    ],
+  },
+  {
+    agentSurface: "kiro-ide",
+    clientHostId: "kiro",
+    kind: "agent-host",
+    configScope: "project",
+    configFormat: "json",
+    relativeTargetPath: ".kiro/settings/mcp.json",
+    scopeCondition:
+      "Yayıncı sayfası bu dosyayı çalışma alanı düzeyi olarak belgeler; sayfa IDE, CLI ve Web için ortaktır. Öncelik: aracı yapılandırması > çalışma alanı > kullanıcı. Dosya kaydedilince sunucular otomatik yeniden bağlanır; “autoApprove” içindeki “*” tüm araçları sormadan onaylar; kimlik bilgileri dosyada bulunabilir.",
+    previewKind: "none",
+    capabilities: { ...NOT_ASSESSED, mcp_stdio: "documented", mcp_http: "documented" },
+    planSupported: false,
+    evidenceIds: ["R60"],
+    untouched: [
+      "~/.kiro/settings/mcp.json (kullanıcı düzeyi)",
+      "Kiro aracı (agent) JSON dosyaları ve içindeki mcpServers alanı",
+      "autoApprove, oauth ve headers alanları (hiçbir zaman okunmaz, önizlenmez, yazılmaz)",
+      "Kiro CLI ayarları (başka bir yüzey)",
+    ],
+  },
   {
     agentSurface: "local-cli",
     clientHostId: "local-programs",
@@ -138,5 +243,5 @@ export const AGENT_HOST_SURFACES: readonly AgentHostSurface[] = [
 
 export const agentHostFor = (surface: string): AgentHostSurface | null => AGENT_HOST_SURFACES.find((h) => h.agentSurface === surface) ?? null;
 
-/** The surfaces the installer-side plan layer knows (everything but the project-only Codex target). */
+/** The surfaces the installer-side plan layer knows (everything but the project-only targets: Codex, Cline and Kiro). */
 export const planSurfaces = (surfaces: readonly string[]): string[] => surfaces.filter((s) => agentHostFor(s)?.planSupported === true);

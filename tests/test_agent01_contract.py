@@ -15,8 +15,10 @@ import sqlite3
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SURFACES = ["claude-code-terminal", "claude-desktop-code", "antigravity-ide", "codex-cli", "local-cli"]
-HISTORIC = [s for s in SURFACES if s != "codex-cli"]
+# AGENT-02 (Issue #53) appended six more ids; the AGENT-01 facts below are about migration 0010's list (SURFACES_V10) and the four historic surfaces.
+SURFACES_V10 = ["claude-code-terminal", "claude-desktop-code", "antigravity-ide", "codex-cli", "local-cli"]
+SURFACES = ["claude-code-terminal", "claude-desktop-code", "antigravity-ide", "codex-cli", "codex-vscode", "cline-cli", "cline-vscode", "cline-jetbrains", "kiro-cli", "kiro-ide", "local-cli"]
+HISTORIC = ["claude-code-terminal", "claude-desktop-code", "antigravity-ide", "local-cli"]
 
 
 def read(rel):
@@ -39,9 +41,10 @@ class SurfaceListsAgree(unittest.TestCase):
         m = re.search(r"export const TARGET_SURFACES = \[([^\]]*)\] as const", read("src/workspace.ts"))
         self.assertEqual(quoted_list(m.group(1)), SURFACES)
         self.assertEqual(re.findall(r'^\s+agentSurface: "([^"]+)"', read("src/agentHosts.ts"), re.M), SURFACES)
-        sql = read("src-tauri/migrations/0010_codex_cli_surface.sql")
-        m = re.search(r"agent_surface\s+TEXT NOT NULL CHECK \(agent_surface IN \(([^)]*)\)\)", sql)
-        self.assertEqual(quoted_list(m.group(1)), SURFACES)
+        for name, expected in (("0010_codex_cli_surface", SURFACES_V10), ("0011_agent02_surfaces", SURFACES)):
+            sql = read("src-tauri/migrations/%s.sql" % name)
+            m = re.search(r"agent_surface\s+TEXT NOT NULL CHECK \(agent_surface IN \(([^)]*)\)\)", sql)
+            self.assertEqual(quoted_list(m.group(1)), expected, name)
 
     def test_the_install_plan_layer_does_not_know_codex(self):
         plan = rust_list(read("src-tauri/src/plan.rs"), "SURFACES")
@@ -51,13 +54,14 @@ class SurfaceListsAgree(unittest.TestCase):
         for rel in ("schemas/install-recipe.schema.json", "schemas/reviewed-recipe.schema.json", "schemas/audit-event.schema.json"):
             self.assertNotIn("codex", read(rel).lower(), rel)
 
-    def test_no_catalog_data_file_or_schema_carries_a_codex_evidence_row(self):
-        # the word "codex" may appear in a publisher's own description (e.g. a purpose text); an evidence ROW or schema value for the surface may not
-        for rel in ("data/catalog-seed.json", "data/catalog-candidates-1b.json", "data/catalog-candidates-c01.json", "data/catalog-candidates-c02.json", "data/catalog-candidates-c03.json", "data/catalog-candidates-c04.json", "schemas/catalog-entry.schema.json"):
+    def test_no_catalog_data_file_carries_a_codex_evidence_row_and_the_schema_enum_allows_the_value(self):
+        # the word "codex" may appear in a publisher's own description (e.g. a purpose text); an evidence ROW for the surface may not.
+        # AGENT-02 (D5): the catalog SCHEMA now lists `codex-cli` (and the six new ids) so that evidence can be recorded later; no data file does.
+        for rel in ("data/catalog-seed.json", "data/catalog-candidates-1b.json", "data/catalog-candidates-c01.json", "data/catalog-candidates-c02.json", "data/catalog-candidates-c03.json", "data/catalog-candidates-c04.json"):
             text = read(rel)
             self.assertNotIn("codex-cli", text, rel)
             self.assertIsNone(re.search(r'"agentSurface"\s*:\s*"codex', text, re.I), rel)
-            self.assertIsNone(re.search(r"codex", text.split('"records"')[0] if '"records"' in text else text, re.I) if rel.endswith("schema.json") else None, rel)
+        self.assertIn('"codex-cli"', read("schemas/catalog-entry.schema.json"))
 
     def test_the_historic_candidate_identities_are_all_still_present(self):
         ids = []
@@ -144,15 +148,16 @@ class MigrationTen(unittest.TestCase):
         self.assertEqual(statements, ["CREATE TABLE project_preferences_v10", "INSERT INTO project_preferences_v10", "DROP TABLE project_preferences", "ALTER TABLE project_preferences_v10 RENAME TO project_preferences"])
         self.assertNotRegex(self.sql, r"(?i)\b(UPDATE|DELETE)\b\s+(FROM\s+)?\w")
 
-    def test_the_migration_is_registered_last_and_documented(self):
+    def test_the_migration_is_registered_in_order_and_documented(self):
         db = read("src-tauri/src/db.rs")
         block = db[db.index("const MIGRATIONS: &[Migration] = &["):]
         block = block[: block.index("];")]
         files = re.findall(r'include_str!\("\.\./migrations/([^"]+)"\)', block)
-        self.assertEqual(files[-1], "0010_codex_cli_surface.sql")
-        self.assertEqual(len(files), 7)  # migrations 2, 5 and 7 are Rust steps that include their own SQL
-        self.assertEqual(block.count("Migration::"), 10)  # ten migrations in total: this phase added exactly one
+        self.assertEqual(files[-2:], ["0010_codex_cli_surface.sql", "0011_agent02_surfaces.sql"])  # AGENT-01's step is still second to last; AGENT-02 appended one
+        self.assertEqual(len(files), 8)  # migrations 2, 5 and 7 are Rust steps that include their own SQL
+        self.assertEqual(block.count("Migration::"), 11)  # eleven migrations in total
         self.assertIn("10 = AGENT-01", db)
+        self.assertIn("11 = AGENT-02", db)
 
     def build_v9(self):
         con = sqlite3.connect(":memory:")
