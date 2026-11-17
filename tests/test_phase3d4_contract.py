@@ -177,9 +177,39 @@ class TheReleaseStaysClosed(unittest.TestCase):
         self.assertIn('#[cfg(all(feature = "jq-pilot", feature = "synthetic-pilot"))]\ncompile_error!', lib)
         ci = text(ROOT / ".github" / "workflows" / "ci.yml")
         for line in ci.splitlines():
-            if "tauri build" in line:
+            if "tauri build" in line and line.strip() != "npx tauri build --debug --no-bundle --target ${{ matrix.target }} --features jq-pilot":
                 self.assertNotIn("pilot", line, "the release build never carries a pilot feature")
         self.assertIn("--features jq-pilot", ci)
+        # JQ-PILOT-NEXT-04: exactly ONE experimental build may enable the feature: a Windows-only DEBUG build of a push to development, written to
+        # the debug folder, uploaded as its own 3-day artifact, and placed after the release build and the device-test artifact.
+        release = "npx tauri build --no-bundle --target ${{ matrix.target }}"
+        self.assertEqual(ci.count(release), 1, "the one release build line is unchanged and carries no feature")
+        pilot_builds = [l for l in ci.splitlines() if "tauri build" in l and "pilot" in l]
+        self.assertEqual(len(pilot_builds), 1)
+        for needle in ("--debug", "--no-bundle", "--target ${{ matrix.target }}", "--features jq-pilot"):
+            self.assertIn(needle, pilot_builds[0], needle)
+        self.assertNotIn("--release", pilot_builds[0])
+        self.assertEqual(pilot_builds[0].strip(), "npx tauri build --debug --no-bundle --target ${{ matrix.target }} --features jq-pilot")
+        only = "if: matrix.name == 'windows-x64' && github.event_name == 'push' && github.ref == 'refs/heads/development'"
+        step_at = ci.index("- name: Build the experimental jq-pilot GUI executable")
+        step = ci[step_at:].split("\n      - uses:")[0]
+        self.assertIn(only, step.split("run:")[0])
+        self.assertIn("/debug/${{ matrix.exe }}", step)
+        self.assertNotIn("/release/", step.replace("never a release", ""))
+        self.assertIn('rm -f "$BIN"', step)  # a stale cached executable is never accepted
+        self.assertLess(step.index('rm -f "$BIN"'), step.index(pilot_builds[0].strip()))
+        self.assertLess(step.index(pilot_builds[0].strip()), step.index('test -f "$BIN"'))
+        self.assertIn("0x8664", step)
+        self.assertIn("sha256sum atm-jq-pilot-experimental.exe", step)
+        self.assertIn("commit ${{ github.sha }}", step)
+        upload = ci[ci.index("name: jq-pilot-experimental-unsigned-windows-x64-${{ github.sha }}") - 200:]
+        self.assertIn(only, upload.split("with:")[0])
+        self.assertIn("retention-days: 3", upload.split("if-no-files-found")[0])
+        # ordering: release build < device-test artifact < the experimental build, so the release path cannot be affected by it
+        self.assertLess(ci.index(release), ci.index("device-test-unsigned-${{ matrix.name }}-${{ github.sha }}"))
+        self.assertLess(ci.index("device-test-unsigned-${{ matrix.name }}-${{ github.sha }}"), step_at)
+        # no jq program is part of the workflow
+        self.assertNotIn("jq-windows-amd64", ci)
         # the Windows-only configuration is exercised only on the Windows job; the macOS job proves the refusal
         win_step = ci[ci.index("jq-pilot feature configuration"):]
         self.assertIn("if: matrix.name == 'windows-x64'", win_step.split("- name:")[0])

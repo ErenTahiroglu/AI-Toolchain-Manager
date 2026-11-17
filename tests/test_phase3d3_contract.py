@@ -157,7 +157,8 @@ class NothingIsActivated(unittest.TestCase):
     def test_ci_never_builds_the_release_with_a_pilot_feature(self):
         ci = text(ROOT / ".github" / "workflows" / "ci.yml")
         for line in ci.splitlines():
-            if "tauri build" in line:
+            # no build line carries a pilot feature EXCEPT the one exact experimental debug command, whose step, conditions and place are pinned in test_phase3d4_contract
+            if "tauri build" in line and line.strip() != "npx tauri build --debug --no-bundle --target ${{ matrix.target }} --features jq-pilot":
                 self.assertNotIn("pilot", line)
         self.assertIn("--features synthetic-pilot", ci)
 

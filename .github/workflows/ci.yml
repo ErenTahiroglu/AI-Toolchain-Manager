@@ -195,3 +195,55 @@ jobs:
           path: ${{ runner.temp }}/device-test/
           retention-days: 3
           if-no-files-found: error
+
+      # JQ-PILOT-NEXT-04: an EXPERIMENTAL, UNSIGNED, NON-RELEASE Windows debug executable with the non-default jq-pilot feature, for ONE future,
+      # separately authorized manual test. It runs only for a push to development (never for a pull request, never on main), only on the Windows
+      # job, and AFTER every step and artifact above, so the default release build (which never carries a pilot feature), its self-check and the
+      # device-test artifact are exactly what they were. The debug profile writes to target/<triple>/debug, the release build to target/<triple>/release.
+      # It is built from this exact commit; an older executable is never reused (a cached one is deleted first). Not independently accepted. Not a release.
+      # CI compilation says nothing about Smart App Control acceptance on any other computer.
+      - name: Build the experimental jq-pilot GUI executable (Windows only; unsigned; debug; never a release)
+        if: matrix.name == 'windows-x64' && github.event_name == 'push' && github.ref == 'refs/heads/development'
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          BIN="src-tauri/target/${{ matrix.target }}/debug/${{ matrix.exe }}"
+          rm -f "$BIN"
+          npx tauri build --debug --no-bundle --target ${{ matrix.target }} --features jq-pilot
+          test -f "$BIN"
+          python - "$BIN" <<'PY'
+          import struct, sys
+          d = open(sys.argv[1], "rb").read(4096)
+          assert d[:2] == b"MZ", "not a PE file"
+          off = struct.unpack_from("<I", d, 0x3C)[0]
+          assert d[off:off + 4] == b"PE\0\0", "no PE signature"
+          machine = struct.unpack_from("<H", d, off + 4)[0]
+          assert machine == 0x8664, "not x64: 0x%04x" % machine
+          print("PE x64 OK")
+          PY
+          OUT="${{ runner.temp }}/jq-pilot-unsigned"
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+          cp "$BIN" "$OUT/atm-jq-pilot-experimental.exe"
+          cmp "$BIN" "$OUT/atm-jq-pilot-experimental.exe"
+          {
+            echo "EXPERIMENTAL / UNSIGNED / NOT A RELEASE / NOT INDEPENDENTLY ACCEPTED"
+            echo "jq-pilot test build of commit ${{ github.sha }}. It does not contain the jq program."
+            echo "It is armed for one data-directory scope identifier only; it installs nothing without the owner's separate authorization."
+            echo "A successful CI build says nothing about Smart App Control acceptance on any computer."
+          } > "$OUT/EXPERIMENTAL-NOT-A-RELEASE.txt"
+          {
+            (cd "$OUT" && sha256sum atm-jq-pilot-experimental.exe)
+            echo "commit ${{ github.sha }}"
+            echo "target ${{ matrix.target }}"
+            echo "cargo features: jq-pilot (non-default); profile: debug; unsigned; no bundle"
+            rustc -V
+          } > "$OUT/SHA256.txt"
+          cat "$OUT/SHA256.txt"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: matrix.name == 'windows-x64' && github.event_name == 'push' && github.ref == 'refs/heads/development'
+        with:
+          name: jq-pilot-experimental-unsigned-windows-x64-${{ github.sha }}
+          path: ${{ runner.temp }}/jq-pilot-unsigned/
+          retention-days: 3
+          if-no-files-found: error

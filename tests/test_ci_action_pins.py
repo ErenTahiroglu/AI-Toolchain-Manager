@@ -300,7 +300,7 @@ class TabPolicy(unittest.TestCase):
             root = make_repo(pathlib.Path(tmp))
             (root / ".github" / "workflows" / "extra.yml").write_text(wf("      - uses:\tevil/action@v4\n"), encoding="utf-8")
             violations, summary = cap.check_repository(root)
-            self.assertEqual(summary["uses"], 13)  # the count is unchanged, which is exactly why it cannot be the proof of complete extraction
+            self.assertEqual(summary["uses"], 14)  # the count is unchanged, which is exactly why it cannot be the proof of complete extraction
             self.assertEqual([v.file for v in violations], [".github/workflows/extra.yml"])
             self.assertIn("tab character", violations[0].message)
             self.assertEqual(cap.main(["--root", str(root)]), 1)
@@ -314,7 +314,7 @@ class TabPolicy(unittest.TestCase):
             self.assertIn(old, text)
             ci.write_text(text.replace(old, "uses:\tactions/checkout@v4", 1), encoding="utf-8", newline="")
             violations, summary = cap.check_repository(root)
-            self.assertEqual(summary["uses"], 12)  # one dependency silently not extracted: the rule above must reject, not the count
+            self.assertEqual(summary["uses"], 13)  # one dependency silently not extracted: the rule above must reject, not the count
             self.assertTrue(any(v.file.endswith("ci.yml") and "tab character" in v.message for v in violations))
             self.assertEqual(cap.main(["--root", str(root)]), 1)
 

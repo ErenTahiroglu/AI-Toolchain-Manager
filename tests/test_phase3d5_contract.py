@@ -86,7 +86,8 @@ class TheCandidateStaysInactive(unittest.TestCase):
     def test_the_default_release_and_ci_never_enable_the_pilot_and_no_jq_byte_is_in_the_tree(self):
         ci = text(ROOT / ".github" / "workflows" / "ci.yml")
         for line in ci.splitlines():
-            if "tauri build" in line:
+            # no build line carries a pilot feature EXCEPT the one exact experimental debug command, whose step, conditions and place are pinned in test_phase3d4_contract
+            if "tauri build" in line and line.strip() != "npx tauri build --debug --no-bundle --target ${{ matrix.target }} --features jq-pilot":
                 self.assertNotIn("pilot", line)
         self.assertIn("docs/phase-3d5/b3-staging-manifest.json", ci)
         for p in SRC.glob("*.rs"):

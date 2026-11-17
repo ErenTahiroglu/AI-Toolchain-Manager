@@ -84,7 +84,8 @@ class TheArming(unittest.TestCase):
         self.assertIn('#[cfg(all(feature = "jq-pilot", feature = "synthetic-pilot"))]\ncompile_error!', lib)
         ci = text(ROOT / ".github" / "workflows" / "ci.yml")
         for line in ci.splitlines():
-            if "tauri build" in line:
+            # no build line carries a pilot feature EXCEPT the one exact experimental debug command, whose step, conditions and place are pinned in test_phase3d4_contract
+            if "tauri build" in line and line.strip() != "npx tauri build --debug --no-bundle --target ${{ matrix.target }} --features jq-pilot":
                 self.assertNotIn("pilot", line)
         flow = text(SRC / "install_flow.rs").split("#[cfg(test)]\n#[path")[0]
         self.assertIn("one_time: None,", flow, "the release supply carries no one-time rule")

@@ -204,7 +204,8 @@ class ProductionStaysClosed(unittest.TestCase):
         ci = text(ROOT / ".github" / "workflows" / "ci.yml")
         self.assertIn("tools/run_staging.py", ci)
         for line in ci.splitlines():
-            if "tauri build" in line:
+            # no build line carries a pilot feature EXCEPT the one exact experimental debug command, whose step, conditions and place are pinned in test_phase3d4_contract
+            if "tauri build" in line and line.strip() != "npx tauri build --debug --no-bundle --target ${{ matrix.target }} --features jq-pilot":
                 self.assertNotIn("pilot", line)
 
 
