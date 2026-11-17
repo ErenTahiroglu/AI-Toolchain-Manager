@@ -13,7 +13,9 @@
 //!   approval is consumed after the lock is taken and before the first change to managed state.
 //! * **Journal-before-effect with identity.** Every file the transaction creates goes through intent (durable) -> exclusive create ->
 //!   identity from the open handle (durable) -> data -> fsync -> final record (durable). Cleanup deletes only files that match their
-//!   manifest record (identity, single link, content), through `managed_fs`; anything else is kept and reported.
+//!   manifest record, through `managed_fs`; anything else is kept and reported. The record is identity and a link count of 1 while the
+//!   file is only `Created`, and also size and SHA-256 once it is `Final` (see `classify`). Folders are removed only by the identity of
+//!   the folder that was inspected and emptied (`Dir::remove_dir_verified`).
 //! * **Never touched:** the tool's own user data (`data/`), anything outside the managed root, the program search path, system
 //!   settings, agent configuration. No process is started and no network is used.
 //!
@@ -292,6 +294,14 @@ impl<'a> Adapter<'a> {
 
     /// Durable journal write: a fresh temporary file (exclusive create, unique name), fsync, atomic replace. A crash in between leaves
     /// an unrecognised temporary file, which recovery reports and never deletes.
+    ///
+    /// NEXT-11 RESIDUAL (H3, NOT eliminated; the redesign is recorded as DESIGN_BLOCKED in docs/phase-3d6/NEXT-11-DESIGN.md): every write
+    /// after the first reaches the file layer's one replacing move, i.e. replace-existing semantics. The destination is verified (plain single-link file
+    /// with exactly the identity this transaction last wrote or read) immediately before the rename, but Windows cannot pin a
+    /// destination against deletion and replace it in one operation, so a same-account process that deletes the journal and creates a
+    /// file under its exact name inside that window has that file replaced by this journal. The blast radius is that one name inside
+    /// the owner-only `journal` folder of the manager's own root; the macOS path swaps and swaps back instead. The first write is
+    /// exclusive (no replace). Do not "fix" this by holding the destination open: Windows then refuses the rename.
     fn save(&self, d: &Dirs, t: &mut Txn) -> R<()> {
         t.journal_digest = txn_digest(t);
         let bytes = serde_json::to_vec(t).map_err(|_| TxnError::Refused("journal_unwritable"))?;
@@ -390,6 +400,12 @@ impl<'a> Adapter<'a> {
     }
 
     /// What may be done with the file `name` in `dir` given the manifest entry (found by role or by place).
+    ///
+    /// NEXT-11 (recorded, unchanged): a file in phase `Created` is recorded right after its exclusive create, BEFORE any data is written, so
+    /// its final content digest does not exist yet. Cleanup of such a file therefore verifies identity and a link count of 1, NOT content;
+    /// only a `Final` file is also verified by size and SHA-256, and an `Intended` one (a crash before the identity was recorded) is
+    /// `Ambiguous` and never deleted. Strengthening `Created` is not possible without a second durable record between the create and the
+    /// first write; that is a transaction-format change and is out of scope here.
     fn classify(dir: &Dir, name: &str, entry: Option<&OwnedFile>) -> Class {
         let Some(e) = entry else { return Class::Unrecorded };
         match dir.stat(name) {
@@ -444,6 +460,8 @@ impl<'a> Adapter<'a> {
             Err(FsError::NotFound) => return Ok(()),
             Err(e) => return Err(format!("the folder cannot be opened safely ({}); it was left untouched", e.code())),
         };
+        // NEXT-11: the folder that is inspected and emptied below is the folder that is removed: its identity is read from this handle
+        let child_id = child.identity();
         let entries = child.list().map_err(|e| format!("the folder cannot be listed ({})", e.code()))?;
         let (mut unexpected, mut changed, mut ambiguous) = (0, 0, 0);
         let mut plan: Vec<(String, Expect)> = Vec::new();
@@ -468,7 +486,9 @@ impl<'a> Adapter<'a> {
                 .map_err(|e| format!("cannot remove a file this transaction created ({})", e.code()))?;
         }
         drop(child);
-        parent.remove_dir(folder).map_err(|e| format!("the folder is not empty or cannot be removed ({})", e.code()))
+        parent
+            .remove_dir_verified(folder, child_id)
+            .map_err(|e| format!("the folder is not empty, is not the folder that was inspected, or cannot be removed ({})", e.code()))
     }
 
     /// The snapshot folder: `pointer.json` and `versions/<v>/artifact.bin`, nothing else.
@@ -479,10 +499,14 @@ impl<'a> Adapter<'a> {
             Err(FsError::NotFound) => return Ok(()),
             Err(e) => return Err(format!("the snapshot cannot be opened safely ({}); it was left untouched", e.code())),
         };
+        // NEXT-11: the identity of every folder that is inspected below is kept, so that each folder removal at the end is bound to the
+        // folder that was inspected and emptied (not to whatever has the same name by then)
+        let snap_id = snap.identity();
         let top = snap.list().map_err(|e| format!("the snapshot cannot be listed ({})", e.code()))?;
         let (mut unexpected, mut changed, mut ambiguous) = (0, 0, 0);
         let mut plan: Vec<(Option<String>, String, Expect)> = Vec::new(); // (version folder, file, expect)
-        let mut version_folders: Vec<String> = Vec::new();
+        let mut version_folders: Vec<(String, Identity)> = Vec::new(); // (version folder, identity of the inspected folder)
+        let mut versions_id: Option<Identity> = None;
         for (name, kind) in &top {
             match (name.as_str(), kind) {
                 ("pointer.json", Kind::File) => {
@@ -495,12 +519,14 @@ impl<'a> Adapter<'a> {
                 }
                 ("versions", Kind::Dir) => {
                     let vs = snap.child("versions").map_err(|e| format!("the snapshot cannot be opened safely ({})", e.code()))?;
+                    versions_id = Some(vs.identity());
                     for (v, vk) in vs.list().map_err(|e| format!("the snapshot cannot be listed ({})", e.code()))? {
                         if vk != Kind::Dir {
                             unexpected += 1;
                             continue;
                         }
                         let vd = vs.child(&v).map_err(|e| format!("the snapshot cannot be opened safely ({})", e.code()))?;
+                        let vd_id = vd.identity();
                         for (f, fk) in vd.list().map_err(|e| format!("the snapshot cannot be listed ({})", e.code()))? {
                             if fk == Kind::File && f == "artifact.bin" {
                                 match Self::classify(&vd, &f, Self::by_rel(t, &format!("snapshots/{txn}/versions/{v}/artifact.bin"))) {
@@ -513,7 +539,7 @@ impl<'a> Adapter<'a> {
                                 unexpected += 1;
                             }
                         }
-                        version_folders.push(v);
+                        version_folders.push((v, vd_id));
                     }
                 }
                 _ => unexpected += 1,
@@ -530,15 +556,21 @@ impl<'a> Adapter<'a> {
             .map_err(|e| format!("cannot remove a file this transaction created ({})", e.code()))?;
         }
         if !version_folders.is_empty() {
+            let vsid = versions_id.ok_or_else(|| "the snapshot's versions folder was not inspected; it was left untouched".to_string())?;
             let vs = snap.child("versions").map_err(|e| e.code().to_string())?;
-            for v in &version_folders {
-                vs.remove_dir(v).map_err(|e| format!("cannot remove a snapshot folder ({})", e.code()))?;
+            if vs.identity() != vsid {
+                return Err("the snapshot's versions folder is no longer the folder that was inspected; it was left untouched".to_string());
+            }
+            for (v, vid) in &version_folders {
+                vs.remove_dir_verified(v, *vid).map_err(|e| format!("cannot remove a snapshot folder ({})", e.code()))?;
             }
             drop(vs);
-            snap.remove_dir("versions").map_err(|e| format!("cannot remove a snapshot folder ({})", e.code()))?;
+            snap.remove_dir_verified("versions", vsid).map_err(|e| format!("cannot remove a snapshot folder ({})", e.code()))?;
         }
         drop(snap);
-        d.snapshots.remove_dir(txn).map_err(|e| format!("the snapshot folder is not empty or cannot be removed ({})", e.code()))
+        d.snapshots.remove_dir_verified(txn, snap_id).map_err(|e| {
+            format!("the snapshot folder is not empty, is not the folder that was inspected, or cannot be removed ({})", e.code())
+        })
     }
 }
 
@@ -1263,15 +1295,18 @@ impl<'a> Adapter<'a> {
         if !versions.is_empty() {
             let svs = snap.create_child("versions").map_err(fs_err)?;
             let vtool = d.versions.child(&tool).map_err(fs_err)?;
+            let vtool_id = vtool.identity();
             for (v, id) in &versions {
                 let sv = svs.create_child(v).map_err(fs_err)?;
                 let vd = vtool.child(v).map_err(fs_err)?;
+                // NEXT-11: the folder that was emptied by the move is the folder that is removed
+                let vd_id = vd.identity();
                 vd.move_file("artifact.bin", &sv, "artifact.bin", *id).map_err(fs_err)?;
                 drop(vd);
-                vtool.remove_dir(v).map_err(fs_err)?;
+                vtool.remove_dir_verified(v, vd_id).map_err(fs_err)?;
             }
             drop(vtool);
-            d.versions.remove_dir(&tool).map_err(fs_err)?;
+            d.versions.remove_dir_verified(&tool, vtool_id).map_err(fs_err)?;
         }
         self.hit(Point::UninstallAfterVersionsMoved)?;
         t.state = TxnState::Activated;
@@ -1557,6 +1592,8 @@ impl<'a> Adapter<'a> {
             Err(FsError::NotFound) => return Ok(false),
             Err(e) => return Err(format!("the version path is a link, redirected or unsafe ({}); it was left untouched", e.code())),
         };
+        // NEXT-11: the folder that is inspected (and emptied below) is the folder that is removed
+        let vd_id = vd.identity();
         let entries = vd.list().map_err(|e| e.code().to_string())?;
         match entries.as_slice() {
             [] => {}
@@ -1578,7 +1615,9 @@ impl<'a> Adapter<'a> {
             }
         }
         drop(vd);
-        vtool.remove_dir(version).map_err(|e| format!("cannot remove the version folder ({})", e.code()))?;
+        vtool
+            .remove_dir_verified(version, vd_id)
+            .map_err(|e| format!("cannot remove the version folder, or it is not the folder that was inspected ({})", e.code()))?;
         Ok(true)
     }
 
@@ -1589,11 +1628,15 @@ impl<'a> Adapter<'a> {
             Err(FsError::NotFound) => return Ok(false),
             Err(e) => return Err(format!("the version root is a link, redirected or unsafe ({}); it was left untouched", e.code())),
         };
+        // NEXT-11: the folder that was found empty is the folder that is removed
+        let vtool_id = vtool.identity();
         if !vtool.list().map_err(|e| e.code().to_string())?.is_empty() {
             return Ok(false);
         }
         drop(vtool);
-        d.versions.remove_dir(&t.tool_id).map_err(|e| format!("cannot remove the version root ({})", e.code()))?;
+        d.versions
+            .remove_dir_verified(&t.tool_id, vtool_id)
+            .map_err(|e| format!("cannot remove the version root, or it is not the folder that was inspected ({})", e.code()))?;
         Ok(true)
     }
 

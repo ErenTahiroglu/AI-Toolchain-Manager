@@ -17,7 +17,34 @@ Seçilen klasör, yolu depoda yazılmadan, yalnızca **kapsam tanımlayıcısıy
 9. **Tam önizleme** (sizin okumanız için; hiçbir şeyi değiştirmez) → **onay düğmesine yalnızca siz basarsınız.** Ajan o düğmeye asla basmaz.
 10. **Kurulum:** tek seferlik izin, onay denetim kaydından sonra ve işlemden önce kalıcı olarak ayrılır; yalnızca geri okuma doğruysa *kullanıldı* olur.
 11. **Envanter 1 ve SHA-256 karşılaştırması;** SAC/Defender gözlemi (**ayar değişmeden**, yalnızca kayıt); dürüst sonuç. jq **çalıştırılmaz** (`--version` dahil), PATH'e eklenmez.
-12. **Beklenmeyen sonuçta otomatik temizlik veya yeniden deneme yoktur;** *"tek seferlik izin belirsiz"* durumunda uygulama izni **sıfırlamaz** — çözüm incelenmiş bir insan kararıdır.
+12. **Beklenmeyen sonuçta operatör tarafında otomatik temizlik, yeniden deneme veya izin sıfırlama yoktur** (uygulamanın *kendi işleminin* geri alması ve açılışta kurtarması ayrı şeylerdir ve vardır: aşağıdaki bölüme bakın). *"tek seferlik izin belirsiz"* durumunda uygulama izni **sıfırlamaz** — çözüm incelenmiş bir insan kararıdır.
+
+## Uygulamanın yerleşik davranışı ve operatör kısıtları (NEXT-11 düzeltmesi)
+
+> Bu listenin önceki hâli "otomatik temizlik yoktur" diyordu. Bu, kaynak koduyla **uyuşmuyordu** ve düzeltildi. Aşağıdakiler `adapter.rs` ve `install_flow.rs` okunarak yazıldı; **sıfır otomatik temizlik** vaadi ve **kalıntısız geri alınabilirlik** garantisi VERİLMEZ. Bu bölümü yazan NEXT-11 çalışması yerel ve işlenmemiştir (uncommitted); ilgili Rust derlemesi ve testleri **çalıştırılmadı** (NOT RUN).
+
+### Uygulamanın kendi yaptıkları (otomatik; operatör kapatamaz)
+
+- Kurulum işlemi **olağan bir hatayla** biterse uygulama, hemen ve aynı çağrıda, **işlemin kendi yazdığı** dosyaları geri almayı dener (`adapter.rs`: `finish` → `roll_back`). Bu bir **deneme**dir; her hatanın hemen ve tamamen geri alınacağı VAAT EDİLMEZ. Dört durum ayrı tutulur:
+  1. **Olağan hata, geri alma tamam:** geri alma `restored` veya `not_needed` ile biterse geçici dosyalar temizlenir ve kilit bırakılır.
+  2. **Olağan hata, geri alma eksik (`partial` / `failed`):** geri alınamayan dosyalar ve klasörler yerinde kalır, işlem `RollbackFailed` olur, kilit **kalır**, geçici dosyalar temizlenmez; durum `needs_attention` olarak bildirilir. Kalıntı dosyalar bu durumda beklenen sonuçtur.
+  3. **`Interrupted` (kesinti) ve süreç sonlanması:** `TxnError::Interrupted` yolunda `finish` **hiçbir geri alma yapmaz** (`Err(Interrupted)` olduğu gibi döner); bu, bir çökme benzetimidir. Süreç gerçekten sonlandığında (görev sonlandırma, elektrik kesintisi, çökme) hiçbir kod çalışmaz: işlem günlüğü yarım, dosyalar ve kilit yerinde kalır. Hiçbir şey o anda geri alınmaz.
+  4. **Sonraki açılış kurtarması:** yarım işlem ancak uygulama **bir sonraki kez açıldığında** ele alınır (aşağıya bakın); bu da başarısız olabilir.
+- Geri alma ve temizlik yalnızca **işlem günlüğünde kayıtlı ve doğrulanmış** dosyaları siler, tutamaç (handle) üzerinden: kimlik (birim + dosya numarası) ve tek bağlantı; dosya `Final` aşamasındaysa ayrıca boyut ve SHA-256. Yalnızca `Created` aşamasındaki dosya için içerik özeti **yoktur** (henüz yazılmamıştır): kimlik + bağlantı sayısı denetlenir. Kimliği hiç kaydedilmemiş (`Intended`) dosya silinmez. Bu kalan risk bilinir ve değiştirilmemiştir.
+- Boş klasörler, incelenip boşaltılan klasörün **kimliğiyle** silinir (NEXT-11 değişikliği; CI'da doğrulanmadı). Bu koruma yalnızca **incelemeden sonrası** içindir; aşağıdaki "inceleme öncesi" riske bakın.
+- Başarılı bir işlemden sonra, işlemin geçici (staging ve snapshot) dosyaları aynı kurallarla temizlenir.
+- Uygulama **her açılışta** (`install_flow.rs`: `startup` → `recover`) yarım kalmış **kendi** işlemlerini geri almayı ya da tamamlamayı **dener**; bu da başarısız olabilir. Geri alma başarısızsa durum `needs_attention` kalır ve sonraki her açılışta yeniden denenir. Günlüğü okunamayan ya da özet denetimini geçmeyen kayıt `CorruptJournal` olarak bildirilir ve dokunulmaz.
+- Kayıtta olmayan, değişmiş, belirsiz veya yabancı **dosyalar**, kod bunları **tespit edebildiği** ölçüde silinmez; olduğu gibi bırakılır ve bildirilir. Bu "yabancı hiçbir şey asla silinmez" anlamına GELMEZ; aşağıdaki iki açık risk bilinir ve **giderilmemiştir**. Temizlik başarısız olursa **artık dosyalar kalabilir**. Geri alma kısmî olabilir.
+- **Klasör değiştirme (inceleme öncesi) — AÇIK RİSK:** NEXT-11 ile boş klasör silme, **incelenip boşaltılan klasörün kimliğine** bağlandı; incelemeden **sonra** aynı adla başka bir klasör konursa silinmez. Ancak günlük yalnızca **dosya** kimliklerini kaydeder, klasör kimliklerini değil. Bu yüzden incelemeden **önce** aynı adla konmuş, farklı ama boş (ya da yalnızca kayıtlı dosyalarla eşleşen içerikli) bir klasör, işlemin kendi klasörü sayılır ve silinebilir. Bu risk giderilmemiştir; kapatmak için günlük biçiminde değişiklik gerekir (kapsam dışı).
+- **Günlük değiştirme (H3) — AÇIK RİSK, `DESIGN_BLOCKED`:** günlüğün ilk kaydı var olanın üzerine yazmayan taşımayla oluşturulur; **sonraki her kayıt** mevcut günlüğü değiştirerek yazar. Windows'ta bu değiştirme için küçük, belgelenmiş bir pencere **kalır**: aynı hesabın başka bir süreci, kimlik denetimi ile yeniden adlandırma arasında günlüğü silip aynı adla bir dosya koyarsa o dosyanın üzerine bu işlemin günlüğü yazılır. Etki alanı, yönetilen kökün sahip-yalnız `journal` klasöründeki o tek addır; macOS'ta durum değişimle yakalanıp geri alınır. Pencere kapatılmamıştır (`Adapter::save` belgesine ve `NEXT-11-DESIGN.md` dosyasına bakın). İlk etkin-sürüm işaretçisi ise var olanın üzerine yazmayan taşımayla oluşturulur.
+
+### Operatör kısıtları (siz ve ajan için)
+
+- Onaysız kaldırma (uninstall) yok.
+- Elle temizlik, elle silme veya izin sıfırlama yok.
+- Yeniden deneme yok — ne otomatik ne elle başlatılan — yeni ve açık bir yetki olmadan.
+- jq çalıştırılmaz (`--version` dahil); PATH, kısayol, zamanlanmış görev, kayıt defteri ve ajan yapılandırması değiştirilmez.
+- Belirsiz bir başarısızlıktan sonra, inceleme (triage) bitene kadar ATM yeniden başlatılmaz: yeniden başlatma, yukarıdaki otomatik kurtarmayı yeniden çalıştırır.
 
 ## Bu liste neyi kapsamaz
 

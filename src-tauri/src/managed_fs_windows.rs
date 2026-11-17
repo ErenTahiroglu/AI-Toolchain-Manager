@@ -552,6 +552,15 @@ impl DirImp {
     }
 
     pub fn remove_empty_dir(&self, name: &str) -> Result<(), FsError> {
+        self.remove_empty_dir_checked(name, None)
+    }
+
+    /// Opens the folder `name` WITHOUT following a reparse point and with DELETE access, reads kind and identity from that very handle,
+    /// refuses a link, a non-directory and (when `expect` is given) a directory whose identity is not `expect`, and only then deletes
+    /// THROUGH THAT HANDLE. The operating system refuses to delete a directory that is not empty, so this is never recursive.
+    /// `expect: None` is the older, identity-less form (`remove_empty_dir`).
+    pub fn remove_empty_dir_checked(&self, name: &str, expect: Option<Identity>) -> Result<(), FsError> {
+        hook::fire("before-dir-remove");
         let h = nt_open(
             self.h,
             &wide(name),
@@ -563,7 +572,13 @@ impl DirImp {
             null(),
         )?;
         let r = match handle_stat(h) {
-            Ok(s) if s.kind == Kind::Dir => delete_by_handle(h),
+            Ok(s) if s.kind == Kind::Dir => {
+                if expect.is_some_and(|i| i != s.identity) {
+                    Err(FsError::Changed)
+                } else {
+                    delete_by_handle(h)
+                }
+            }
             Ok(s) if s.kind == Kind::Link => Err(FsError::Link),
             Ok(_) => Err(FsError::NotDir),
             Err(e) => Err(e),

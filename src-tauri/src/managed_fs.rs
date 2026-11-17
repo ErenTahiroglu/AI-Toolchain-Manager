@@ -19,6 +19,9 @@
 //!   SHA-256 THROUGH THE OPEN HANDLE and deletes. Windows deletes through that same handle (`FileDispositionInformationEx`), so the
 //!   object deleted is exactly the one verified. macOS has no inode-based unlink: it confirms `(st_dev, st_ino)` with `fstatat`
 //!   immediately before `unlinkat`; a window of microseconds remains (documented in `docs/phase-3c`). No recursive deletion exists.
+//!   NEXT-11: [`Dir::remove_dir_verified`] does the same for an EMPTY folder: it opens the folder without following links, reads kind
+//!   and identity from that handle and deletes through it (Windows) or re-confirms `(st_dev, st_ino)` right before `unlinkat(AT_REMOVEDIR)`
+//!   (macOS, same microsecond window).
 //! * **Owner-only root.** The managed root is created with a protected DACL granting only the owner (`D:P(A;OICI;FA;;;OW)`) on
 //!   Windows and mode `0700` on macOS, and the result is read back and verified.
 //! * **Bounded.** Reads and hashes have explicit limits; directory listings are bounded; names are a strict ASCII subset.
@@ -410,11 +413,31 @@ impl Dir {
 
     /// Removes an EMPTY folder (never recursive; a link is refused, not followed). The caller must not hold an open `Dir` for the
     /// folder being removed (on Windows that handle would block the removal: reported as `Locked`).
+    ///
+    /// NEXT-11: this form binds NOTHING to the identity of the folder: a folder that replaced the inspected one under the same name
+    /// between the caller's inspection and this call is removed if it is empty. The installer's own transaction code therefore uses
+    /// [`Dir::remove_dir_verified`]; a source-scan test keeps `adapter.rs` from calling this one.
     pub fn remove_dir(&self, name: &str) -> Result<(), FsError> {
         if !valid_name(name) {
             return Err(FsError::InvalidName);
         }
         self.imp.remove_empty_dir(name)
+    }
+
+    /// NEXT-11: removes an EMPTY folder only if it is the folder with identity `expect` (normally `Dir::identity()` of the handle the
+    /// caller inspected and emptied). The folder is opened without following links, must be an ordinary directory, its identity is read
+    /// from that very handle and the deletion goes through that handle (Windows: `FileDispositionInformationEx` on a handle opened with
+    /// DELETE; the operating system refuses a non-empty folder). A different folder under the same name -- even an empty one -- is
+    /// refused with [`FsError::Changed`] and left untouched; a link is [`FsError::Link`]; never recursive.
+    ///
+    /// macOS has no inode-based `rmdir`: it confirms `(st_dev, st_ino)` with `fstatat` immediately before `unlinkat(AT_REMOVEDIR)`;
+    /// a window of microseconds remains there (the same documented limit as [`Dir::remove_file_verified`]). Like [`Dir::remove_dir`],
+    /// the caller must not hold an open `Dir` for the folder being removed.
+    pub fn remove_dir_verified(&self, name: &str, expect: Identity) -> Result<(), FsError> {
+        if !valid_name(name) {
+            return Err(FsError::InvalidName);
+        }
+        self.imp.remove_empty_dir_checked(name, Some(expect))
     }
 
     /// Moves a plain file into `to_dir` under `to` and REFUSES (with [`FsError::Exists`]) if anything at all already exists there --
@@ -468,14 +491,25 @@ impl Dir {
     /// the replacement of one known file. Anything else -- in particular [`FsError::Unsupported`] -- is a refusal: a volume that
     /// cannot do it is never used for managed state. It removes what it created and nothing else; a leftover after a crash is a
     /// folder named `capprobe-<random>` that is reported, never adopted.
+    ///
+    /// NEXT-11 cleanup contract: the identity of every scratch file is recorded the moment the file exists, and cleanup removes an entry
+    /// only if it still carries one of those identities (checked on the handle used for the deletion). An entry that does not -- a file
+    /// substituted under one of the probe's names, a link, a folder -- is KEPT, and the probe folder is removed only by identity
+    /// ([`Dir::remove_dir_verified`]), so a folder that is not empty or not the probe's own stays. Any cleanup failure is returned as an
+    /// error even when the capability itself was proven: the probe never reports "clean" while something is left behind. (Consequence:
+    /// a scratch file another program holds open at that instant makes the probe, and so the root check that calls it, fail closed.)
     pub fn probe_atomic_rename(&self) -> Result<(), FsError> {
         let name = format!("capprobe-{}", &uuid::Uuid::new_v4().simple().to_string()[..16]);
         let d = self.create_child(&name)?;
+        let dir_id = d.identity();
+        let created: std::cell::RefCell<Vec<Identity>> = std::cell::RefCell::new(Vec::new());
         let write = |n: &str| -> Result<Identity, FsError> {
             let mut f = d.create_file(n)?;
+            let id = f.stat()?.identity;
+            created.borrow_mut().push(id); // recorded before any data is written
             f.write_all(b"probe")?;
             f.sync_all()?;
-            Ok(f.stat()?.identity)
+            Ok(id)
         };
         let outcome = (|| {
             let (a, b) = (write("a.bin")?, write("b.bin")?);
@@ -492,12 +526,35 @@ impl Dir {
             }
             Ok(())
         })();
+        let mine: Vec<Identity> = created.borrow().clone();
+        let mut cleanup: Option<FsError> = None;
         for n in ["a.bin", "b.bin", "c.bin"] {
-            let _ = d.remove_file_verified(n, &Expect::default());
+            match d.stat(n) {
+                Ok(None) => {}
+                // the very object this probe created: deleted through a handle that is checked against exactly that identity
+                Ok(Some(s)) if s.kind == Kind::File && mine.contains(&s.identity) => {
+                    if let Err(e) = d.remove_file_verified(n, &Expect { identity: Some(s.identity), size: None, sha256: None }) {
+                        cleanup.get_or_insert(e);
+                    }
+                }
+                // anything else under these names is not the probe's: kept and reported
+                Ok(Some(_)) => {
+                    cleanup.get_or_insert(FsError::Changed);
+                }
+                Err(e) => {
+                    cleanup.get_or_insert(e);
+                }
+            }
         }
         drop(d);
-        let _ = self.remove_dir(&name);
-        outcome
+        if let Err(e) = self.remove_dir_verified(&name, dir_id) {
+            cleanup.get_or_insert(e);
+        }
+        match (outcome, cleanup) {
+            (Err(e), _) => Err(e),
+            (Ok(()), Some(e)) => Err(e),
+            (Ok(()), None) => Ok(()),
+        }
     }
 
     /// The name of the file system this folder lives on (`ntfs`, `apfs`, ...), when the platform reports it. Used only to record on
