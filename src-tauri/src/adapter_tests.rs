@@ -1986,3 +1986,198 @@ fn a_synthetic_notice_sidecar_is_never_deleted_adopted_or_ignored_and_blocks_des
     fs::remove_file(&sidecar).unwrap();
     assert!(l.uninstall(&l.v2, None).is_ok());
 }
+
+// ---- NEXT-11: ownership phases, journal replacement residual, folder removal by identity ---------------------------------------------
+// AUTHOR EVIDENCE: written without a Rust compiler in the authoring environment (local builds were blocked); they have NOT been run.
+
+#[test]
+fn a_created_file_is_known_by_identity_only_a_final_file_by_content_too_and_an_intended_one_is_never_deleted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let dir = Dir::open_anchor(&base).unwrap();
+    let mut f = dir.create_file("owned.bin").unwrap();
+    f.write_all(b"original").unwrap();
+    f.sync_all().unwrap();
+    let id = f.stat().unwrap().identity;
+    drop(f);
+    let entry = |phase: Phase, sha: Option<String>, size: Option<u64>| OwnedFile {
+        role: "role".to_string(),
+        phase,
+        rels: vec!["x/owned.bin".to_string()],
+        sha256: sha,
+        size,
+        identity: Some(pair(id)),
+    };
+    let created = entry(Phase::Created, None, None);
+    let fin = entry(Phase::Final, Some(sha256_hex_bytes(b"original")), Some(8));
+    let intended = entry(Phase::Intended, None, None);
+
+    assert!(
+        matches!(Adapter::classify(&dir, "owned.bin", Some(&intended)), Class::Ambiguous),
+        "an intent alone proves nothing: never deleted"
+    );
+    assert!(matches!(Adapter::classify(&dir, "owned.bin", Some(&created)), Class::Ours(_)));
+    assert!(matches!(Adapter::classify(&dir, "owned.bin", Some(&fin)), Class::Ours(_)));
+    assert!(matches!(Adapter::classify(&dir, "owned.bin", None), Class::Unrecorded));
+
+    // the SAME object with other bytes of the same length: a `Created` record cannot tell (RECORDED RESIDUAL, no content digest exists yet),
+    // a `Final` record can
+    fs::write(base.join("owned.bin"), b"changed!").unwrap();
+    assert_eq!(
+        dir.stat("owned.bin").unwrap().unwrap().identity,
+        id,
+        "precondition: the in-place write kept the original object (same identity)"
+    );
+    assert!(
+        matches!(Adapter::classify(&dir, "owned.bin", Some(&created)), Class::Ours(_)),
+        "documented: Created is identity and link count only"
+    );
+    assert!(matches!(Adapter::classify(&dir, "owned.bin", Some(&fin)), Class::Changed), "Final verifies size and SHA-256");
+
+    // ANOTHER object under the same name (even with the original bytes): changed for both phases.
+    // Deterministic: the foreign file is created while the original still exists, so the two identities differ by construction (this does
+    // not rely on the file system never re-using the identity of a deleted file); a rename keeps the foreign file's own identity.
+    fs::write(base.join("foreign.bin"), b"original").unwrap();
+    let foreign = dir.stat("foreign.bin").unwrap().unwrap().identity;
+    assert_ne!(foreign, id, "precondition: two files that exist at the same time are two objects");
+    fs::remove_file(base.join("owned.bin")).unwrap();
+    fs::rename(base.join("foreign.bin"), base.join("owned.bin")).unwrap();
+    let now = dir.stat("owned.bin").unwrap().unwrap().identity;
+    assert_eq!(now, foreign, "precondition: the object under the recorded name is now the foreign file");
+    assert_ne!(now, id, "precondition: and it is not the recorded object");
+    assert!(matches!(Adapter::classify(&dir, "owned.bin", Some(&created)), Class::Changed));
+    assert!(matches!(Adapter::classify(&dir, "owned.bin", Some(&fin)), Class::Changed));
+    assert_eq!(fs::read(base.join("owned.bin")).unwrap(), b"original", "classification deletes nothing");
+}
+
+#[test]
+fn the_adapter_removes_folders_only_by_identity_and_never_by_a_blank_expectation() {
+    let src = include_str!("adapter.rs").replace("\r\n", "\n");
+    let production = src.split("#[cfg(test)]\n#[path").next().unwrap();
+    assert!(!production.contains(".remove_dir("), "a folder removal that binds no identity must not appear in the adapter");
+    assert!(production.matches(".remove_dir_verified(").count() >= 8, "every folder removal of the transaction code is identity-bound");
+    assert!(!production.contains("Expect::default()"), "no deletion by a blank expectation");
+}
+
+#[test]
+fn a_journal_swapped_in_the_gap_before_a_replacing_save_touches_nothing_but_that_one_name() {
+    // H3 RESIDUAL, pinned and NOT turned into a security claim. On Windows the replacing rename cannot be bound to the destination object, so
+    // the alien may be replaced by the next journal (documented in `Adapter::save`): there the test only requires that the injection really
+    // happened on the transaction's own journal and that the result is one of the two documented states. On macOS the swap is detected: the
+    // alien is preserved and the install fails. On every platform a foreign file with another name in the journal folder, and everything
+    // outside the managed root, stay exactly as they were.
+    use std::{cell::RefCell, rc::Rc};
+    let l = lab();
+    let jdir = l.p("journal");
+    let canary = jdir.join("canary-n11.txt");
+    fs::write(&canary, b"foreign file next to the journals").unwrap();
+    const ALIEN: &[u8] = b"alien journal created in the gap";
+
+    #[derive(Default)]
+    struct Seen {
+        renames: u32,
+        steps: Vec<String>,
+        target: Option<PathBuf>,
+        txn: Option<String>,
+    }
+    let seen = Rc::new(RefCell::new(Seen::default()));
+    let (hook_seen, watched) = (seen.clone(), jdir.clone());
+    crate::managed_fs::hook::set(move |stage| {
+        if stage != "before-rename" {
+            return;
+        }
+        let mut s = hook_seen.borrow_mut();
+        s.renames += 1;
+        // the first rename creates the journal, the second one is the first REPLACING save
+        if s.renames != 2 {
+            return;
+        }
+        s.steps.push("the replacing rename was reached".to_string());
+        let jsons: Vec<PathBuf> =
+            fs::read_dir(&watched).unwrap().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")).collect();
+        if jsons.len() != 1 {
+            s.steps.push(format!("FAILED: expected exactly one journal, found {}", jsons.len()));
+            return;
+        }
+        let j = jsons[0].clone();
+        // the target is the transaction's own journal: valid JSON that names the transaction and carries a digest, under the name `<txn>.json`
+        let parsed = fs::read(&j).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+        let txn = parsed.as_ref().and_then(|v| v.get("txnId")).and_then(|v| v.as_str()).map(str::to_string);
+        let digest_ok = parsed.as_ref().and_then(|v| v.get("journalDigest")).and_then(|v| v.as_str()).is_some_and(|d| !d.is_empty());
+        let name_ok = txn.as_ref().is_some_and(|t| j.file_name().is_some_and(|n| n.to_string_lossy() == format!("{t}.json")));
+        s.steps.push(if digest_ok && name_ok {
+            "the target is the transaction's own journal".to_string()
+        } else {
+            "FAILED: the target is not the transaction's journal".to_string()
+        });
+        s.txn = txn;
+        s.steps.push(match fs::remove_file(&j) {
+            Ok(()) => "removed the journal".to_string(),
+            Err(e) => format!("FAILED: remove ({e})"),
+        });
+        s.steps.push(match fs::write(&j, ALIEN) {
+            Ok(()) => "created the alien under the journal name".to_string(),
+            Err(e) => format!("FAILED: create ({e})"),
+        });
+        s.target = Some(j);
+    });
+    let r = l.install(&l.v1, None);
+    crate::managed_fs::hook::clear();
+
+    // the injection happened, exactly once, on the intended file, and no step failed (a failed injection must fail the test, not pass it)
+    let s = seen.borrow();
+    assert_eq!(
+        s.steps,
+        vec![
+            "the replacing rename was reached",
+            "the target is the transaction's own journal",
+            "removed the journal",
+            "created the alien under the journal name",
+        ],
+        "the fault injection did not run as planned (renames seen: {}): {r:?}",
+        s.renames
+    );
+    let target = s.target.clone().expect("the injected journal path");
+    let txn = s.txn.clone().expect("the transaction id read from the journal");
+
+    // on every platform
+    assert_eq!(fs::read(&canary).unwrap(), b"foreign file next to the journals");
+    l.outside_is_untouched();
+
+    #[cfg(unix)]
+    {
+        assert_eq!(fs::read(&target).unwrap(), ALIEN, "macOS detects the substitution, swaps back and keeps the alien");
+        assert!(
+            matches!(r, Err(TxnError::Failed { .. }) | Err(TxnError::Refused(_))),
+            "the install must not succeed over a substituted journal: {r:?}"
+        );
+    }
+    #[cfg(windows)]
+    {
+        // DOCUMENTED H3 WINDOW: no preservation is asserted. The name holds either the alien (the replace did not take it) or a journal of
+        // this very transaction (the replace overwrote the alien). Anything else, including a missing file, is a defect.
+        let now = fs::read(&target).expect("a file must exist under the journal name");
+        let replaced_by_journal = serde_json::from_slice::<serde_json::Value>(&now)
+            .ok()
+            .and_then(|v| v.get("txnId").and_then(|t| t.as_str()).map(str::to_string))
+            .is_some_and(|t| t == txn);
+        assert!(now == ALIEN || replaced_by_journal, "unexpected content under the journal name");
+        eprintln!("H3 window on this run: {}", if now == ALIEN { "alien preserved" } else { "alien replaced by the journal (documented)" });
+    }
+    let _ = &txn; // used on Windows only
+}
+
+#[test]
+fn a_partial_journal_write_leaves_a_temporary_file_that_recovery_reports_and_never_deletes() {
+    let l = lab();
+    let partial = l.p("journal").join("txn-00000000000000000000000000000000.deadbeef.tmp");
+    let bytes: &[u8] = br#"{"schemaVersion":1,"txnId":"txn-0"#;
+    fs::write(&partial, bytes).unwrap();
+    for _ in 0..2 {
+        let out = l.recover(None);
+        assert!(out.iter().any(|r| matches!(r, Recovered::LeftoversRetained(who, _) if who == "journal")), "{out:?}");
+        assert_eq!(fs::read(&partial).unwrap(), bytes, "an unrecognised temporary file is kept byte-for-byte");
+    }
+    assert!(l.journals().is_empty(), "no journal was invented from the partial file");
+    l.outside_is_untouched();
+}

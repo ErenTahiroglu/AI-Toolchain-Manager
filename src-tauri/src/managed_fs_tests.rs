@@ -715,3 +715,148 @@ fn the_capability_probe_proves_the_volume_and_leaves_nothing_and_a_missing_primi
     b.anchor.probe_atomic_rename().unwrap();
     assert_eq!(fs::read(b.base.join("keep.txt")).unwrap(), b"user");
 }
+
+// ---- NEXT-11: identity-bound folder removal and the capability probe's cleanup -----------------------------------------------------
+// AUTHOR EVIDENCE: written without a Rust compiler in the authoring environment (local builds were blocked); they have NOT been run.
+
+#[test]
+fn a_verified_folder_removal_needs_the_expected_identity_and_is_never_recursive() {
+    let b = bed();
+    let sub = b.anchor.create_child("sub").unwrap();
+    let id = sub.identity();
+    drop(sub);
+    let other = b.anchor.create_child("other").unwrap().identity();
+    // the identity of ANOTHER folder: refused, the folder stays
+    assert_eq!(b.anchor.remove_dir_verified("sub", other).err(), Some(FsError::Changed));
+    assert!(b.base.join("sub").is_dir());
+    assert_eq!(b.anchor.remove_dir_verified("missing", id).err(), Some(FsError::NotFound));
+    // the right identity but not empty: refused by the operating system, nothing inside is touched
+    let sub = b.anchor.child("sub").unwrap();
+    put(&sub, "precious.db", b"precious");
+    drop(sub);
+    assert_eq!(b.anchor.remove_dir_verified("sub", id).err(), Some(FsError::NotEmpty));
+    assert_eq!(fs::read(b.base.join("sub/precious.db")).unwrap(), b"precious");
+    // emptied by its owner, then removed by identity; the other folder is untouched
+    fs::remove_file(b.base.join("sub/precious.db")).unwrap();
+    b.anchor.remove_dir_verified("sub", id).unwrap();
+    assert!(!b.base.join("sub").exists());
+    assert!(b.base.join("other").is_dir());
+}
+
+/// Log of what a fault-injection hook really did. Every step is recorded as it happens, so a test can prove that the injection fired and
+/// that none of its steps failed (a silently failed injection would make a "never deleted" assertion pass for the wrong reason).
+type InjectionLog = std::rc::Rc<std::cell::RefCell<Vec<String>>>;
+
+fn note<T>(log: &InjectionLog, step: &str, r: std::io::Result<T>) {
+    log.borrow_mut().push(match r {
+        Ok(_) => format!("{step}: ok"),
+        Err(e) => format!("{step}: FAILED ({e})"),
+    });
+}
+
+fn assert_injected(log: &InjectionLog, steps: &[&str]) {
+    let want: Vec<String> = steps.iter().map(|s| format!("{s}: ok")).collect();
+    assert_eq!(*log.borrow(), want, "the fault injection did not run exactly as planned, so the assertions below would prove nothing");
+}
+
+#[test]
+fn a_folder_swapped_in_the_gap_before_a_verified_removal_is_never_deleted() {
+    let b = bed();
+    let id = b.anchor.create_child("victim").unwrap().identity();
+    let (path, moved) = (b.base.join("victim"), b.base.join("victim-moved"));
+    let log = InjectionLog::default();
+    let hook_log = log.clone();
+    hook::set(move |stage| {
+        if stage == "before-dir-remove" {
+            // another process of the same user puts a DIFFERENT, empty folder under the same name after the caller inspected the original
+            note(&hook_log, "move the original away", fs::rename(&path, &moved));
+            note(&hook_log, "create the newcomer", fs::create_dir(&path));
+        }
+    });
+    let r = b.anchor.remove_dir_verified("victim", id);
+    hook::clear();
+    assert_injected(&log, &["move the original away", "create the newcomer"]);
+    assert_eq!(r.err(), Some(FsError::Changed));
+    assert!(b.base.join("victim").is_dir(), "the newcomer under the name stays");
+    assert!(b.base.join("victim-moved").is_dir(), "the original stays too: nothing was deleted");
+}
+
+#[test]
+fn a_link_in_place_of_a_folder_is_refused_by_the_verified_removal_and_its_target_stays() {
+    let b = bed();
+    let outside = b.base.parent().unwrap().join("outside-dir-n11");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("keep.txt"), b"outside content").unwrap();
+    let id = b.anchor.create_child("victim").unwrap().identity();
+    fs::remove_dir(b.base.join("victim")).unwrap();
+    assert!(make_dir_link(&b.base.join("victim"), &outside));
+    assert_eq!(b.anchor.remove_dir_verified("victim", id).err(), Some(FsError::Link));
+    assert_eq!(fs::read(outside.join("keep.txt")).unwrap(), b"outside content", "the target was not touched");
+    remove_dir_link(&b.base.join("victim"));
+}
+
+#[test]
+fn a_file_is_not_a_folder_for_the_verified_removal() {
+    let b = bed();
+    let id = b.anchor.create_child("victim").unwrap().identity();
+    fs::remove_dir(b.base.join("victim")).unwrap();
+    fs::write(b.base.join("victim"), b"a file now").unwrap();
+    assert_eq!(b.anchor.remove_dir_verified("victim", id).err(), Some(FsError::NotDir));
+    assert_eq!(fs::read(b.base.join("victim")).unwrap(), b"a file now");
+}
+
+fn probe_folders(base: &Path) -> Vec<PathBuf> {
+    fs::read_dir(base)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("capprobe-")))
+        .collect()
+}
+
+#[test]
+fn the_probe_keeps_a_substituted_scratch_file_and_reports_the_leftover() {
+    let b = bed();
+    let base = b.base.clone();
+    let log = InjectionLog::default();
+    let hook_log = log.clone();
+    let mut done = false;
+    hook::set(move |stage| {
+        if stage == "before-delete" && !done {
+            done = true;
+            // a file of ANOTHER object appears under the name the probe is about to clean up (or has just finished using)
+            let probes = probe_folders(&base);
+            if probes.len() != 1 {
+                hook_log.borrow_mut().push(format!("find the probe folder: FAILED ({} folders)", probes.len()));
+                return;
+            }
+            hook_log.borrow_mut().push("find the probe folder: ok".to_string());
+            let c = probes[0].join("c.bin");
+            note(&hook_log, "move c.bin away", fs::rename(&c, probes[0].join("c-moved.bin")));
+            note(&hook_log, "create the alien under the probe name", fs::write(&c, b"alien under a probe name"));
+        }
+    });
+    let r = b.anchor.probe_atomic_rename();
+    hook::clear();
+    assert_injected(&log, &["find the probe folder", "move c.bin away", "create the alien under the probe name"]);
+    assert!(r.is_err(), "a probe that leaves something behind is never reported as clean: {r:?}");
+    #[cfg(windows)]
+    assert_eq!(r.err(), Some(FsError::NotEmpty), "the cleanup deleted the verified object by handle; the alien made the folder non-empty");
+    #[cfg(unix)]
+    assert_eq!(r.err(), Some(FsError::Changed), "the substitution was detected during the probe itself");
+    let left = probe_folders(&b.base);
+    assert_eq!(left.len(), 1, "the probe folder stays because it is not empty");
+    assert_eq!(fs::read(left[0].join("c.bin")).unwrap(), b"alien under a probe name", "the substituted file was not deleted");
+}
+
+#[test]
+fn the_probe_cleanup_is_bound_to_identities_in_the_source() {
+    let src = include_str!("managed_fs.rs").replace("\r\n", "\n");
+    let from = src.find("pub fn probe_atomic_rename").expect("probe");
+    let to = src.find("pub fn filesystem_name").expect("next function");
+    let body = &src[from..to];
+    assert!(!body.contains("Expect::default()"), "the probe's cleanup must not delete by a blank expectation");
+    assert!(!body.contains(".remove_dir("), "the probe folder is removed by identity");
+    assert!(body.contains("remove_dir_verified"));
+    assert!(body.contains("mine.contains"), "only entries that carry an identity the probe recorded are deleted");
+}

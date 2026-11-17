@@ -351,13 +351,34 @@ impl DirImp {
     }
 
     pub fn remove_empty_dir(&self, name: &str) -> Result<(), FsError> {
+        self.remove_empty_dir_checked(name, None)
+    }
+
+    /// NEXT-11: with `expect: Some(identity)` the folder must be exactly that folder. There is no inode-based `rmdir` on macOS, so the
+    /// identity of the NAME is read with `fstatat(AT_SYMLINK_NOFOLLOW)` and confirmed a second time immediately before
+    /// `unlinkat(AT_REMOVEDIR)`; a window of microseconds remains (documented, the same limit as the verified file deletion).
+    /// `AT_REMOVEDIR` removes only an empty directory, so this is never recursive.
+    pub fn remove_empty_dir_checked(&self, name: &str, expect: Option<Identity>) -> Result<(), FsError> {
+        hook::fire("before-dir-remove");
         let c = cname(name)?;
         // a link is refused, not followed: unlinkat(AT_REMOVEDIR) on a symlink fails with ENOTDIR, but check explicitly first
         match self.stat_name(name)? {
             None => return Err(FsError::NotFound),
             Some(s) if s.kind == Kind::Link => return Err(FsError::Link),
             Some(s) if s.kind != Kind::Dir => return Err(FsError::NotDir),
+            Some(s) if expect.is_some_and(|i| i != s.identity) => return Err(FsError::Changed),
             Some(_) => {}
+        }
+        if let Some(want) = expect {
+            // confirm the NAME still designates the verified folder, immediately before the removal
+            // SAFETY: zeroed stat is a valid out-parameter.
+            let mut now: libc::stat = unsafe { std::mem::zeroed() };
+            if unsafe { libc::fstatat(self.fd, c.as_ptr(), &mut now, libc::AT_SYMLINK_NOFOLLOW) } != 0 {
+                return Err(map_errno(errno()));
+            }
+            if stat_of(&now).identity != want || kind_of(now.st_mode) != Kind::Dir {
+                return Err(FsError::Changed);
+            }
         }
         // SAFETY: valid descriptor and name; AT_REMOVEDIR removes only an empty directory.
         if unsafe { libc::unlinkat(self.fd, c.as_ptr(), libc::AT_REMOVEDIR) } != 0 {
