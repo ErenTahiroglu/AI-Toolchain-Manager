@@ -1,0 +1,1779 @@
+name: jq-pilot exact-source experimental build
+
+# JQ-PILOT-NEXT-13 R6. EXPERIMENTAL / UNSIGNED / NOT A RELEASE / NOT INDEPENDENTLY REVIEWED.
+# Purpose: build ONE unsigned, unbundled, debug, Windows x64 executable with the non-default jq-pilot feature from the exact accepted
+# NEXT-11 source commit, for ONE future separately authorized manual test. It builds nothing else.
+# It lives only on the branch ci/next13-r6-jqpilot-exact-8abe0e6 (one workflow-only commit on top of 0fa04d8). It must never be merged into
+# development or main, and it never runs there (exact branch name below, plus a job guard, plus a runtime check).
+# Two checkouts: "workflow" is the branch that holds this file (used only for the pin policy tools and tests); "source" is the accepted
+# commit and is the ONLY tree that is built. Every build step runs inside source.
+# It downloads no jq, runs no test of the application, signs nothing, creates no release and installs nothing.
+# PUBLICATION: the repository is public. An uploaded Actions artifact is NOT a GitHub Release and NOT a production distribution, but it is
+# downloadable by GitHub users who have artifact read access to this repository during its retention. The owner has not yet decided this, so
+# Gate 0 refuses to run while PUBLICATION_DECISION is UNDECIDED. Changing that value is an owner decision and needs a new review of this file.
+# REPEAT RUNS: the job runs only for run attempt 1. That does not stop a different commit pushed to the same branch from starting its own
+# first attempt, so this file is NOT a one-use capability. Exactly one authorized push is a procedure, not something this file can enforce.
+# EVIDENCE TRUST BOUNDARY: the launcher records, the verifier and the hash re-checks below detect honest mistakes and simple tampering. They run
+# as the same runner user as the build, so they are NOT an independent attestation against a hostile process of that user.
+# EFFECTIVE CARGO CONFIGURATION (R6): Cargo runs with a fresh CARGO_HOME under RUNNER_TEMP, the genuine toolchain bin folder first in PATH, and RUSTC set to the
+# genuine rustc.exe. Before each Cargo or Tauri run the environment, the Cargo configuration search path (every ancestor of src-tauri) and the lookup of cargo.exe
+# are audited. The lookup is a MODEL of the Windows search order (INFERRED); it is not proof about the process that Tauri starts, and it does not pin the MSVC
+# linker or the Windows SDK. Tauri also starts one unrecorded 'cargo metadata --no-deps' child by PATH lookup, and 'rustup target list'.
+# R6 binds the bare 'rustup' lookup of Tauri (desktop.rs line 283) to ONE recorded rustup.exe (path and SHA-256, recorded before any toolchain command) with the same
+# lookup model as cargo.exe, and binds every Node require of the Tauri loader to the expected file by asking Node itself (resolution only, nothing is loaded).
+# Both remain same-runner-user checks and the Windows lookup model is derived from std source text, not observed (RUNTIME_UNVERIFIED).
+# A green run says nothing about Smart App Control acceptance on any computer.
+
+on:
+  push:
+    branches: [ci/next13-r6-jqpilot-exact-8abe0e6]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jq-pilot-exact-source-build-r6
+  cancel-in-progress: false
+
+env:
+  PUBLICATION_DECISION: UNDECIDED
+  EXPECT_REPO: ErenTahiroglu/AI-Toolchain-Manager
+  EXPECT_BRANCH: ci/next13-r6-jqpilot-exact-8abe0e6
+  ACCEPTED_COMMIT: 8abe0e62c5ff5bcc55550a61fc26c498b0384d24
+  ACCEPTED_TREE: 30c924be09a2db745b0e8dca009f884446e8a36a
+  BASE_COMMIT: 0fa04d8d30b2ce416ff5909f6d27af738c49326e
+  BASE_TREE: 789e607b402e4511429143a500a6072bc31869d5
+  CI_TESTED_MERGE_COMMIT: aa1cf5d2318e942293d9767692956a251b4a9ebb
+  ACCEPTED_CI_RUN: "44203040323"
+  RUST_VERSION: 1.100.0
+  TARGET: x86_64-pc-windows-msvc
+  WORKFLOW_FILE: .github/workflows/jq-pilot-exact-source-build.yml
+
+jobs:
+  build:
+    name: jq-pilot exact-source experimental build (Windows x64)
+    if: github.repository == 'ErenTahiroglu/AI-Toolchain-Manager' && github.event_name == 'push' && github.ref == 'refs/heads/ci/next13-r6-jqpilot-exact-8abe0e6' && github.run_attempt == 1
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Gate 0 - owner publication decision (fails closed while undecided)
+        id: gate0
+        run: |
+          set -eu
+          case "${PUBLICATION_DECISION:-}" in
+            OWNER_APPROVED_PUBLIC_ACTIONS_ARTIFACT) echo "GATE0 PASS: the owner approved a public Actions artifact" ;;
+            *) echo "GATE0 REFUSED: the owner has not approved publication of an Actions artifact (value: ${PUBLICATION_DECISION:-unset})"; exit 1 ;;
+          esac
+
+      - name: Helper library and verifiers (no network, no checkout)
+        id: lib
+        run: |
+          set -eu
+          RT="$(cygpath -u "$RUNNER_TEMP")"
+          mkdir -p "$RT/n13"
+          cat > "$RT/n13/lib.sh" <<'N13_LIB'
+          set -euo pipefail
+          N13="$(cygpath -u "$RUNNER_TEMP")/n13"
+          N13W="$(cygpath -m "$RUNNER_TEMP")/n13"
+          fail() { local LC_ALL=C m="$*"; m="${m//[^ -~]/?}"; echo "FAIL: ${m:0:500}" >&2; exit 1; }
+          eq() {
+            [ -n "$1" ] || fail "$3: the actual value is empty"
+            [ -n "$2" ] || fail "$3: the expected value is empty"
+            [ "$1" = "$2" ] || fail "$3: got '$1', expected '$2'"
+          }
+          is_sha1() { local re='^[0-9a-f]{40}$'; [[ "$1" =~ $re ]] || fail "not a full SHA-1: '$1'"; }
+          is_sha256() { local re='^[0-9a-f]{64}$'; [[ "$1" =~ $re ]] || fail "not a SHA-256: '$1'"; }
+          is_semver() { local re='^[0-9]+\.[0-9]+\.[0-9]+$'; [[ "$1" =~ $re ]] || fail "not a version number: '$1'"; }
+          oneline() { local LC_ALL=C re='^[ -~]+$'; [[ "$1" =~ $re ]] || fail "$2 is empty, has several lines, or has control or non-ASCII characters"; }
+          safe_val() {
+            local LC_ALL=C v="$1" re='^[A-Za-z0-9._:/+@~-]+$'
+            [ "${#v}" -ge 1 ] && [ "${#v}" -le 400 ] || fail "a value has a bad length"
+            [[ "$v" =~ $re ]] || fail "a value has characters outside the safe token set"
+          }
+          emit_env() {
+            local n="$1" v="$2" re='^(N13_[A-Z0-9_]{1,40}|RUSTUP_TOOLCHAIN)$'
+            [[ "$n" =~ $re ]] || fail "refused environment name: $n"
+            safe_val "$v"
+            [ -n "${GITHUB_ENV:-}" ] || fail "GITHUB_ENV is not set"
+            printf '%s=%s\n' "$n" "$v" >> "$GITHUB_ENV" || fail "cannot write GITHUB_ENV"
+          }
+          env_hygiene() {
+            local n u
+            while IFS= read -r n; do
+              u="${n^^}"
+              case "$u" in
+                CARGO_HOME|RUSTUP_HOME|RUSTUP_TOOLCHAIN|RUSTC|RUST_VERSION) ;;
+                CARGO_*|RUST*|TAURI_*|NAPI_*|NODE_OPTIONS|NODE_PATH|CL|_CL_|LINK|_LINK_|CC|CXX|AR|CFLAGS|CXXFLAGS|LDFLAGS|ARFLAGS|CC_*|CXX_*|CFLAGS_*|CXXFLAGS_*|AR_*|CRATE_CC_*|LIBCLANG_PATH|BINDGEN_*) fail "a forbidden environment variable is set: $u" ;;
+              esac
+            done < <(compgen -e)
+          }
+          gitq() { local d="$1" o; shift; o="$(git -C "$d" "$@")" || fail "git -C $d $* failed"; printf '%s\n' "$o"; }
+          tree_of() { gitq "$1" rev-parse --verify "$2^{tree}"; }
+          one_parent() {
+            local d="$1" want="$2" line
+            line="$(git -C "$d" rev-list --parents -n 1 HEAD)" || fail "git rev-list failed in $d"
+            set -- $line
+            [ "$#" -eq 2 ] || fail "the commit in $d has $(( $# - 1 )) parents, exactly one is required"
+            eq "$2" "$want" "the parent of the commit in $d"
+          }
+          sha256_of() {
+            local o re='^[0-9a-f]{64}$'
+            o="$(sha256sum -- "$1")" || fail "sha256sum failed for $1"
+            o="${o%% *}"; [[ "$o" =~ $re ]] || fail "not a SHA-256: '$o'"; printf '%s' "$o"
+          }
+          hash_is() { local h; h="$(sha256_of "$1")" || fail "cannot hash $3"; is_sha256 "$h"; eq "$h" "$2" "$3"; }
+          clean_tree() {
+            local o; o="$(git -C "$1" status --porcelain=v1 --untracked-files=all)" || fail "git status failed in $1"
+            [ -z "$o" ] || fail "the tree in $1 is not clean: $o"
+          }
+          no_credentials() {
+            local rc=0 o
+            o="$(git -C "$1" config --local --get-regexp 'extraheader' 2>&1)" || rc=$?
+            case "$rc" in
+              1) ;;
+              0) fail "a checkout credential header is persisted in $1" ;;
+              *) fail "git config failed (rc=$rc) in $1: $o" ;;
+            esac
+            git -C "$1" config --local --list > /dev/null || fail "the local git config of $1 cannot be read"
+          }
+          cmp_same() { local rc=0; cmp -s -- "$1" "$2" || rc=$?; case "$rc" in 0) ;; 1) fail "files differ: $1 / $2" ;; *) fail "cmp failed (rc=$rc)" ;; esac; }
+          cmp_differs() { local rc=0; cmp -s -- "$1" "$2" || rc=$?; case "$rc" in 1) ;; 0) fail "files are identical: $1 / $2" ;; *) fail "cmp failed (rc=$rc)" ;; esac; }
+          canon_get() {
+            local v
+            v="$(python "$N13W/verify_cargo.py" canon-get "$N13W/canon.json" "$1")" || fail "canon-get $1 failed"
+            safe_val "$v"
+            printf '%s' "$v"
+          }
+          plain_file() { python "$N13W/verify_cargo.py" plain "$1" || fail "not a plain file: $1"; }
+          plain_dir() { python "$N13W/verify_cargo.py" plaindir "$1" || fail "not a plain folder: $1"; }
+          pin_env() {
+            local h r b bu
+            h="$(canon_get cargo_home_m)"
+            r="$(canon_get real_rustc_m)"
+            b="$(canon_get toolchain_bin_m)"
+            bu="$(cygpath -u "$b")" || fail "cygpath failed"
+            export CARGO_HOME="$h"
+            export RUSTC="$r"
+            export RUSTUP_TOOLCHAIN="$RUST_VERSION"
+            export PATH="$bu:$PATH"
+          }
+          cargo_audit() {
+            local nm
+            nm="$(command -v node)" || fail "node is not on the PATH"
+            nm="$(cygpath -m "$nm")" || fail "cygpath failed"
+            python "$N13W/verify_cargo.py" audit "$N13W/canon.json" "$nm" || fail "the effective Cargo environment audit failed"
+          }
+          cargo_guard() { env_hygiene; pin_env; cargo_audit; }
+          N13_LIB
+          cat > "$RT/n13/verify_cargo.py" <<'N13_VERIFY_PY'
+          import hashlib, json, os, re, stat, sys
+
+          CAP = 16 * 1024 * 1024          # per captured stream; the launcher uses the same cap
+          REC_CAP = 1024 * 1024
+          # Closed contract for the one Cargo child that Tauri 2.12.3 starts. Source: crates/tauri-cli/src/interface/rust/desktop.rs cargo_command() and
+          # crates/tauri-cli/src/interface/rust.rs build_options() at tag tauri-cli-v2.12.3: "build", the runner arguments, the options.args (our "-- --locked", then "--bins"
+          # that build_options appends for a desktop build), then "--features <user features,tauri/custom-protocol>", no "--release" when --debug is given, then "--target <T>".
+          # R6: the runtime child must NOT carry --manifest-path: Tauri 2.12.3 does not emit it (desktop.rs 233-277), and Cargo finds the manifest in the working folder. The
+          # direct pre-check of the workflow itself passes --manifest-path on purpose and is not judged by this contract.
+          # The order and the exact tokens are UPSTREAM-OBSERVED (source text); that Tauri really runs this way on the runner is RUNTIME_UNVERIFIED. Anything else fails closed.
+          ALLOWED_FEATURES = {"jq-pilot", "tauri/custom-protocol"}
+          EXPECT_FEATURES = "jq-pilot,tauri/custom-protocol"
+          OK_HOME = {"registry", "git", ".package-cache", ".package-cache-mutate", ".global-cache"}
+          FORBID_ENV = re.compile(r"^(CARGO_.*|RUST.*|TAURI_.*|NAPI_.*|NODE_OPTIONS|NODE_PATH|CL|_CL_|LINK|_LINK_|CC|CXX|AR|CFLAGS|CXXFLAGS|LDFLAGS|ARFLAGS|CC_.*|CXX_.*|CFLAGS_.*|CXXFLAGS_.*|AR_.*|CRATE_CC_.*|LIBCLANG_PATH|BINDGEN_.*)$")
+          DIAG_RE = re.compile(r"^error: cannot update the lock file (.+?) because --locked was passed to prevent this\r?$", re.M)
+          SHA_RE = re.compile(r"^[0-9a-f]{64}$")
+          SAFE_RE = re.compile(r"^[A-Za-z0-9._:/+@~-]{1,400}$")
+          REC_RE = re.compile(r"^inv-(\d{1,40}-\d{1,12})\.(rec|stdout|stderr)$")
+          DANGEROUS = (("--target-dir", "redirects the build output"), ("--config", "overrides the Cargo configuration"), ("-Z", "uses an unstable Cargo flag"),
+                       ("--offline", "changes dependency resolution"), ("--frozen", "changes lock handling"), ("--manifest-path", "selects a manifest"),
+                       ("--package", "selects a package"), ("-p", "selects a package"), ("--workspace", "selects a workspace"), ("--bin", "selects a target"),
+                       ("--all-targets", "selects targets"), ("--lib", "selects a target"), ("--examples", "selects targets"), ("--example", "selects a target"),
+                       ("--tests", "selects targets"), ("--test", "selects a target"), ("--benches", "selects targets"), ("--bench", "selects a target"),
+                       ("--all", "selects a workspace"), ("--exclude", "selects packages"), ("--no-default-features", "changes the feature set"),
+                       ("--all-features", "changes the feature set"), ("--message-format", "changes the output format"))
+
+
+          def bad(msg):
+              print("VERIFY_FAIL: " + msg)
+              sys.exit(1)
+
+
+          def shown(p):
+              return re.sub(r"[^ -~]", "?", str(p))[:200]
+
+
+          def pnorm(p, what):
+              if not isinstance(p, str) or not p or len(p) > 1000:
+                  bad(what + ": empty or oversized path")
+              if re.search(r"[\x00-\x1f]", p):
+                  bad(what + ": control character in a path")
+              s = p.replace("\\", "/")
+              if s.startswith("//?/"):
+                  s = s[4:]
+              m = re.match(r"^/(?:cygdrive/)?([A-Za-z])(/.*)?$", s)
+              if m:
+                  s = m.group(1) + ":" + (m.group(2) or "/")
+              m = re.match(r"^([A-Za-z]):(/.*)$", s)
+              if not m:
+                  bad(what + ": not an absolute drive path: " + shown(p))
+              parts = []
+              for c in m.group(2).split("/"):
+                  if c in ("", "."):
+                      continue
+                  if c == "..":
+                      bad(what + ": relative traversal in a path: " + shown(p))
+                  if c.endswith((".", " ")) or re.search(r'[<>:"|?*]', c):
+                      bad(what + ": a path component that Windows aliases or forbids: " + shown(p))
+                  parts.append(c.lower())
+              return m.group(1).lower() + ":/" + "/".join(parts)
+
+
+          def is_reparse(st):
+              return stat.S_ISLNK(st.st_mode) or bool(getattr(st, "st_file_attributes", 0) & 0x400)
+
+
+          def sha256_file(path):
+              h = hashlib.sha256()
+              try:
+                  with open(path, "rb") as f:
+                      for chunk in iter(lambda: f.read(1 << 20), b""):
+                          h.update(chunk)
+              except OSError as e:
+                  bad("cannot hash %s: %s" % (shown(path), e))
+              return h.hexdigest()
+
+
+          def read_text(path, strict=True, cap=CAP):
+              try:
+                  with open(path, "rb") as f:
+                      data = f.read(cap + 1)
+              except OSError as e:
+                  bad("cannot read %s: %s" % (shown(path), e))
+              if len(data) > cap:
+                  bad("file exceeds the size cap: " + shown(path))
+              try:
+                  return data.decode("utf-8", errors="strict" if strict else "replace")
+              except UnicodeError as e:
+                  bad("not UTF-8 text: %s (%s)" % (shown(path), e))
+
+
+          # ---------------------------------------------------------------------------------------------------- canonical definition
+          def canon_init(out, ws, src, target, commit, tree, real, real_sha, rustc, rustc_sha, rustup, rustup_sha, rustup_home):
+              if not (re.fullmatch(r"[0-9a-f]{40}", commit) and re.fullmatch(r"[0-9a-f]{40}", tree)):
+                  bad("commit or tree is not a full SHA-1")
+              if not re.fullmatch(r"[A-Za-z0-9_.-]+", target):
+                  bad("odd target")
+              if not SHA_RE.match(real_sha):
+                  bad("the Cargo hash is not a SHA-256")
+              if pnorm(src, "source") != pnorm(ws, "workspace") + "/source":
+                  bad("the source folder is not <workspace>/source")
+              c = {}
+              for key, p, want_dir in (("src", src, True), ("tauri_dir", src + "/src-tauri", True), ("manifest", src + "/src-tauri/Cargo.toml", False),
+                                       ("lock", src + "/src-tauri/Cargo.lock", False)):
+                  pa = os.path.abspath(p)
+                  try:
+                      st = os.lstat(pa)
+                  except OSError:
+                      bad(key + " is missing")
+                  if is_reparse(st):
+                      bad(key + " is a link or reparse point")
+                  if want_dir != stat.S_ISDIR(st.st_mode) or (not want_dir and not stat.S_ISREG(st.st_mode)):
+                      bad(key + " has the wrong file type")
+                  if pnorm(os.path.realpath(pa), key) != pnorm(pa, key):
+                      bad(key + " resolves to another location")
+                  c[key] = pnorm(pa, key)
+                  c[key + "_m"] = pa.replace("\\", "/")
+              ra = os.path.abspath(real)
+              try:
+                  rst = os.lstat(ra)
+              except OSError:
+                  bad("the pinned Cargo is missing")
+              if is_reparse(rst) or not stat.S_ISREG(rst.st_mode):
+                  bad("the pinned Cargo is not a plain file")
+              if os.path.basename(ra).lower() != "cargo.exe":
+                  bad("the pinned Cargo is not named cargo.exe")
+              if sha256_file(ra) != real_sha:
+                  bad("the pinned Cargo does not match its recorded SHA-256")
+              c["real_cargo"] = pnorm(ra, "cargo")
+              c["real_cargo_m"] = ra.replace("\\", "/")
+              c["real_cargo_sha256"] = real_sha
+              qa = os.path.abspath(rustc)
+              try:
+                  qst = os.lstat(qa)
+              except OSError:
+                  bad("the pinned rustc is missing")
+              if is_reparse(qst) or not stat.S_ISREG(qst.st_mode):
+                  bad("the pinned rustc is not a plain file")
+              if os.path.basename(qa).lower() != "rustc.exe":
+                  bad("the pinned rustc is not named rustc.exe")
+              if pnorm(os.path.dirname(qa), "the rustc folder") != pnorm(os.path.dirname(ra), "the cargo folder"):
+                  bad("rustc.exe and cargo.exe are not in the same toolchain folder")
+              if not SHA_RE.match(rustc_sha) or sha256_file(qa) != rustc_sha:
+                  bad("the pinned rustc does not match its recorded SHA-256")
+              c["real_rustc"] = pnorm(qa, "rustc")
+              c["real_rustc_m"] = qa.replace("\\", "/")
+              c["real_rustc_sha256"] = rustc_sha
+              ua = os.path.abspath(rustup)
+              try:
+                  ust = os.lstat(ua)
+              except OSError:
+                  bad("the recorded rustup.exe is missing")
+              if is_reparse(ust) or not stat.S_ISREG(ust.st_mode):
+                  bad("the recorded rustup.exe is not a plain file")
+              if os.path.basename(ua).lower() != "rustup.exe":
+                  bad("the recorded rustup is not named rustup.exe")
+              if not SHA_RE.match(rustup_sha) or sha256_file(ua) != rustup_sha:
+                  bad("the recorded rustup.exe does not match its recorded SHA-256")
+              c["real_rustup"] = pnorm(ua, "rustup")
+              c["real_rustup_m"] = ua.replace("\\", "/")
+              c["real_rustup_sha256"] = rustup_sha
+              if rustup_home != "-":
+                  pnorm(rustup_home, "RUSTUP_HOME")
+              c["rustup_home"] = rustup_home
+              c["toolchain_bin_m"] = os.path.dirname(ra).replace("\\", "/")
+              rt = os.environ.get("RUNNER_TEMP", "")
+              if not rt:
+                  bad("RUNNER_TEMP is not set")
+              pnorm(rt, "RUNNER_TEMP")
+              home = os.path.abspath(os.path.join(rt, "n13", "cargo-home"))
+              try:
+                  os.mkdir(home)
+              except OSError as e:
+                  bad("cannot create the fresh Cargo home (it must not exist): %s" % e)
+              c["cargo_home_m"] = home.replace("\\", "/")
+              c["orig_lock_sha256"] = sha256_file(c["lock_m"])
+              c["target"] = target
+              c["accepted_commit"] = commit
+              c["accepted_tree"] = tree
+              for k, v in c.items():
+                  if not SAFE_RE.match(v):
+                      bad("a canonical value is not a safe token: " + k)
+              with open(out, "x", encoding="utf-8", newline="\n") as f:
+                  f.write(json.dumps(c, indent=2, sort_keys=True) + "\n")
+              print("CANON PASS")
+
+
+          def load_canon(path):
+              try:
+                  c = json.loads(read_text(path))
+              except ValueError:
+                  bad("canon.json is not JSON")
+              if not isinstance(c, dict):
+                  bad("canon.json is not an object")
+              return c
+
+
+          def canon_add(path, key, value):
+              c = load_canon(path)
+              if key in c:
+                  bad("canonical value already set: " + key)
+              if key == "shim_exe_m":
+                  if not SAFE_RE.match(value) or not os.path.isfile(value):
+                      bad("the launcher path is not a safe existing file")
+              elif key in ("shim_sha256", "canary_lock_sha256"):
+                  if not SHA_RE.match(value):
+                      bad("not a SHA-256")
+                  if key == "shim_sha256" and sha256_file(c.get("shim_exe_m", "")) != value:
+                      bad("the launcher hash does not match the file")
+                  if key == "canary_lock_sha256" and value == c.get("orig_lock_sha256"):
+                      bad("the canary equals the original lock file")
+              else:
+                  bad("this key cannot be added: " + key)
+              c[key] = value
+              with open(path, "w", encoding="utf-8", newline="\n") as f:
+                  f.write(json.dumps(c, indent=2, sort_keys=True) + "\n")
+              print("CANON ADD " + key)
+
+
+          def canon_get(path, key):
+              c = load_canon(path)
+              v = c.get(key)
+              if not isinstance(v, str) or not SAFE_RE.match(v):
+                  bad("canonical value is missing or unsafe: " + key)
+              print(v)
+
+
+          def check_tools(c, need_shim=True):
+              real = c.get("real_cargo_m", "")
+              if sha256_file(real) != c.get("real_cargo_sha256"):
+                  bad("the pinned Cargo changed after it was recorded")
+              if need_shim:
+                  if "shim_exe_m" not in c or "shim_sha256" not in c:
+                      bad("the launcher is not recorded in the canonical file")
+                  if sha256_file(c["shim_exe_m"]) != c["shim_sha256"]:
+                      bad("the launcher changed after it was recorded")
+
+
+          # ---------------------------------------------------------------------------------------------------- plain files and the effective Cargo environment
+          def plain(path, want_dir=False):
+              pa = os.path.abspath(path)
+              try:
+                  st = os.lstat(pa)
+              except OSError:
+                  bad("missing: " + shown(path))
+              if is_reparse(st):
+                  bad("a link or reparse point: " + shown(path))
+              if want_dir != stat.S_ISDIR(st.st_mode) or (not want_dir and not stat.S_ISREG(st.st_mode)):
+                  bad("has the wrong file type: " + shown(path))
+              if pnorm(os.path.realpath(pa), "path") != pnorm(pa, "path"):
+                  bad("resolves to another location: " + shown(path))
+              print("PLAIN OK " + ("folder" if want_dir else "file"))
+
+
+          def audit(c, node_exe):
+              """Effective Cargo environment. Same runner user: this detects mistakes and simple planting, it is not an attestation."""
+              check_tools(c, need_shim=False)
+              if sha256_file(c.get("real_rustc_m", "")) != c.get("real_rustc_sha256"):
+                  bad("the pinned rustc changed after it was recorded")
+              env = {k.upper(): v for k, v in os.environ.items()}
+              for k in env:
+                  if k in ("CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN", "RUSTC", "RUST_VERSION"):
+                      continue
+                  if FORBID_ENV.match(k):
+                      bad("a forbidden environment variable is set: " + k)
+
+              def same(name, want):
+                  v = env.get(name)
+                  if not v:
+                      bad("%s is not set; it must be the pinned value" % name)
+                  if pnorm(v, name) != pnorm(want, name):
+                      bad("%s is not the pinned value: %s" % (name, shown(v)))
+              same("CARGO_HOME", c["cargo_home_m"])
+              same("RUSTC", c["real_rustc_m"])
+              if not env.get("RUST_VERSION") or env.get("RUSTUP_TOOLCHAIN") != env.get("RUST_VERSION"):
+                  bad("RUSTUP_TOOLCHAIN is not the pinned toolchain version")
+              if sha256_file(c.get("real_rustup_m", "")) != c.get("real_rustup_sha256"):
+                  bad("the recorded rustup.exe changed after it was recorded")
+              if c.get("rustup_home") in (None, ""):
+                  bad("the canonical record has no RUSTUP_HOME entry")
+              if c["rustup_home"] == "-":
+                  if env.get("RUSTUP_HOME"):
+                      bad("RUSTUP_HOME is set now but was not set when rustup was recorded: " + shown(env["RUSTUP_HOME"]))
+              elif not env.get("RUSTUP_HOME") or pnorm(env["RUSTUP_HOME"], "RUSTUP_HOME") != pnorm(c["rustup_home"], "RUSTUP_HOME"):
+                  bad("RUSTUP_HOME is not the value recorded together with rustup: " + shown(env.get("RUSTUP_HOME", "")))
+              home = os.path.abspath(c["cargo_home_m"])
+              plain(home, True)
+              rt = env.get("RUNNER_TEMP", "")
+              if not rt or pnorm(home, "cargo home") != pnorm(rt, "RUNNER_TEMP") + "/n13/cargo-home":
+                  bad("the Cargo home is not the fresh folder under RUNNER_TEMP")
+              for nm in os.listdir(home):
+                  if nm.lower() not in OK_HOME:
+                      bad("the Cargo home holds an entry that Cargo does not create itself (a configuration or credential file?): " + shown(nm))
+                  if is_reparse(os.lstat(os.path.join(home, nm))):
+                      bad("an entry of the Cargo home is a link: " + shown(nm))
+              # Cargo reads .cargo/config and .cargo/config.toml in the current folder and in EVERY ancestor. Walk all of them. A workspace Cargo.toml above src-tauri also changes the build.
+              cur = os.path.abspath(c["tauri_dir_m"])
+              first = True
+              while True:
+                  for nm in ("config", "config.toml"):
+                      p = os.path.join(cur, ".cargo", nm)
+                      if os.path.lexists(p):
+                          bad("a Cargo configuration file exists in %s and would be read by Cargo: %s" % ("src-tauri" if first else "an ancestor folder", shown(p)))
+                  cd = os.path.join(cur, ".cargo")
+                  if os.path.lexists(cd) and (is_reparse(os.lstat(cd)) or not stat.S_ISDIR(os.lstat(cd).st_mode)):
+                      bad(".cargo is a link or not a folder: " + shown(cd))
+                  for nm in ("rust-toolchain", "rust-toolchain.toml"):
+                      if os.path.lexists(os.path.join(cur, nm)):
+                          bad("a rust-toolchain file exists in %s" % shown(cur))
+                  if not first and os.path.lexists(os.path.join(cur, "Cargo.toml")):
+                      bad("a Cargo.toml exists in an ancestor folder of src-tauri and may define a workspace: " + shown(cur))
+                  parent = os.path.dirname(cur)
+                  if parent == cur:
+                      break
+                  cur = parent
+                  first = False
+              # Model of the lookup that Tauri's bare Command::new("cargo") (rust.rs 1201) and Command::new("rustup") (desktop.rs 283) perform on Windows (INFERRED, not observed).
+              # Source text of Rust std 1.100.0, library/std/src/sys/process/windows.rs, search_paths(): (1) the child's own PATH, only if Command::env changed PATH (Tauri sets none for
+              # these children); (2) the folder of the running executable, here node.exe, because Tauri runs as a native addon inside node; (3) GetSystemDirectoryW; (4) GetWindowsDirectoryW;
+              # (5) the PATH of this process, in order. The current folder is NOT a stage there. The model below ALSO refuses src-tauri and the 16-bit System folder (conservative, extra).
+              # std 1.100.0 is the pinned toolchain; the compiler that built the prebuilt Tauri CLI is unknown, so this is RUNTIME_UNVERIFIED. A shadow or an unexpected first hit fails closed.
+              sysroot = env.get("SYSTEMROOT", "")
+              early = [os.path.dirname(node_exe), c["tauri_dir_m"]]
+              if sysroot:
+                  early += [os.path.join(sysroot, "System32"), os.path.join(sysroot, "System"), sysroot]
+
+              def lookup(exe, pinned_m, label):
+                  want = pnorm(pinned_m, label)
+                  for d in early:
+                      if d and os.path.lexists(os.path.join(d, exe)):
+                          bad("a %s exists in %s, where the Windows lookup for '%s' can find it before the PATH: %s" % (exe, "a system or parent-executable folder", exe[:-4], shown(d)))
+                  hit = None
+                  for d in env.get("PATH", "").split(";"):
+                      if not d:
+                          continue
+                      if not re.match(r"^[A-Za-z]:[\\/]", d):
+                          bad("a PATH entry is not an absolute drive path (it could resolve to the working directory): " + shown(d))
+                      if os.path.lexists(os.path.join(d, exe)):
+                          hit = os.path.join(d, exe)
+                          break
+                  if hit is None or pnorm(hit, label) != want:
+                      bad("the first %s on PATH is not the pinned %s: %s" % (exe, label, shown(hit)))
+              lookup("cargo.exe", c["real_cargo_m"], "Cargo")
+              lookup("rustup.exe", c["real_rustup_m"], "rustup")
+              print("VERIFY_PASS audit")
+
+
+          def bins(c):
+              """Binary inventory of the accepted source: --bins must select exactly one implicit binary, ai-toolchain-manager (src/main.rs)."""
+              import tomllib
+              try:
+                  data = tomllib.loads(read_text(c["manifest_m"]))
+              except ValueError as e:
+                  bad("the manifest is not valid TOML: %s" % e)
+              pkg = data.get("package", {})
+              if pkg.get("name") != "ai-toolchain-manager":
+                  bad("the package name is not ai-toolchain-manager")
+              if "bin" in data:
+                  bad("the manifest declares explicit [[bin]] targets")
+              if pkg.get("autobins") is False:
+                  bad("autobins is switched off")
+              if "workspace" in data:
+                  bad("the manifest declares a workspace")
+              tdir = c["tauri_dir_m"]
+              plain(os.path.join(tdir, "src", "main.rs"))
+              if os.path.lexists(os.path.join(tdir, "src", "bin")):
+                  bad("src-tauri/src/bin exists: --bins would build more than one binary")
+              print("BINS PASS: one implicit binary ai-toolchain-manager (src/main.rs); explicit bin targets: none; src/bin: absent")
+
+
+          # ---------------------------------------------------------------------------------------------------- records
+          def inventory(path, expected):
+              try:
+                  names = os.listdir(path)
+              except OSError as e:
+                  bad("cannot list the log folder: %s" % e)
+              groups = {}
+              for nm in names:
+                  full = os.path.join(path, nm)
+                  st = os.lstat(full)
+                  m = REC_RE.match(nm)
+                  if not m:
+                      bad("unexpected entry in the log folder: " + shown(nm))
+                  if is_reparse(st) or not stat.S_ISREG(st.st_mode):
+                      bad("a log entry is not a plain file: " + shown(nm))
+                  if st.st_size > (REC_CAP if m.group(2) == "rec" else CAP):
+                      bad("a log entry exceeds the size cap: " + shown(nm))
+                  groups.setdefault(m.group(1), set()).add(m.group(2))
+              for k, v in groups.items():
+                  if v != {"rec", "stdout", "stderr"}:
+                      bad("incomplete record set for " + k)
+              if len(groups) != expected:
+                  bad("exactly %d recorded Cargo child is expected, found %d (a different count means Tauri did not behave as the contract says)" % (expected, len(groups)))
+              return sorted(groups)
+
+
+          def load(path, ident):
+              base = os.path.join(path, "inv-" + ident)
+              text = read_text(base + ".rec", cap=REC_CAP)
+              if not text.endswith("\n"):
+                  bad("record is not newline terminated (the launcher did not finish): " + ident)
+              lines = text[:-1].split("\n")
+              if len(lines) < 7 or lines[0] != "N13SHIM 1":
+                  bad("record header is wrong: " + ident)
+              m = re.fullmatch(r"ARGC (\d+)", lines[1])
+              if not m:
+                  bad("record has no ARGC: " + ident)
+              n = int(m.group(1))
+              if len(lines) != 2 + n + 5:
+                  bad("record has the wrong number of lines (incomplete or tampered): " + ident)
+              args = []
+              for line in lines[2:2 + n]:
+                  if not line.startswith("ARG "):
+                      bad("record has a malformed ARG line: " + ident)
+                  args.append(line[4:])
+              cwd, real, ex, pump, end = lines[2 + n:]
+              if not cwd.startswith("CWD ") or not real.startswith("REAL "):
+                  bad("record has no CWD or REAL line: " + ident)
+              m = re.fullmatch(r"EXIT (-?\d+)", ex)
+              if not m:
+                  bad("record has no numeric exit status (" + shown(ex) + "): " + ident)
+              if pump != "PUMP ok" or end != "END":
+                  bad("record is not complete (output capture or END marker): " + ident)
+              return {"id": ident, "args": args, "cwd": cwd[4:], "real": real[5:], "exit": int(m.group(1)),
+                      "stdout": read_text(base + ".stdout", strict=False), "stderr": read_text(base + ".stderr", strict=False)}
+
+
+          def contract(inv, c):
+              a = inv["args"]
+              core = ["build"]
+              if not a or a[0] != "build":
+                  bad("the recorded child is not a 'cargo build': " + shown(json.dumps(a)))
+              if any(x in ("--release", "-r", "--profile") or x.startswith("--profile=") for x in a):
+                  bad("the Cargo child is a release or profile build, not a debug build: " + shown(json.dumps(a)))
+              sep = a.index("--") if "--" in a else len(a)
+              if "--locked" not in a[:sep]:
+                  bad("the Cargo child did not receive --locked before any -- separator: " + shown(json.dumps(a)))
+              if sep != len(a):
+                  bad("the Cargo child has a '--' separator; nothing after it is allowed: " + shown(json.dumps(a)))
+              locked, nbins, targets, feats = 0, 0, [], []
+              i = 1
+              while i < len(a):
+                  x = a[i]
+                  val = None
+                  if x == "--locked":
+                      locked += 1
+                      core.append(x)
+                      i += 1
+                      continue
+                  if x == "--bins":
+                      nbins += 1
+                      core.append(x)
+                      i += 1
+                      continue
+                  for flag, bucket in (("--target", targets), ("--features", feats), ("-F", feats)):
+                      if x == flag:
+                          if i + 1 >= len(a):
+                              bad("the option " + flag + " has no value")
+                          val = a[i + 1]
+                          i += 2
+                          core += [flag, val]
+                      elif flag.startswith("--") and x.startswith(flag + "="):
+                          val = x[len(flag) + 1:]
+                          i += 1
+                          core.append(x)
+                      else:
+                          continue
+                      if not val:
+                          bad("the option " + flag + " has an empty value")
+                      bucket.append(val)
+                      break
+                  else:
+                      for pre, why in DANGEROUS:
+                          if x == pre or (pre.startswith("--") and x.startswith(pre + "=")):
+                              bad("the Cargo child uses %s, which %s: %s" % (pre, why, shown(x)))
+                      bad("the Cargo child has an argument outside the closed contract: " + shown(x))
+              if locked != 1:
+                  bad("--locked must appear exactly once")
+              if nbins == 0:
+                  bad("the Cargo child has no --bins; Tauri 2.12.3 adds --bins to a desktop build: " + shown(json.dumps(a)))
+              if nbins != 1:
+                  bad("--bins must appear exactly once, found %d" % nbins)
+              if targets != [c["target"]]:
+                  bad("the Cargo child has no single --target " + c["target"] + ": " + shown(json.dumps(a)))
+              fl = []
+              for v in feats:
+                  fl += [y for y in re.split(r"[,\s]+", v) if y]
+              if "jq-pilot" not in fl:
+                  bad("the Cargo child has no jq-pilot feature: " + shown(json.dumps(a)))
+              if not set(fl) <= ALLOWED_FEATURES:
+                  bad("the Cargo child enables a feature outside the contract: " + shown(json.dumps(fl)))
+              if "tauri/custom-protocol" not in fl:
+                  bad("the Cargo child lacks tauri/custom-protocol, which Tauri 2.12.3 adds to a build: " + shown(json.dumps(fl)))
+              cwd_raw = inv["cwd"]
+              if pnorm(cwd_raw, "the working directory of the Cargo child") != c["tauri_dir"]:
+                  bad("the Cargo child did not run in the expected src-tauri folder: " + shown(cwd_raw))
+              # The recorded text is now known to name the canonical folder (in any accepted spelling). That folder must EXIST and must not be reached through a link.
+              if not os.path.isdir(c["tauri_dir_m"]):
+                  bad("the recorded working directory of the Cargo child does not exist: " + shown(cwd_raw))
+              if pnorm(os.path.realpath(c["tauri_dir_m"]), "cwd") != c["tauri_dir"]:
+                  bad("the working directory of the Cargo child resolves to another location")
+              if pnorm(inv["real"], "the recorded Cargo") != c["real_cargo"]:
+                  bad("a recorded child is not the pinned Cargo: " + shown(inv["real"]))
+              want = ["build", "--locked", "--bins", "--features", EXPECT_FEATURES, "--target", c["target"]]
+              if core != want:
+                  bad("the Cargo child argv is not the form that Tauri 2.12.3 builds (%s): %s" % (" ".join(want), shown(json.dumps(core))))
+
+
+          def diag_ok(text, c, where):
+              # Invariant: ONE Cargo child ran, so Cargo prints this diagnostic once. Exactly one occurrence must exist and it must name the expected lock file.
+              # A record that also contains a diagnostic for another lock file is refused, so that "any" cannot be satisfied by a mixed log.
+              found = [m.group(1) for m in DIAG_RE.finditer(text)]
+              if not found:
+                  bad("the expected Cargo lock diagnostic is absent in " + where)
+              if len(found) != 1:
+                  bad("more than one Cargo lock diagnostic in %s (%d found); exactly one naming the expected lock file is required" % (where, len(found)))
+              if pnorm(found[0], "the diagnostic path") != c["lock"]:
+                  bad("the Cargo lock diagnostic names another lock file, not the expected Cargo.lock: " + shown(found[0]))
+
+
+          def main():
+              mode = sys.argv[1]
+              if mode == "canon-init":
+                  canon_init(*sys.argv[2:15])
+                  return
+              if mode == "plain":
+                  plain(sys.argv[2])
+                  return
+              if mode == "plaindir":
+                  plain(sys.argv[2], True)
+                  return
+              if mode == "canon-add":
+                  canon_add(*sys.argv[2:5])
+                  return
+              if mode == "canon-get":
+                  canon_get(sys.argv[2], sys.argv[3])
+                  return
+              canon_path = sys.argv[2]
+              c = load_canon(canon_path)
+              if mode == "audit":
+                  audit(c, sys.argv[3])
+                  return
+              if mode == "bins":
+                  bins(c)
+                  return
+              if mode == "diag":
+                  check_tools(c, need_shim=False)
+                  diag_ok(read_text(sys.argv[3], strict=False), c, "the direct Cargo check")
+                  print("VERIFY_PASS diag")
+                  return
+              logdir = sys.argv[3]
+              check_tools(c)
+              ids = inventory(logdir, 1)
+              inv = load(logdir, ids[0])
+              if pnorm(inv["real"], "the recorded Cargo") != c["real_cargo"]:
+                  bad("the recorded child is not the pinned Cargo: " + shown(inv["real"]))
+              if mode == "selftest":
+                  if inv["args"] != ["-V"] or inv["exit"] != 0:
+                      bad("the launcher self-test record is wrong")
+                  if not inv["stdout"].startswith(sys.argv[4]):
+                      bad("the launcher did not pass the Cargo output through: " + shown(inv["stdout"][:60]))
+                  print("VERIFY_PASS selftest")
+                  return
+              contract(inv, c)
+              if mode == "control":
+                  if inv["exit"] != 101:
+                      bad("the Cargo child exit status is %d, expected 101" % inv["exit"])
+                  diag_ok(inv["stderr"], c, "the stderr that Cargo itself produced")
+              elif mode == "build":
+                  if inv["exit"] != 0:
+                      bad("the cargo build child failed with status %d" % inv["exit"])
+              else:
+                  bad("unknown mode " + mode)
+              out = {"mode": mode, "real_cargo_sha256": c["real_cargo_sha256"], "launcher_sha256": c["shim_sha256"],
+                     "children": [{"id": inv["id"], "args": inv["args"], "cwd": inv["cwd"], "exit": inv["exit"]}]}
+              with open(os.path.join(os.path.dirname(canon_path), "verified-" + mode + ".json"), "w", encoding="utf-8", newline="\n") as f:
+                  f.write(json.dumps(out, indent=2) + "\n")
+              print("VERIFY_PASS " + mode + " " + shown(json.dumps(inv["args"])))
+
+
+          main()
+          N13_VERIFY_PY
+          cat > "$RT/n13/cli_check.py" <<'N13_CLI_PY'
+          import hashlib, json, os, re, stat, sys
+
+          CLI = "@tauri-apps/cli"
+          NATIVE = "@tauri-apps/cli-win32-x64-msvc"
+          NATIVE_FILE = "cli.win32-x64-msvc.node"
+          CLI_FILES = ("tauri.js", "main.js", "index.js", "package.json")
+          CLI_ALLOWED_STEMS = ("main.js", "index.js", "main.d.ts", "index.d.ts")
+          NATIVE_ALLOWED = ("README.md", "package.json", "cli.win32-x64-msvc.node")
+          # Lookup sites of the pinned loader (tauri-apps/cli 2.12.3, win32 x64): tauri.js require('./main'); main.js require('./index'); index.js require('./cli.win32-x64-msvc.node')
+          # (must NOT resolve), require('@tauri-apps/cli-win32-x64-msvc'), require('@tauri-apps/cli-win32-x64-msvc/package.json'), and the WASI fallbacks require('./cli.wasi.cjs') and
+          # require('@tauri-apps/cli-wasm32-wasi') (must NOT resolve: the declared policy is the MSVC native package only). The expected file of each site is fixed here.
+          SITES = (("tauri.js", "./main", "cli", "main.js"), ("main.js", "./index", "cli", "index.js"), ("index.js", "./cli.win32-x64-msvc.node", None, None),
+                   ("index.js", "@tauri-apps/cli-win32-x64-msvc", "native", "cli.win32-x64-msvc.node"), ("index.js", "@tauri-apps/cli-win32-x64-msvc/package.json", "native", "package.json"),
+                   ("index.js", "./cli.wasi.cjs", None, None), ("index.js", "@tauri-apps/cli-wasm32-wasi", None, None))
+          RESOLVE_JS = ("const m=require('module'),p=require('path');const cli=p.join(p.resolve(process.argv[1]),'node_modules','@tauri-apps','cli');const S=JSON.parse(process.argv[2]);"
+                        "const o=[];for(const s of S){let r=null,c=null;try{r=m.createRequire(p.join(cli,s[0])).resolve(s[1])}catch(e){c=e.code||'ERR'}o.push([s[0],s[1],r,c])}"
+                        "process.stdout.write(JSON.stringify(o))")
+          MAXFILES = 2000
+
+
+          def bad(msg):
+              print("CLI_FAIL: " + msg, file=sys.stderr)
+              sys.exit(1)
+
+
+          def sha(path):
+              h = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(1 << 20), b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+
+          def is_link(st):
+              return stat.S_ISLNK(st.st_mode) or bool(getattr(st, "st_file_attributes", 0) & 0x400)
+
+
+          def plain_file(path, what):
+              try:
+                  st = os.lstat(path)
+              except OSError:
+                  bad("missing " + what)
+              if is_link(st) or not stat.S_ISREG(st.st_mode):
+                  bad(what + " is not a plain file")
+              if os.path.normcase(os.path.realpath(path)) != os.path.normcase(os.path.abspath(path)):
+                  bad(what + " resolves to another location")
+
+
+          def inside(path, root, what):
+              rp = os.path.normcase(os.path.realpath(path))
+              rr = os.path.normcase(os.path.realpath(root))
+              if not rp.startswith(rr + os.sep):
+                  bad(what + " is not inside the expected package folder")
+
+
+          def find_node():
+              """first node executable on this process's PATH (absolute entries only); the same node runs the Tauri CLI. Never the current folder."""
+              exe = "node.exe" if os.name == "nt" else "node"
+              for d in os.environ.get("PATH", "").split(os.pathsep):
+                  if d and os.path.isabs(d) and os.path.isfile(os.path.join(d, exe)):
+                      return os.path.join(d, exe)
+              bad("node was not found on the PATH")
+
+
+          def resolve_sites(root, d, n):
+              """Ask Node itself where each require of the Tauri loader resolves (RESOLUTION ONLY: require.resolve never loads or runs a module, and no .node is opened).
+              Bind the result to the one expected file. This covers extension order (file, .js, .json, .node before a folder), extensionless files, folder main, and sibling scopes."""
+              import subprocess
+              if "NODE_OPTIONS" in os.environ or "NODE_PATH" in os.environ:
+                  bad("a Node override variable is set")
+              try:
+                  r = subprocess.run([find_node(), "-e", RESOLVE_JS, os.path.abspath(root), json.dumps([[a, b] for a, b, _, _ in SITES])], capture_output=True, text=True, timeout=60,
+                                     cwd=os.path.abspath(root), stdin=subprocess.DEVNULL)
+              except (OSError, subprocess.SubprocessError) as e:
+                  bad("the Node resolution probe could not run: %s" % e)
+              if r.returncode != 0:
+                  bad("the Node resolution probe failed: " + r.stderr.strip()[:200])
+              try:
+                  got = json.loads(r.stdout)
+              except ValueError:
+                  bad("the Node resolution probe printed no JSON")
+              if len(got) != len(SITES):
+                  bad("the Node resolution probe returned the wrong number of results")
+              base = {"cli": d, "native": n}
+              for (f, req, where, name), (gf, greq, res, code) in zip(SITES, got):
+                  if (f, req) != (gf, greq):
+                      bad("the Node resolution probe answered another question")
+                  if where is None:
+                      if res is not None:
+                          bad("Node resolves %s from %s to a file that must not exist (a shadow or fallback candidate): %s" % (req, f, os.path.basename(str(res))))
+                      continue
+                  if res is None:
+                      bad("Node cannot resolve %s from %s (%s)" % (req, f, code))
+                  want = os.path.normcase(os.path.realpath(os.path.join(base[where], name)))
+                  if os.path.normcase(os.path.realpath(res)) != want:
+                      bad("Node resolves %s from %s to another file than the expected one: %s" % (req, f, os.path.relpath(res, root).replace("\\", "/") if os.path.isabs(res) else res))
+                  plain_file(res, "the resolved file for " + req)
+
+
+          def competitors(root, d, n):
+              """Defense in depth: names that the resolver would not pick today but that must not exist next to the expected files."""
+              for nm in os.listdir(d):
+                  low = nm.lower()
+                  if low.startswith("cli."):
+                      bad("a loader-relevant file name sits in the CLI package folder: " + nm)
+                  if low.split(".")[0] in ("main", "index") and nm not in CLI_ALLOWED_STEMS:
+                      bad("a competing main or index candidate sits in the CLI package folder: " + nm)
+              for nm in os.listdir(n):
+                  if nm not in NATIVE_ALLOWED:
+                      bad("an unexpected entry sits in the native package folder: " + nm)
+              want = os.path.normcase(os.path.abspath(n))
+              cur = os.path.abspath(d)
+              while True:
+                  if os.path.basename(cur).lower() != "node_modules":
+                      sc = os.path.join(cur, "node_modules", "@tauri-apps")
+                      if os.path.isdir(sc):
+                          for nm in os.listdir(sc):
+                              low = nm.lower()
+                              if (low.startswith("cli-win32-x64-msvc") or low.startswith("cli-wasm32-wasi")) and os.path.normcase(os.path.abspath(os.path.join(sc, nm))) != want:
+                                  bad("a competing native or WASI candidate exists in a node_modules folder on the lookup path: " + nm)
+                  parent = os.path.dirname(cur)
+                  if parent == cur:
+                      break
+                  cur = parent
+
+
+          def jload(path):
+              with open(path, encoding="utf-8") as f:
+                  return json.load(f)
+
+
+          def tree(folder, what):
+              """every file (SHA-256) and every folder of a package, recursively; a link, a reparse point or a special file is refused"""
+              out = {}
+              for dp, dn, fn in os.walk(folder):
+                  for nm in dn + fn:
+                      full = os.path.join(dp, nm)
+                      rel = os.path.relpath(full, folder).replace("\\", "/")
+                      st = os.lstat(full)
+                      if is_link(st):
+                          bad(what + " holds a link or reparse point: " + rel)
+                      if len(out) >= MAXFILES:
+                          bad(what + " holds an implausible number of entries")
+                      if stat.S_ISDIR(st.st_mode):
+                          out[rel + "/"] = "dir"
+                      elif stat.S_ISREG(st.st_mode):
+                          out[rel] = sha(full)
+                      else:
+                          bad(what + " holds a special file: " + rel)
+              return out
+
+
+          def loader_path(root):
+              """Model of require('@tauri-apps/cli-win32-x64-msvc') from a file in the CLI package (Node walks node_modules folders upward and skips a folder that is itself named
+              node_modules). The first hit must be the expected native package; anything that exists earlier would be loaded instead."""
+              want = os.path.normcase(os.path.abspath(os.path.join(root, "node_modules", NATIVE)))
+              cur = os.path.abspath(os.path.join(root, "node_modules", CLI))
+              while True:
+                  if os.path.basename(cur).lower() != "node_modules":
+                      cand = os.path.join(cur, "node_modules", "@tauri-apps", "cli-win32-x64-msvc")
+                      if os.path.normcase(os.path.abspath(cand)) == want:
+                          return
+                      if os.path.lexists(cand):
+                          bad("a package of the native module's name exists earlier on the Node lookup path than the expected one: " + os.path.relpath(cand, root).replace("\\", "/"))
+                  parent = os.path.dirname(cur)
+                  if parent == cur:
+                      break
+                  cur = parent
+              bad("the expected native package is not on the Node lookup path of the CLI")
+
+
+          def verify(root):
+              """All binding checks. It runs at the first check and AGAIN before every Tauri CLI invocation (the same function)."""
+              for k in os.environ:
+                  u = k.upper()
+                  if u.startswith("NAPI_RS") or u in ("NODE_OPTIONS", "NODE_PATH"):
+                      bad("a native-loader or Node override variable is set: " + u)
+              lock = jload(os.path.join(root, "package-lock.json"))["packages"]
+              d = os.path.join(root, "node_modules", CLI)
+              n = os.path.join(root, "node_modules", NATIVE)
+              ver = None
+              for name, folder in ((CLI, d), (NATIVE, n)):
+                  p = os.path.join(folder, "package.json")
+                  if not os.path.isfile(p):
+                      bad("missing " + p)
+                  have = jload(p)
+                  ent = lock.get("node_modules/" + name)
+                  if not ent or not str(ent.get("integrity", "")).startswith("sha512-"):
+                      bad("no integrity entry in package-lock.json for " + name)
+                  if have.get("version") != ent.get("version"):
+                      bad("version mismatch for %s: installed %s, locked %s" % (name, have.get("version"), ent.get("version")))
+                  if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", have["version"]):
+                      bad("odd version text for " + name)
+                  if name == CLI:
+                      ver = have["version"]
+                      if have.get("bin", {}).get("tauri") != "./tauri.js":
+                          bad("unexpected bin entry")
+                  else:
+                      if have.get("main") != NATIVE_FILE:
+                          bad("the native package main is not " + NATIVE_FILE)
+                      if "exports" in have:
+                          bad("the native package declares exports, which would override main")
+                      if have.get("name") != NATIVE:
+                          bad("the native package has another name")
+              if jload(os.path.join(n, "package.json"))["version"] != ver:
+                  bad("the CLI and its native package differ in version")
+              # The upstream loader (index.js) tries ./cli.win32-x64-msvc.node inside the CLI folder first, and a nested copy of the native package before ours.
+              for nm in os.listdir(d):
+                  if nm.lower().endswith(".node"):
+                      bad("a .node file sits inside the CLI package folder and would be loaded first: " + nm)
+              if os.path.exists(os.path.join(d, "node_modules")):
+                  bad("the CLI package has a nested node_modules folder that could shadow the native package")
+              loader_path(root)
+              resolve_sites(root, d, n)
+              competitors(root, d, n)
+              for f in CLI_FILES:
+                  plain_file(os.path.join(d, f), f)
+              plain_file(os.path.join(n, NATIVE_FILE), "the native module")
+              inside(os.path.join(n, NATIVE_FILE), n, "the native module")
+              with open(os.path.join(n, NATIVE_FILE), "rb") as f:
+                  head = f.read(2)
+              if head != b"MZ" or os.path.getsize(os.path.join(n, NATIVE_FILE)) < 1000000:
+                  bad("the native module is not a plausible Windows DLL")
+              files = {}
+              for k, v in tree(d, "the CLI package").items():
+                  files["cli/" + k] = v
+              for k, v in tree(n, "the native package").items():
+                  files["native/" + k] = v
+              scope = sorted(os.listdir(os.path.join(root, "node_modules", "@tauri-apps")))
+              if "node_modules" in scope:
+                  bad("a node_modules folder sits inside the @tauri-apps scope folder")
+              return {"version": ver, "files": files, "scope": scope,
+                      "lock_integrity": {CLI: lock["node_modules/" + CLI]["integrity"], NATIVE: lock["node_modules/" + NATIVE]["integrity"]}}
+
+
+          def check(root, outfile):
+              doc = verify(root)
+              with open(outfile, "x", encoding="utf-8", newline="\n") as f:
+                  f.write(json.dumps(doc, indent=2) + "\n")
+              print("CLI_CHECK PASS " + doc["version"])
+
+
+          def recheck(root, jsonfile):
+              doc = jload(jsonfile)
+              now = verify(root)
+              if now["version"] != doc["version"]:
+                  bad("the CLI version changed after it was recorded")
+              old, new = doc["files"], now["files"]
+              added = sorted(set(new) - set(old))
+              removed = sorted(set(old) - set(new))
+              changed = sorted(k for k in old if k in new and old[k] != new[k])
+              if added or removed or changed:
+                  bad("a CLI or native-package file changed after it was recorded (added %s, removed %s, changed %s)" % (added[:5], removed[:5], changed[:5]))
+              if doc.get("scope") != now["scope"]:
+                  bad("the @tauri-apps folder listing changed after it was recorded")
+              print("CLI_RECHECK PASS")
+
+
+          def version(jsonfile):
+              v = jload(jsonfile)["version"]
+              if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", v):
+                  bad("odd version")
+              print(v)
+
+
+          def versionline(path, ver):
+              with open(path, "rb") as f:
+                  data = f.read(4096)
+              want = ("tauri-cli " + ver).encode("ascii")
+              if data not in (want + b"\n", want + b"\r\n"):
+                  bad("the CLI --version output is not exactly one line 'tauri-cli %s'" % ver)
+              print("CLI_VERSION_LINE PASS")
+
+
+          if sys.argv[1] == "check":
+              check(sys.argv[2], sys.argv[3])
+          elif sys.argv[1] == "recheck":
+              recheck(sys.argv[2], sys.argv[3])
+          elif sys.argv[1] == "version":
+              version(sys.argv[2])
+          elif sys.argv[1] == "versionline":
+              versionline(sys.argv[2], sys.argv[3])
+          else:
+              bad("unknown mode")
+          N13_CLI_PY
+          cat > "$RT/n13/stale_lock.py" <<'N13_STALE_PY'
+          import re, sys
+          p = sys.argv[1]
+          b = open(p, "rb").read().decode("utf-8")
+          n, c = re.subn(r'(name = "ai-toolchain-manager"\r?\nversion = )"0\.1\.0"', r'\1"0.0.0-n13-canary"', b)
+          if c != 1:
+              print("canary edit did not match exactly once: %d" % c, file=sys.stderr)
+              sys.exit(1)
+          open(p, "wb").write(n.encode("utf-8"))
+          print("stale lock written")
+          N13_STALE_PY
+          cat > "$RT/n13/artifact_check.py" <<'N13_ART_PY'
+          import os, stat, struct, sys
+
+          WANT = {"BUILD-PROVENANCE.json", "EXPERIMENTAL-NOT-A-RELEASE.txt", "SHA256.txt", "atm-jq-pilot-experimental.exe"}
+
+
+          def bad(msg):
+              print("ARTIFACT_FAIL: " + msg)
+              sys.exit(1)
+
+
+          def pe(path):
+              with open(path, "rb") as f:
+                  d = f.read(65536)
+              if d[:2] != b"MZ" or len(d) < 0x100:
+                  bad("not a PE file")
+              off = struct.unpack_from("<I", d, 0x3C)[0]
+              if off + 24 + 152 > len(d) or d[off:off + 4] != b"PE\0\0":
+                  bad("no PE signature in range")
+              machine = struct.unpack_from("<H", d, off + 4)[0]
+              if machine != 0x8664:
+                  bad("not AMD64: 0x%04x" % machine)
+              opt = off + 24
+              if struct.unpack_from("<H", d, opt)[0] != 0x20B:
+                  bad("not a PE32+ optional header")
+              nrva = struct.unpack_from("<I", d, opt + 108)[0]
+              if nrva > 16:
+                  bad("implausible data-directory count")
+              if nrva >= 5:
+                  sec_off, sec_size = struct.unpack_from("<II", d, opt + 112 + 4 * 8)
+                  if sec_off != 0 or sec_size != 0:
+                      bad("the security directory is not empty: an embedded signature table is present")
+              print("PE AMD64 OK; security directory empty (this is a boundary check: it does not prove there is no catalog signature or anything else)")
+
+
+          def inv(folder):
+              names = set()
+              for nm in os.listdir(folder):
+                  st = os.lstat(os.path.join(folder, nm))
+                  if stat.S_ISLNK(st.st_mode) or (getattr(st, "st_file_attributes", 0) & 0x400) or not stat.S_ISREG(st.st_mode):
+                      bad("an entry is not a plain file: " + nm.encode("ascii", "replace").decode())
+                  names.add(nm)
+              if names != WANT:
+                  bad("the artifact folder does not hold exactly the four expected files")
+              if os.path.getsize(os.path.join(folder, "atm-jq-pilot-experimental.exe")) <= 1000000:
+                  bad("the executable is implausibly small")
+              print("ARTIFACT_INVENTORY OK")
+
+
+          if sys.argv[1] == "pe":
+              pe(sys.argv[2])
+          elif sys.argv[1] == "inv":
+              inv(sys.argv[2])
+          else:
+              bad("unknown mode")
+          N13_ART_PY
+          for f in lib.sh verify_cargo.py cli_check.py stale_lock.py artifact_check.py; do
+            test -s "$RT/n13/$f"
+          done
+          echo "LIB PASS"
+
+      - name: Checkout the workflow branch (policy tools only; never built)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: workflow
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Checkout the accepted source commit (the only tree that is built)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ env.ACCEPTED_COMMIT }}
+          path: source
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Gate 1 - workflow identity (exact branch, first attempt, one workflow-only commit, mode 100644, bytes equal the Git blob)
+        id: gate1
+        run: |
+          source "$(cygpath -u "$RUNNER_TEMP")/n13/lib.sh"
+          eq "$GITHUB_EVENT_NAME" push "event"
+          eq "$GITHUB_REPOSITORY" "$EXPECT_REPO" "repository"
+          eq "$GITHUB_REF" "refs/heads/$EXPECT_BRANCH" "ref"
+          eq "${GITHUB_RUN_ATTEMPT:-}" 1 "run attempt (a re-run is refused)"
+          for v in "$ACCEPTED_COMMIT" "$ACCEPTED_TREE" "$BASE_COMMIT" "$BASE_TREE" "$GITHUB_SHA"; do is_sha1 "$v"; done
+          H="$(gitq workflow rev-parse --verify HEAD)"
+          eq "$H" "$GITHUB_SHA" "workflow checkout HEAD"
+          one_parent workflow "$BASE_COMMIT"
+          T="$(tree_of workflow 'HEAD^')"
+          eq "$T" "$BASE_TREE" "tree of the workflow commit's parent"
+          K="$(gitq workflow cat-file -t "$BASE_COMMIT")"
+          eq "$K" commit "type of the base object"
+          WT="$(gitq workflow rev-parse --show-toplevel)"
+          ST="$(gitq source rev-parse --show-toplevel)"
+          [ "$WT" != "$ST" ] || fail "the workflow and source checkouts are the same folder"
+          BLOB="$(gitq workflow rev-parse --verify "HEAD:$WORKFLOW_FILE")"
+          is_sha1 "$BLOB"
+          BK="$(gitq workflow cat-file -t "$BLOB")"
+          eq "$BK" blob "type of the workflow object (a symlink or gitlink is refused)"
+          ZERO="$(printf '%040d' 0)"
+          WANT_RAW="$(printf ':000000 100644 %s %s A\t%s' "$ZERO" "$BLOB" "$WORKFLOW_FILE")"
+          GOT_RAW="$(gitq workflow diff --raw --no-abbrev --no-renames "$BASE_COMMIT" HEAD)"
+          eq "$GOT_RAW" "$WANT_RAW" "workflow commit change list (exactly one added regular 100644 file)"
+          no_credentials workflow
+          no_credentials source
+          clean_tree workflow
+          git -C workflow cat-file blob "$BLOB" > "$N13/workflow.blob" || fail "cannot read the workflow blob"
+          cmp_same "$N13/workflow.blob" "workflow/$WORKFLOW_FILE"
+          WFS="$(sha256_of "$N13/workflow.blob")"
+          is_sha256 "$WFS"
+          printf '%s\n' "$WFS" > "$N13/workflow.sha256"
+          echo "GATE1 PASS workflow_commit=$GITHUB_SHA workflow_blob=$BLOB workflow_sha256=$WFS"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Gate 2 - this workflow file against the action-pins policy and the relevant contract tests (workflow checkout)
+        id: gate2
+        working-directory: workflow
+        run: |
+          source "$(cygpath -u "$RUNNER_TEMP")/n13/lib.sh"
+          python -m pip install -r requirements-test.txt
+          python tools/check_action_pins.py > "$N13/pins.txt"
+          cat "$N13/pins.txt"
+          grep -q '^ACTION_PINS_RESULT PASS files=4 ' "$N13/pins.txt" || fail "the pins checker did not report PASS for 4 files"
+          python -m unittest discover -s tests -p test_ci_action_pins.py -v
+          python -m unittest discover -s tests -p test_phase3d4_contract.py -v
+          echo "GATE2 PASS"
+
+      - name: Gate 3 - the accepted source (HEAD, tree, single parent, exact nine-file diff, B3 file untouched, clean tree)
+        id: gate3
+        run: |
+          source "$(cygpath -u "$RUNNER_TEMP")/n13/lib.sh"
+          H="$(gitq source rev-parse --verify HEAD)"
+          eq "$H" "$ACCEPTED_COMMIT" "source HEAD"
+          T="$(tree_of source HEAD)"
+          eq "$T" "$ACCEPTED_TREE" "source tree"
+          one_parent source "$BASE_COMMIT"
+          PT="$(tree_of source 'HEAD^')"
+          eq "$PT" "$BASE_TREE" "tree of the source commit's parent"
+          WANT="$(printf '%s\n' \
+            docs/phase-3d6/NETWORK-OBSERVATION.md \
+            docs/phase-3d6/NEXT-11-DESIGN.md \
+            docs/phase-3d6/REMAINING-STEPS.tr.md \
+            src-tauri/src/adapter.rs \
+            src-tauri/src/adapter_tests.rs \
+            src-tauri/src/managed_fs.rs \
+            src-tauri/src/managed_fs_tests.rs \
+            src-tauri/src/managed_fs_unix.rs \
+            src-tauri/src/managed_fs_windows.rs | LC_ALL=C sort)"
+          GOT="$(gitq source diff --name-only --no-renames "$BASE_COMMIT" HEAD | LC_ALL=C sort)"
+          eq "$GOT" "$WANT" "the source change list against the pinned base"
+          DR=0
+          git -C source diff --quiet "$BASE_COMMIT" HEAD -- src-tauri/src/jq_pilot.rs src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json package.json package-lock.json .github || DR=$?
+          eq "$DR" 0 "protected paths unchanged against the base"
+          clean_tree source
+          [ ! -e source/src-tauri/target ] || fail "a target folder exists in the source checkout"
+          [ ! -e "source/$WORKFLOW_FILE" ] || fail "the source checkout contains this workflow file: it is not the accepted tree"
+          echo "GATE3 PASS accepted_commit=$ACCEPTED_COMMIT accepted_tree=$ACCEPTED_TREE"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: Rust toolchain (exact version, no fallback) and the genuine Cargo path
+        id: rust
+        run: |
+          source "$(cygpath -u "$RUNNER_TEMP")/n13/lib.sh"
+          eq "$RUST_VERSION" 1.100.0 "pinned Rust version"
+          RUPU="$(command -v rustup.exe)" || fail "rustup.exe is not on the PATH"
+          oneline "$RUPU" "the rustup path"
+          RUPM="$(cygpath -m "$RUPU")" || fail "cygpath failed for the rustup path"
+          safe_val "$RUPM"
+          case "${RUPM,,}" in */rustup.exe) ;; *) fail "the rustup path is not a rustup.exe: $RUPM" ;; esac
+          [ -f "$RUPU" ] && [ ! -L "$RUPU" ] || fail "rustup.exe is not a plain file: $RUPM"
+          RUPSHA="$(sha256_of "$RUPU")" || fail "cannot hash rustup"
+          is_sha256 "$RUPSHA"
+          if [ -n "${RUSTUP_HOME:-}" ]; then
+            RHM="$(cygpath -m "$RUSTUP_HOME")" || fail "cygpath failed for RUSTUP_HOME"
+            safe_val "$RHM"
+          else
+            RHM="-"
+          fi
+          emit_env N13_REAL_RUSTUP "$RUPM"
+          emit_env N13_REAL_RUSTUP_SHA256 "$RUPSHA"
+          emit_env N13_RUSTUP_HOME "$RHM"
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target "$TARGET"
+          rustup default "$RUST_VERSION"
+          emit_env RUSTUP_TOOLCHAIN "$RUST_VERSION"
+          export RUSTUP_TOOLCHAIN="$RUST_VERSION"
+          RV="$(rustc -V)" || fail "rustc -V failed"
+          oneline "$RV" "the rustc version line"
+          RE_RUSTC='^rustc 1\.100\.0 \([0-9a-f]{8,12} [0-9]{4}-[0-9]{2}-[0-9]{2}\)$'
+          [[ "$RV" =~ $RE_RUSTC ]] || fail "wrong rustc: $RV"
+          hash_is "$RUPU" "$RUPSHA" "rustup.exe after the toolchain commands"
+          REAL="$(rustup which cargo)" || fail "rustup which cargo failed"
+          oneline "$REAL" "the cargo path"
+          REALM="$(cygpath -m "$REAL")" || fail "cygpath failed for the cargo path"
+          safe_val "$REALM"
+          case "$REALM" in */toolchains/"$RUST_VERSION"-*/bin/cargo.exe) ;; *) fail "the cargo path is not the cargo.exe of the $RUST_VERSION toolchain: $REALM" ;; esac
+          REALU="$(cygpath -u "$REAL")" || fail "cygpath failed for the cargo path"
+          [ -f "$REALU" ] && [ ! -L "$REALU" ] || fail "the cargo executable is not a plain file: $REALM"
+          CV="$("$REALU" -V)" || fail "cargo -V failed"
+          oneline "$CV" "the cargo version line"
+          RE_CARGO='^cargo 1\.100\.0 \([0-9a-f]{8,12} [0-9]{4}-[0-9]{2}-[0-9]{2}\)$'
+          [[ "$CV" =~ $RE_CARGO ]] || fail "wrong cargo: $CV"
+          RSHA="$(sha256_of "$REALU")" || fail "cannot hash cargo"
+          is_sha256 "$RSHA"
+          emit_env N13_REAL_CARGO "$REALM"
+          emit_env N13_REAL_CARGO_SHA256 "$RSHA"
+          RUSTCU="$(dirname "$REALU")/rustc.exe"
+          [ -f "$RUSTCU" ] && [ ! -L "$RUSTCU" ] || fail "the toolchain rustc.exe is not a plain file next to cargo.exe"
+          RUSTCM="$(cygpath -m "$RUSTCU")" || fail "cygpath failed for the rustc path"
+          safe_val "$RUSTCM"
+          RV2="$("$RUSTCU" -V)" || fail "the toolchain rustc.exe -V failed"
+          oneline "$RV2" "the toolchain rustc version line"
+          [[ "$RV2" =~ $RE_RUSTC ]] || fail "wrong toolchain rustc: $RV2"
+          RCSHA="$(sha256_of "$RUSTCU")" || fail "cannot hash rustc"
+          is_sha256 "$RCSHA"
+          emit_env N13_REAL_RUSTC "$RUSTCM"
+          emit_env N13_REAL_RUSTC_SHA256 "$RCSHA"
+          echo "$RV"
+          echo "$CV at $REALM"
+          NV="$(node -v)" || fail "node -v failed"
+          RE_NODE='^v24\.[0-9]+\.[0-9]+$'
+          [[ "$NV" =~ $RE_NODE ]] || fail "wrong node: $NV"
+          NPMV="$(npm -v)" || fail "npm -v failed"
+          is_semver "$NPMV"
+          echo "node $NV npm $NPMV"
+          echo "RUST PASS"
+
+      - name: Canonical build location (source root, src-tauri, manifest, lock file, Cargo) defined once
+        id: canon
+        run: |
+          source "$(cygpath -u "$RUNNER_TEMP")/n13/lib.sh"
+          cd source
+          env_hygiene
+          SRC_M="$(cygpath -m "$PWD")" || fail "cygpath failed"
+          WS_M="$(cygpath -m "$GITHUB_WORKSPACE")" || fail "cygpath failed"
+          safe_val "$SRC_M"
+          safe_val "$WS_M"
+          python "$N13W/verify_cargo.py" canon-init "$N13W/canon.json" "$WS_M" "$SRC_M" "$TARGET" "$ACCEPTED_COMMIT" "$ACCEPTED_TREE" "$N13_REAL_CARGO" "$N13_REAL_CARGO_SHA256" "$N13_REAL_RUSTC" "$N13_REAL_RUSTC_SHA256" "$N13_REAL_RUSTUP" "$N13_REAL_RUSTUP_SHA256" "$N13_RUSTUP_HOME"
+          for d in . src-tauri ..; do
+            [ ! -e "$d/.cargo" ] || fail "a .cargo configuration folder exists in $d"
+          done
+          cargo_guard
+          python "$N13W/verify_cargo.py" bins "$N13W/canon.json"
+          LS="$(sha256_of src-tauri/Cargo.lock)"
+          is_sha256 "$LS"
+          LC="$(canon_get orig_lock_sha256)"
+          eq "$LS" "$LC" "Cargo.lock hash computed in two independent ways"
+          printf '%s\n' "$LS" > "$N13/cargo-lock.sha256"
+          cp -- src-tauri/Cargo.lock "$N13/Cargo.lock.orig"
+          cmp_same "$N13/Cargo.lock.orig" src-tauri/Cargo.lock
+          echo "CANON PASS"
+
+      - name: Locked dependency check (cargo metadata --locked with the genuine Cargo; Cargo.lock hash recorded)
+        id: lockmeta
+        timeout-minutes: 30
+        run: |
+          source "$(cygpath -u "$RUNNER_TEMP")/n13/lib.sh"
+          cd source
+          cargo_guard
+          LOCKM="$(canon_get lock_m)"
+          LOCKU="$(cygpath -u "$LOCKM")" || fail "cygpath failed"
+          MANIFESTM="$(canon_get manifest_m)"
+          TDIRM="$(canon_get tauri_dir_m)"
+          TDIRU="$(cygpath -u "$TDIRM")" || fail "cygpath failed"
+          REALM="$(canon_get real_cargo_m)"
+          REALU="$(cygpath -u "$REALM")" || fail "cygpath failed"
+          ORIGSHA="$(canon_get orig_lock_sha256)"
+          is_sha256 "$ORIGSHA"
+          plain_dir "$TDIRU"
+          plain_file "$LOCKU"
+          hash_is "$LOCKU" "$ORIGSHA" "Cargo.lock before the metadata check"
+          (cd "$TDIRU" && "$REALU" metadata --locked --format-version 1 --features jq-pilot --filter-platform "$TARGET" --manifest-path "$MANIFESTM" > /dev/null) || fail "cargo metadata --locked failed"
+          hash_is "$LOCKU" "$ORIGSHA" "Cargo.lock after the metadata check"
+          clean_tree .
+          echo "LOCKED_METADATA PASS"
+
+      - name: Frontend dependencies (npm ci)
+        id: npmci
+        run: |
+          source "$(cygpath -u "$RUNNER_TEMP")/n13/lib.sh"
+          cd source
+          npm ci
+          clean_tree .
+
+      - name: Bind to the locally installed Tauri CLI (no npx, no download, no fallback; native module checked)
+        id: cli
+        run: |
+          source "$(cygpath -u "$RUNNER_TEMP")/n13/lib.sh"
+          cd source
+          env_hygiene
+          python "$N13W/cli_check.py" check . "$N13W/cli.json" || fail "the Tauri CLI binding check failed"
+          CLI_VER="$(python "$N13W/cli_check.py" version "$N13W/cli.json")" || fail "cannot read the CLI version"
+          is_semver "$CLI_VER"
+          JS="$(cygpath -m "$PWD/node_modules/@tauri-apps/cli/tauri.js")" || fail "cygpath failed"
+          safe_val "$JS"
+          [ -f "$(cygpath -u "$JS")" ] || fail "the local Tauri CLI entry point is missing"
+          node "$JS" --version > "$N13/cli-version.out" 2> "$N13/cli-version.err" || fail "the local Tauri CLI did not run"
+          python "$N13W/cli_check.py" versionline "$N13W/cli-version.out" "$CLI_VER" || fail "the CLI version output was not accepted"
+          python "$N13W/cli_check.py" recheck . "$N13W/cli.json" || fail "a CLI file changed while the CLI ran"
+          emit_env N13_TAURI_JS "$JS"
+          emit_env N13_TAURI_VERSION "$CLI_VER"
+          echo "CLI PASS: tauri-cli $CLI_VER at $JS"
+
+      - name: Build the transparent Cargo launcher (records argv, exit status and output of the Cargo child)
+        id: shim
+        timeout-minutes: 15
+        run: |
+          source "$(cygpath -u "$RUNNER_TEMP")/n13/lib.sh"
+          cargo_guard
+          mkdir -p "$N13/shim"
+          cat > "$N13/shim/n13_cargo_runner.rs" <<'N13_SHIM_RS'
+          use std::ffi::OsString;
+          use std::fs::{File, OpenOptions};
+          use std::io::{Read, Write};
+          use std::path::PathBuf;
+          use std::process::{exit, Command, Stdio};
+          use std::thread;
+          use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+          const CAPTURE_LIMIT: u64 = 16 * 1024 * 1024;
+
+          fn die(msg: &str) -> ! {
+              eprintln!("n13-cargo-runner: {}", msg);
+              exit(97)
+          }
+
+          fn pump<R: Read + Send + 'static, W: Write + Send + 'static>(mut src: R, mut sink: W, mut log: File) -> thread::JoinHandle<bool> {
+              thread::spawn(move || {
+                  let mut ok = true;
+                  let mut total: u64 = 0;
+                  let mut buf = [0u8; 8192];
+                  loop {
+                      match src.read(&mut buf) {
+                          Ok(0) => break,
+                          Ok(n) => {
+                              total += n as u64;
+                              if total > CAPTURE_LIMIT {
+                                  ok = false;
+                              } else if log.write_all(&buf[..n]).is_err() {
+                                  ok = false;
+                              }
+                              let _ = sink.write_all(&buf[..n]);
+                              let _ = sink.flush();
+                          }
+                          Err(_) => {
+                              ok = false;
+                              break;
+                          }
+                      }
+                  }
+                  ok && log.flush().is_ok() && log.sync_all().is_ok()
+              })
+          }
+
+          fn finish(h: thread::JoinHandle<bool>) -> bool {
+              if h.is_finished() {
+                  h.join().unwrap_or(false)
+              } else {
+                  false
+              }
+          }
+
+          fn main() {
+              let real = match std::env::var_os("N13_REAL_CARGO") {
+                  Some(v) => PathBuf::from(v),
+                  None => die("N13_REAL_CARGO is not set"),
+              };
+              let dir = match std::env::var_os("N13_SHIM_LOG") {
+                  Some(v) => PathBuf::from(v),
+                  None => die("N13_SHIM_LOG is not set"),
+              };
+              if !real.is_absolute() || !real.is_file() {
+                  die("N13_REAL_CARGO is not an existing absolute file");
+              }
+              let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+              let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+              let id = format!("inv-{}-{}", stamp, std::process::id());
+              let open = |ext: &str| OpenOptions::new().create_new(true).write(true).open(dir.join(format!("{}.{}", id, ext)));
+              let mut rec = open("rec").unwrap_or_else(|e| die(&format!("cannot create the record: {}", e)));
+              let out_log = open("stdout").unwrap_or_else(|e| die(&format!("cannot create the stdout capture: {}", e)));
+              let err_log = open("stderr").unwrap_or_else(|e| die(&format!("cannot create the stderr capture: {}", e)));
+              let cwd = std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_else(|e| die(&format!("no working directory: {}", e)));
+              let mut head = format!("N13SHIM 1\nARGC {}\n", args.len());
+              for a in &args {
+                  let s = match a.to_str() {
+                      Some(s) => s,
+                      None => die("an argument is not valid Unicode"),
+                  };
+                  if s.contains('\n') || s.contains('\r') {
+                      die("an argument contains a line break");
+                  }
+                  head.push_str(&format!("ARG {}\n", s));
+              }
+              head.push_str(&format!("CWD {}\nREAL {}\n", cwd, real.display()));
+              if let Err(e) = rec.write_all(head.as_bytes()).and_then(|_| rec.sync_all()) {
+                  die(&format!("cannot write the record: {}", e));
+              }
+              let mut child = Command::new(&real)
+                  .args(&args)
+                  .stdin(Stdio::inherit())
+                  .stdout(Stdio::piped())
+                  .stderr(Stdio::piped())
+                  .spawn()
+                  .unwrap_or_else(|e| die(&format!("cannot start the real cargo: {}", e)));
+              let h1 = pump(child.stdout.take().unwrap_or_else(|| die("no child stdout")), std::io::stdout(), out_log);
+              let h2 = pump(child.stderr.take().unwrap_or_else(|| die("no child stderr")), std::io::stderr(), err_log);
+              let status = child.wait().unwrap_or_else(|e| die(&format!("cannot wait for the real cargo: {}", e)));
+              let deadline = Instant::now() + Duration::from_secs(60);
+              while !(h1.is_finished() && h2.is_finished()) && Instant::now() < deadline {
+                  thread::sleep(Duration::from_millis(50));
+              }
+              let ok1 = finish(h1);
+              let ok2 = finish(h2);
+              let code = match status.code() {
+                  Some(c) => c,
+                  None => die("the real cargo ended without an exit code"),
+              };
+              let tail = format!("EXIT {}\n{}\nEND\n", code, if ok1 && ok2 { "PUMP ok" } else { "PUMP failed" });
+              if let Err(e) = rec.write_all(tail.as_bytes()).and_then(|_| rec.sync_all()) {
+                  die(&format!("cannot finish the record: {}", e));
+              }
+              if !(ok1 && ok2) {
+                  die("the output capture failed");
+              }
+              exit(code)
+          }
+          N13_SHIM_RS
+          (cd "$N13/shim" && "$RUSTC" --edition 2021 -C opt-level=1 -o n13-cargo-runner.exe n13_cargo_runner.rs) || fail "the launcher did not compile"
+          [ -f "$N13/shim/n13-cargo-runner.exe" ] || fail "the launcher was not built"
+          EXE="$(cygpath -m "$N13/shim/n13-cargo-runner.exe")" || fail "cygpath failed"
+          safe_val "$EXE"
+          SSHA="$(sha256_of "$N13/shim/n13-cargo-runner.exe")" || fail "cannot hash the launcher"
+          is_sha256 "$SSHA"
+          python "$N13W/verify_cargo.py" canon-add "$N13W/canon.json" shim_exe_m "$EXE"
+          python "$N13W/verify_cargo.py" canon-add "$N13W/canon.json" shim_sha256 "$SSHA"
+          LOGD="$(mktemp -d "$N13/selftest-log.XXXXXXXX")" || fail "cannot create the self-test log folder"
+          chmod 700 "$LOGD" || fail "chmod failed"
+          LOGM="$(cygpath -m "$LOGD")" || fail "cygpath failed"
+          safe_val "$LOGM"
+          N13_SHIM_LOG="$LOGM" "$EXE" -V > "$N13/selftest.out" || fail "the launcher self-test failed"
+          python "$N13W/verify_cargo.py" selftest "$N13W/canon.json" "$LOGM" "cargo $RUST_VERSION "
+          emit_env N13_SHIM_EXE "$EXE"
+          echo "SHIM PASS"
+
+      - name: Negative control - the Cargo child that Tauri starts must receive --locked and Cargo itself must refuse a stale lock file
+        id: control
+        timeout-minutes: 30
+        run: |
+          source "$(cygpath -u "$RUNNER_TEMP")/n13/lib.sh"
+          cd source
+          cargo_guard
+          LOCKM="$(canon_get lock_m)"
+          LOCKU="$(cygpath -u "$LOCKM")" || fail "cygpath failed"
+          MANIFESTM="$(canon_get manifest_m)"
+          TDIRM="$(canon_get tauri_dir_m)"
+          TDIRU="$(cygpath -u "$TDIRM")" || fail "cygpath failed"
+          REALM="$(canon_get real_cargo_m)"
+          REALU="$(cygpath -u "$REALM")" || fail "cygpath failed"
+          RSHA="$(canon_get real_cargo_sha256)"
+          SHIMM="$(canon_get shim_exe_m)"
+          SHIMU="$(cygpath -u "$SHIMM")" || fail "cygpath failed"
+          SSHA="$(canon_get shim_sha256)"
+          ORIGSHA="$(canon_get orig_lock_sha256)"
+          is_sha256 "$RSHA"; is_sha256 "$SSHA"; is_sha256 "$ORIGSHA"
+          eq "$REALM" "$N13_REAL_CARGO" "the Cargo path in the environment against the canonical path"
+          eq "$SHIMM" "$N13_SHIM_EXE" "the launcher path in the environment against the canonical path"
+          ORIG="$N13/Cargo.lock.orig"
+          hash_is "$ORIG" "$ORIGSHA" "the saved original Cargo.lock"
+          hash_is "$LOCKU" "$ORIGSHA" "Cargo.lock before the control"
+          cmp_same "$ORIG" "$LOCKU"
+          [ ! -e src-tauri/target ] || fail "a target folder exists before the control"
+          LOGD="$(mktemp -d "$N13/control-log.XXXXXXXX")" || fail "cannot create the control log folder"
+          chmod 700 "$LOGD" || fail "chmod failed"
+          LOGM="$(cygpath -m "$LOGD")" || fail "cygpath failed"
+          safe_val "$LOGM"
+          LISTING="$(ls -A "$LOGD")" || fail "cannot list the log folder"
+          [ -z "$LISTING" ] || fail "the control log folder is not empty"
+          NEED_RESTORE=0
+          on_exit() {
+            local rc=$?
+            if [ "$NEED_RESTORE" = 1 ]; then
+              if python "$N13W/verify_cargo.py" plain "$LOCKU" > /dev/null && [ "$(sha256sum -- "$ORIG" | cut -d' ' -f1)" = "$ORIGSHA" ] && cp -- "$ORIG" "$LOCKU" && cmp -s -- "$ORIG" "$LOCKU"; then
+                echo "the exit handler restored Cargo.lock"
+              else
+                echo "STOP: Cargo.lock could not be restored (the original failure status was $rc; the current file is left in place and nothing was deleted)" >&2
+                rc=98
+              fi
+            fi
+            exit "$rc"
+          }
+          trap on_exit EXIT
+          NEED_RESTORE=1
+          plain_dir "$TDIRU"
+          plain_file "$LOCKU"
+          plain_file "$ORIG"
+          python "$N13W/stale_lock.py" "$LOCKU"
+          CANARY="$(sha256_of "$LOCKU")" || fail "cannot hash the canary"
+          is_sha256 "$CANARY"
+          [ "$CANARY" != "$ORIGSHA" ] || fail "the canary equals the original lock file"
+          cmp_differs "$ORIG" "$LOCKU"
+          python "$N13W/verify_cargo.py" canon-add "$N13W/canon.json" canary_lock_sha256 "$CANARY"
+          PRE=0
+          (cd "$TDIRU" && "$REALU" metadata --locked --format-version 1 --manifest-path "$MANIFESTM" > "$N13/pre.out" 2> "$N13/pre.err") || PRE=$?
+          eq "$PRE" 101 "the genuine Cargo refuses the stale lock file before Tauri is involved (exit status)"
+          python "$N13W/verify_cargo.py" diag "$N13W/canon.json" "$N13W/pre.err"
+          hash_is "$LOCKU" "$CANARY" "Cargo.lock after the direct Cargo check (it must still be the canary)"
+          hash_is "$REALU" "$RSHA" "the pinned Cargo before the Tauri run"
+          hash_is "$SHIMU" "$SSHA" "the launcher before the Tauri run"
+          JSC="$(cygpath -m "$PWD/node_modules/@tauri-apps/cli/tauri.js")" || fail "cygpath failed"
+          eq "$JSC" "$N13_TAURI_JS" "the Tauri CLI path in the environment"
+          python "$N13W/cli_check.py" recheck . "$N13W/cli.json" || fail "a CLI file changed before the control"
+          cargo_audit
+          RC=0
+          N13_SHIM_LOG="$LOGM" node "$N13_TAURI_JS" build --debug --no-bundle --target "$TARGET" --features jq-pilot --runner "$N13_SHIM_EXE" -- --locked > "$N13/control-tauri.log" 2>&1 || RC=$?
+          echo "tauri exit status: $RC (informational: this log is never used as evidence)"
+          tail -n 20 "$N13/control-tauri.log" | LC_ALL=C sed -e 's/^::/_::/' || true
+          hash_is "$LOCKU" "$CANARY" "Cargo.lock after the Tauri child, before the restore (it must still be the same canary)"
+          plain_file "$LOCKU"
+          cp -- "$ORIG" "$LOCKU" || fail "the original Cargo.lock could not be restored"
+          plain_file "$LOCKU"
+          cmp_same "$ORIG" "$LOCKU"
+          hash_is "$LOCKU" "$ORIGSHA" "Cargo.lock after the restore"
+          NEED_RESTORE=0
+          DR=0
+          git diff --quiet -- src-tauri/Cargo.lock || DR=$?
+          eq "$DR" 0 "git sees no change in Cargo.lock after the restore"
+          clean_tree .
+          [ "$RC" -ne 0 ] || fail "the Tauri build succeeded with a stale lock file"
+          python "$N13W/verify_cargo.py" control "$N13W/canon.json" "$LOGM"
+          if [ -e src-tauri/target ]; then
+            EXES="$(find src-tauri/target -name '*.exe')" || fail "cannot inspect the target folder"
+            [ -z "$EXES" ] || fail "the control produced an executable: $EXES"
+            rm -rf src-tauri/target
+          fi
+          [ ! -e src-tauri/target ] || fail "the target folder could not be removed"
+          clean_tree .
+          echo "TAURI_LOCKED_FORWARDING_CONTROL PASS"
+
+      - name: Build the experimental jq-pilot executable (debug; no bundle; no signing; locked; local CLI; recorded Cargo child)
+        id: build
+        timeout-minutes: 60
+        run: |
+          source "$(cygpath -u "$RUNNER_TEMP")/n13/lib.sh"
+          cd source
+          cargo_guard
+          REALM="$(canon_get real_cargo_m)"
+          REALU="$(cygpath -u "$REALM")" || fail "cygpath failed"
+          RSHA="$(canon_get real_cargo_sha256)"
+          SHIMM="$(canon_get shim_exe_m)"
+          SHIMU="$(cygpath -u "$SHIMM")" || fail "cygpath failed"
+          SSHA="$(canon_get shim_sha256)"
+          ORIGSHA="$(canon_get orig_lock_sha256)"
+          LOCKM="$(canon_get lock_m)"
+          LOCKU="$(cygpath -u "$LOCKM")" || fail "cygpath failed"
+          eq "$REALM" "$N13_REAL_CARGO" "the Cargo path in the environment against the canonical path"
+          eq "$SHIMM" "$N13_SHIM_EXE" "the launcher path in the environment against the canonical path"
+          BIN="src-tauri/target/$TARGET/debug/ai-toolchain-manager.exe"
+          [ ! -e src-tauri/target ] || fail "a target folder exists before the build"
+          plain_file "$LOCKU"
+          hash_is "$LOCKU" "$ORIGSHA" "Cargo.lock before the build"
+          hash_is "$REALU" "$RSHA" "the pinned Cargo before the build"
+          hash_is "$SHIMU" "$SSHA" "the launcher before the build"
+          python "$N13W/cli_check.py" recheck . "$N13W/cli.json" || fail "a CLI file changed before the build"
+          JSC="$(cygpath -m "$PWD/node_modules/@tauri-apps/cli/tauri.js")" || fail "cygpath failed"
+          eq "$JSC" "$N13_TAURI_JS" "the Tauri CLI path in the environment"
+          LOGD="$(mktemp -d "$N13/build-log.XXXXXXXX")" || fail "cannot create the build log folder"
+          chmod 700 "$LOGD" || fail "chmod failed"
+          LOGM="$(cygpath -m "$LOGD")" || fail "cygpath failed"
+          safe_val "$LOGM"
+          LISTING="$(ls -A "$LOGD")" || fail "cannot list the log folder"
+          [ -z "$LISTING" ] || fail "the build log folder is not empty"
+          rm -f "$BIN"
+          touch "$N13/build-start.marker"
+          sleep 2
+          python "$N13W/cli_check.py" recheck . "$N13W/cli.json" || fail "a CLI file changed immediately before the build"
+          cargo_audit
+          N13_SHIM_LOG="$LOGM" node "$N13_TAURI_JS" build --debug --no-bundle --target "$TARGET" --features jq-pilot --runner "$N13_SHIM_EXE" -- --locked
+          [ -f "$BIN" ] || fail "the build output is missing"
+          [ "$BIN" -nt "$N13/build-start.marker" ] || fail "the build output is not newer than the build start"
+          python "$N13W/verify_cargo.py" build "$N13W/canon.json" "$LOGM"
+          hash_is "$LOCKU" "$ORIGSHA" "Cargo.lock after the build"
+          cmp_same "$N13/Cargo.lock.orig" "$LOCKU"
+          hash_is "$REALU" "$RSHA" "the pinned Cargo after the build"
+          hash_is "$SHIMU" "$SSHA" "the launcher after the build"
+          clean_tree .
+          H="$(gitq . rev-parse --verify HEAD)"
+          eq "$H" "$ACCEPTED_COMMIT" "source HEAD after the build"
+          T="$(tree_of . HEAD)"
+          eq "$T" "$ACCEPTED_TREE" "source tree after the build"
+          echo "BUILD PASS"
+
+      - name: Verify the executable and write the artifact and provenance (fails closed)
+        id: artifact
+        run: |
+          source "$(cygpath -u "$RUNNER_TEMP")/n13/lib.sh"
+          cd source
+          BIN="src-tauri/target/$TARGET/debug/ai-toolchain-manager.exe"
+          python "$N13W/artifact_check.py" pe "$BIN"
+          MR=0
+          grep -a -q 'jq-pilot-input' "$BIN" || MR=$?
+          eq "$MR" 0 "the jq-pilot feature marker is present in the executable"
+          OUT="$(cygpath -u "$RUNNER_TEMP")/jq-pilot-unsigned"
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+          cp -- "$BIN" "$OUT/atm-jq-pilot-experimental.exe"
+          cmp_same "$BIN" "$OUT/atm-jq-pilot-experimental.exe"
+          EXE_SHA="$(sha256_of "$OUT/atm-jq-pilot-experimental.exe")" || fail "cannot hash the copy"
+          BIN_SHA="$(sha256_of "$BIN")" || fail "cannot hash the build output"
+          eq "$EXE_SHA" "$BIN_SHA" "copy hash against build output"
+          EXE_BYTES="$(wc -c < "$OUT/atm-jq-pilot-experimental.exe")" || fail "wc failed"
+          EXE_BYTES="${EXE_BYTES//[[:space:]]/}"
+          RE_NUM='^[0-9]+$'
+          [[ "$EXE_BYTES" =~ $RE_NUM ]] || fail "bad byte count '$EXE_BYTES'"
+          [ "$EXE_BYTES" -gt 1000000 ] || fail "the executable is implausibly small: $EXE_BYTES"
+          cmp_same "$N13/workflow.blob" "../workflow/$WORKFLOW_FILE"
+          WF_SHA="$(cat "$N13/workflow.sha256")" || fail "cannot read the workflow hash"
+          is_sha256 "$WF_SHA"
+          hash_is "$N13/workflow.blob" "$WF_SHA" "the workflow blob copy"
+          RUSTCM="$(canon_get real_rustc_m)"
+          RUSTCU="$(cygpath -u "$RUSTCM")" || fail "cygpath failed"
+          hash_is "$RUSTCU" "$(canon_get real_rustc_sha256)" "the pinned rustc before the provenance probe"
+          RUSTC_V="$("$RUSTCU" -V)" || fail "rustc -V failed"
+          oneline "$RUSTC_V" "the rustc version line"
+          REALM="$(canon_get real_cargo_m)"
+          REALU="$(cygpath -u "$REALM")" || fail "cygpath failed"
+          CARGO_V="$("$REALU" -V)" || fail "cargo -V failed"
+          oneline "$CARGO_V" "the cargo version line"
+          NODE_V="$(node -v)" || fail "node -v failed"
+          oneline "$NODE_V" "the node version line"
+          NPM_V="$(npm -v)" || fail "npm -v failed"
+          is_semver "$NPM_V"
+          LOCK_SHA="$(cat "$N13/cargo-lock.sha256")" || fail "cannot read the lock hash"
+          is_sha256 "$LOCK_SHA"
+          is_semver "$N13_TAURI_VERSION"
+          {
+            echo "EXPERIMENTAL / UNSIGNED / NOT A RELEASE / NOT INDEPENDENTLY ACCEPTED"
+            echo "jq-pilot debug build of accepted commit $ACCEPTED_COMMIT (tree $ACCEPTED_TREE). It does not contain the jq program."
+            echo "It is armed for one data-directory scope identifier only; it installs nothing without the owner's separate authorization."
+            echo "Not a GitHub Release. Not a production distribution. Unsigned experimental artifact."
+            echo "This repository is public: while the 3-day retention lasts, every GitHub user with artifact read access to the repository can download it."
+            echo "A successful CI build says nothing about Smart App Control acceptance on any computer."
+          } > "$OUT/EXPERIMENTAL-NOT-A-RELEASE.txt"
+          {
+            echo "$EXE_SHA  atm-jq-pilot-experimental.exe"
+            echo "bytes $EXE_BYTES"
+            echo "accepted_commit $ACCEPTED_COMMIT"
+            echo "accepted_tree $ACCEPTED_TREE"
+            echo "target $TARGET"
+            echo "cargo features: jq-pilot (non-default) and tauri/custom-protocol (added by tauri-cli for a build); target selector: --bins (one implicit binary); profile: debug; unsigned; no bundle; cargo --locked"
+            echo "workflow_commit $GITHUB_SHA"
+            echo "workflow_run $GITHUB_RUN_ID attempt $GITHUB_RUN_ATTEMPT"
+            echo "$RUSTC_V"
+            echo "$CARGO_V"
+            echo "tauri-cli $N13_TAURI_VERSION"
+          } > "$OUT/SHA256.txt"
+          export EXE_SHA EXE_BYTES WF_SHA RUSTC_V CARGO_V NODE_V NPM_V LOCK_SHA
+          PROV_OUT="$(cygpath -m "$OUT")" || fail "cygpath failed"
+          export PROV_OUT
+          python - "$N13W" <<'N13_PROV_PY'
+          import json, os, sys
+          e = os.environ
+          d = sys.argv[1]
+          build = json.load(open(os.path.join(d, "verified-build.json"), encoding="utf-8"))
+          control = json.load(open(os.path.join(d, "verified-control.json"), encoding="utf-8"))
+          canon = json.load(open(os.path.join(d, "canon.json"), encoding="utf-8"))
+          cli = json.load(open(os.path.join(d, "cli.json"), encoding="utf-8"))
+          doc = {
+            "label": "EXPERIMENTAL / UNSIGNED / NOT A RELEASE / NOT INDEPENDENTLY ACCEPTED",
+            "publication": "Not a GitHub Release. Not a production distribution. Unsigned experimental artifact. The repository is public, so GitHub users with artifact read access can download it during the 3-day retention.",
+            "artifact": {"file": "atm-jq-pilot-experimental.exe", "sha256": e["EXE_SHA"], "bytes": int(e["EXE_BYTES"])},
+            "source": {"repository": e["GITHUB_REPOSITORY"], "accepted_commit": e["ACCEPTED_COMMIT"], "accepted_tree": e["ACCEPTED_TREE"],
+                       "base_commit": e["BASE_COMMIT"], "base_tree": e["BASE_TREE"],
+                       "ci_tested_merge_commit_reference": e["CI_TESTED_MERGE_COMMIT"], "accepted_ci_run_reference": e["ACCEPTED_CI_RUN"]},
+            "workflow": {"file": e["WORKFLOW_FILE"], "file_sha256_from_verified_git_blob": e["WF_SHA"], "commit": e["GITHUB_SHA"], "ref": e["GITHUB_REF"],
+                         "run_id": e["GITHUB_RUN_ID"], "run_attempt": e["GITHUB_RUN_ATTEMPT"], "event": e["GITHUB_EVENT_NAME"]},
+            "build": {"target": e["TARGET"], "profile": "debug", "cargo_features": ["jq-pilot", "tauri/custom-protocol"], "cargo_target_selector": "--bins (one implicit binary: ai-toolchain-manager, src/main.rs)", "bundle": False, "signed": False, "cargo_locked": True,
+                      "cargo_lock_sha256": e["LOCK_SHA"], "recorded_cargo_children": build["children"], "canonical_tauri_dir": canon["tauri_dir"]},
+            "negative_control": {"recorded_cargo_children": control["children"], "canary_lock_sha256": canon["canary_lock_sha256"],
+                                 "note": "a stale Cargo.lock was refused by the genuine Cargo child with --locked, in the expected src-tauri folder, for the expected lock file"},
+            "tools": {"rustc": e["RUSTC_V"], "cargo": e["CARGO_V"], "cargo_path": canon["real_cargo_m"], "cargo_sha256": canon["real_cargo_sha256"], "rustc_path": canon["real_rustc_m"], "rustc_sha256": canon["real_rustc_sha256"],
+                      "launcher_sha256": canon["shim_sha256"], "node": e["NODE_V"], "npm": e["NPM_V"], "tauri_cli": e["N13_TAURI_VERSION"],
+                      "tauri_cli_path": e["N13_TAURI_JS"], "tauri_cli_file_sha256": cli["files"], "tauri_cli_lock_integrity": cli["lock_integrity"]},
+            "assurance_levels": {
+              "npm_package_integrity": "package-lock.json integrity (sha512) is verified by npm ci for the CLI and the native package; this is the only upstream-bound level",
+              "installed_package_boundary": "versions equal the lock file, the native module sits in the expected package folder as a plain file, no override variable, no shadowing .node or nested module",
+              "self_derived_sha256": "the SHA-256 values of the installed files are computed here and compared again before each use; they detect change after the check, they are NOT an upstream identity",
+              "same_principal_limit": "all checks run as the runner user that also runs the build; they are not an independent attestation",
+              "artifact_checks": "the PE check proves AMD64 machine type and an empty security-directory field only; the inventory proves four plain files; neither proves signing state, loadability, supply-chain attestation or reproducibility"},
+            "effective_cargo_configuration": {
+              "cargo_home": "fresh folder under RUNNER_TEMP, created by the canonical definition step; must hold only registry/git/cache entries, no config or credentials",
+              "rustc": "RUSTC is the toolchain rustc.exe next to the pinned cargo.exe; its SHA-256 is rechecked before each use",
+              "path": "the toolchain bin folder is first in PATH; no cargo.exe may exist in the parent-executable folder, src-tauri or the system folders; the lookup is a MODEL (INFERRED)",
+              "configuration_search": "every ancestor of src-tauri is checked for .cargo/config, .cargo/config.toml, rust-toolchain files and a workspace Cargo.toml",
+              "environment": "CARGO_*, RUST* (except the pinned RUSTC, RUSTUP_HOME, RUSTUP_TOOLCHAIN, RUST_VERSION), TAURI_*, NAPI_*, NODE_OPTIONS, NODE_PATH and common C compiler variables fail the run",
+              "argv_contract": "build --locked --bins --features jq-pilot,tauri/custom-protocol --target x86_64-pc-windows-msvc (source text of tauri-cli 2.12.3; runtime NOT verified)",
+              "unrecorded_children": "Tauri starts 'cargo metadata --no-deps' by PATH lookup and 'rustup target list'; they are not recorded by the launcher",
+              "rustup": "one rustup.exe (path and SHA-256) and the RUSTUP_HOME value are recorded before any toolchain command and audited before each Tauri run; the lookup is a MODEL (INFERRED)",
+              "node_loader": "Node itself resolves each require of the Tauri loader (resolution only, nothing is loaded) and the result must be the expected file; competing candidates are refused"},
+            "runner": {"os": e["RUNNER_OS"], "arch": e["RUNNER_ARCH"], "image_os": e.get("ImageOS", ""), "image_version": e.get("ImageVersion", "")},
+            "gates": ["publication decision", "workflow identity, first attempt, mode 100644 and blob bytes", "action-pins policy and contract tests", "accepted source identity and nine-file diff",
+                      "locked metadata with the genuine Cargo", "canonical build location", "effective Cargo environment, configuration search path and cargo.exe lookup audit", "accepted-source binary inventory (one implicit binary)", "local Tauri CLI and native module binding", "launcher self-test",
+                      "attributed --locked control", "fresh build", "PE AMD64 and empty security directory", "exact artifact inventory", "copy equals output"],
+            "not_proven": ["Smart App Control acceptance", "independent review of the workflow", "reproducible build", "signature or notarisation",
+                           "one-use of the workflow (a new push can start another first attempt)", "authenticity of the native Tauri module beyond the npm lock integrity",
+                           "protection against a hostile process of the runner user",
+                           "executable loadability or runtime behaviour", "independent supply-chain attestation", "the MSVC linker, the Windows SDK and the runner image contents (not pinned)",
+                           "that the PATH-resolved cargo metadata and rustup children of Tauri used the pinned tools (modelled, not observed)",
+                           "the real Windows search order of the prebuilt Tauri CLI binary (RUNTIME_UNVERIFIED)", "the content of the Cargo home after real dependency operations on the runner",
+                           "bounded child lifetime (drain deadline starts after the child exits; forwarded output is not capped)"],
+          }
+          with open(os.path.join(e["PROV_OUT"], "BUILD-PROVENANCE.json"), "w", encoding="utf-8", newline="\n") as f:
+              f.write(json.dumps(doc, indent=2) + "\n")
+          print("provenance written")
+          N13_PROV_PY
+          cat "$OUT/SHA256.txt"
+          python "$N13W/artifact_check.py" inv "$PROV_OUT"
+          echo "ARTIFACT_READY PASS sha256=$EXE_SHA bytes=$EXE_BYTES"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: jq-pilot-experimental-unsigned-windows-x64-${{ env.ACCEPTED_COMMIT }}
+          path: ${{ runner.temp }}/jq-pilot-unsigned/
+          retention-days: 3
+          if-no-files-found: error
