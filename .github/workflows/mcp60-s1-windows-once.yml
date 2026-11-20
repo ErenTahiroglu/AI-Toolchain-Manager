@@ -1,0 +1,117 @@
+# SOURCE-REVIEW GATE: DO NOT PUSH THIS FILE UNTIL V3 ZIP IS INDEPENDENTLY ACCEPTED.
+# Ephemeral branch-only CI; this is NOT the permanent .github/workflows/ci.yml MCP step.
+name: ATM MCP60 S1 one-time Windows verification
+
+on:
+  push:
+    branches:
+      - review/mcp60-s1-windows-v3
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp60-s1-windows-v3
+  cancel-in-progress: false
+
+jobs:
+  isolated-s1:
+    # Require the first creation push of the exact review branch. Never rebuild
+    # on later pushes without another explicit owner decision.
+    if: github.event.created == true && github.ref == 'refs/heads/review/mcp60-s1-windows-v3'
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CARGO_HOME: ${{ runner.temp }}\mcp60-cargo-home
+      CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+      CARGO_TERM_COLOR: never
+    steps:
+      - name: Checkout immutable triggering SHA (no persisted credentials)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pin already in ATM ci.yml
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Fail-closed provenance, target, and lockfile preflight
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Output "GITHUB_SHA=$env:GITHUB_SHA"
+          Write-Output "GITHUB_REF=$env:GITHUB_REF"
+          Write-Output "RUNNER_OS=$env:RUNNER_OS; RUNNER_ARCH=$env:RUNNER_ARCH"
+          Write-Output "IMAGE_OS=$env:ImageOS; IMAGE_VERSION=$env:ImageVersion"
+          $head = (git rev-parse HEAD).Trim()
+          $parent = (git rev-parse HEAD^).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -ne $env:GITHUB_SHA) { throw 'HEAD != GITHUB_SHA' }
+          if ($parent -ne '0fa04d8d30b2ce416ff5909f6d27af738c49326e') { throw 'Unexpected baseline parent' }
+          if ($env:RUNNER_ARCH -ne 'X64') { throw 'Expected Windows x64' }
+          $paths = @(git diff --name-only '0fa04d8d30b2ce416ff5909f6d27af738c49326e' HEAD)
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect exact source diff' }
+          $allowedWorkflow = '.github/workflows/mcp60-s1-windows-once.yml'
+          foreach ($path in $paths) {
+            if (!($path -like 'atm-mcp/*' -or $path -eq $allowedWorkflow)) {
+              throw "Out-of-scope path in review commit: $path"
+            }
+          }
+          if ($paths -notcontains $allowedWorkflow) { throw 'Missing the one-time workflow in the review commit' }
+          $expected = 'cb0ab0844775b6ef33a87edc52101d83b1f735bed8ea1dbd061f91e905607ab1'
+          $actual = (Get-FileHash 'atm-mcp/Cargo.lock' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Cargo.lock changed: $actual" }
+          Write-Output "CARGO_LOCK_SHA256=$actual"
+          @'
+          import re, tomllib
+          from pathlib import Path
+          lock = tomllib.loads(Path('atm-mcp/Cargo.lock').read_text(encoding='utf-8'))
+          pkgs = lock['package']
+          registry = [p for p in pkgs if 'source' in p]
+          local = [p for p in pkgs if 'source' not in p]
+          assert len(registry) == 87 and len(local) == 1, f'unexpected Cargo.lock inventory {len(registry)}/{len(local)}'
+          for p in registry:
+              assert p['source'] == 'registry+https://github.com/rust-lang/crates.io-index', p['name']
+              assert re.fullmatch(r'[0-9a-f]{64}',p.get('checksum', '')), p['name']
+          print(f'LOCK_PROVENANCE_OK registry={len(registry)} local={len(local)}')
+          manifest = tomllib.loads(Path('atm-mcp/Cargo.toml').read_text(encoding='utf-8'))
+          deps = manifest['dependencies']
+          rmcp = deps['rmcp']
+          assert rmcp['version'] == '=3.9.0' and rmcp['default-features'] is False
+          assert set(rmcp['features']) == {'server', 'transport-io'}
+          for name, spec in deps.items():
+              if isinstance(spec, dict):
+                  assert not any(k in spec for k in ('git', 'path', 'registry')), name
+          assert 'workspace' in manifest and not manifest['workspace'], 'MCP package is no longer standalone'
+          print('MCP_MANIFEST_SCOPE_OK rmcp=3.9.0 no-default-features server+transport-io')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Cargo.lock provenance check failed' }
+          rustc -vV
+          if ($LASTEXITCODE -ne 0) { throw 'Rust compiler is missing' }
+          $target = (rustc -vV | Select-String '^host:').ToString()
+          if ($target -notmatch 'x86_64-pc-windows-msvc') { throw "Unexpected Rust host $target" }
+          cargo -V
+          if ($LASTEXITCODE -ne 0) { throw 'Cargo missing' }
+          cargo fmt --version
+          if ($LASTEXITCODE -ne 0) { throw 'rustfmt not installed; do not install it in CI' }
+          cargo clippy --version
+          if ($LASTEXITCODE -ne 0) { throw 'Clippy not installed; do not install it in CI' }
+
+      - name: One crates.io-only dependency fetch for exact Windows target
+        working-directory: atm-mcp
+        run: |
+          cargo fetch --locked --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw 'Authorized fetch failed; stop' }
+
+      # First S1 compilation must not be blocked by style-only rustfmt differences.
+      # The priority is compile -> actual tests -> lint; no source is autoformatted or modified.
+      - name: Offline dependency features, build, functional tests, and strict Clippy
+        working-directory: atm-mcp
+        run: |
+          cargo tree --offline --locked --target x86_64-pc-windows-msvc -e features
+          if ($LASTEXITCODE -ne 0) { throw 'Cargo feature inventory failed' }
+          cargo build --offline --locked --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw 'Rust build failed' }
+          cargo test --offline --locked --target x86_64-pc-windows-msvc --all-targets
+          if ($LASTEXITCODE -ne 0) { throw 'S1 test suite failed' }
+          cargo clippy --offline --locked --target x86_64-pc-windows-msvc --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { throw 'Clippy failed' }
+          Write-Output 'S1_CI_SUPPORTING_TESTS_PASSED_NOT_INDEPENDENT_SECURITY_ACCEPTANCE'
