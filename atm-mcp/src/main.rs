@@ -30,6 +30,8 @@ fn main() {
                 Ok(_) => 0,
                 Err(_) => 1,
             },
+            // The peer may close stdin before starting an MCP session. That is a normal shutdown.
+            Err(rmcp::service::ServerInitializeError::ConnectionClosed(_)) => 0,
             Err(_) => 1,
         }
     });
