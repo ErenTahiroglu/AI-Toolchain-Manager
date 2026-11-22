@@ -119,6 +119,11 @@ struct IdOnly {
 
 /// The request id of a frame, only when the frame is an object with at most one `id` key that is a string or an integer.
 fn readable_id(frame: &[u8]) -> Option<RequestId> {
+    // Serde reads a one-element JSON array as a one-field struct, so `[1]` would give an id. Require an object root first.
+    let first = frame.iter().find(|b| !matches!(**b, b' ' | b'\t' | b'\r' | b'\n'))?;
+    if *first != b'{' {
+        return None;
+    }
     serde_json::from_slice::<IdOnly>(frame).ok().and_then(|v| v.id)
 }
 
@@ -337,6 +342,12 @@ mod tests {
         assert!(readable_id(br#"{"id":null}"#).is_none());
         assert!(readable_id(br#"{"method":"x"}"#).is_none());
         assert!(readable_id(b"[1]").is_none());
+        assert!(readable_id(br#"{"id":7}"#).is_some());
+        assert!(readable_id(b"  \t\r\n{\"id\":7}").is_some());
+        assert!(readable_id(br#"["id"]"#).is_none());
+        assert!(readable_id(b"null").is_none());
+        assert!(readable_id(b"123").is_none());
+        assert!(readable_id(b"").is_none());
     }
 
     // ---- transport: reply queue, cancellation, short writes, EOF -----------------------------------------------------------------------

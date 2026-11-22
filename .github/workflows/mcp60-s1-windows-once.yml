@@ -1,4 +1,4 @@
-# SOURCE-REVIEW GATE: DO NOT PUSH THIS FILE UNTIL V3 ZIP IS INDEPENDENTLY ACCEPTED.
+# R3 source-fix gate: only one authorized third push from exact R2 head; no further attempts.
 # Ephemeral branch-only CI; this is NOT the permanent .github/workflows/ci.yml MCP step.
 name: ATM MCP60 S1 one-time Windows verification
 
@@ -16,9 +16,9 @@ concurrency:
 
 jobs:
   isolated-s1:
-    # One narrowly authorized repair push: trigger only when the prior branch HEAD
-    # is the exact 0-job workflow-rejection commit. No further push can run this job.
-    if: github.event.created == false && github.event.before == 'df740bf1cc16d2f0a816c515bc5de615f9069cc8' && github.ref == 'refs/heads/review/mcp60-s1-windows-v3'
+    # One authorized third push: trigger only from the exact R2 test-failing commit.
+    # Any subsequent push has a different before SHA and cannot run this job.
+    if: github.event.created == false && github.event.before == '41d2dc24ac00643a89b870a9d91c6bd04efec2ca' && github.ref == 'refs/heads/review/mcp60-s1-windows-v3'
     runs-on: windows-2025
     timeout-minutes: 60
     defaults:
@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pin already in ATM ci.yml
         with:
           persist-credentials: false
-          fetch-depth: 3
+          fetch-depth: 4
 
       - name: Fail-closed provenance, target, and lockfile preflight
         run: |
@@ -44,9 +44,17 @@ jobs:
           $head = (git rev-parse HEAD).Trim()
           $parent = (git rev-parse HEAD^).Trim()
           if ($LASTEXITCODE -ne 0 -or $head -ne $env:GITHUB_SHA) { throw 'HEAD != GITHUB_SHA' }
-          if ($parent -ne 'df740bf1cc16d2f0a816c515bc5de615f9069cc8') { throw 'Unexpected preceding review commit' }
+          if ($parent -ne '41d2dc24ac00643a89b870a9d91c6bd04efec2ca') { throw 'Unexpected preceding review commit' }
           $grandparent = (git rev-parse HEAD^^).Trim()
-          if ($LASTEXITCODE -ne 0 -or $grandparent -ne '0fa04d8d30b2ce416ff5909f6d27af738c49326e') { throw 'Unexpected baseline grandparent' }
+          if ($LASTEXITCODE -ne 0 -or $grandparent -ne 'df740bf1cc16d2f0a816c515bc5de615f9069cc8') { throw 'Unexpected review grandparent' }
+          $greatgrandparent = (git rev-parse HEAD^^^).Trim()
+          if ($LASTEXITCODE -ne 0 -or $greatgrandparent -ne '0fa04d8d30b2ce416ff5909f6d27af738c49326e') { throw 'Unexpected baseline great-grandparent' }
+          $singlePushPaths = @(git diff --name-only HEAD^ HEAD)
+          if ($LASTEXITCODE -ne 0 -or $singlePushPaths.Count -ne 2 -or
+              $singlePushPaths -notcontains 'atm-mcp/src/guard.rs' -or
+              $singlePushPaths -notcontains '.github/workflows/mcp60-s1-windows-once.yml') {
+            throw 'R3 one-push diff must contain exactly guard.rs and the temporary workflow'
+          }
           if ($env:RUNNER_ARCH -ne 'X64') { throw 'Expected Windows x64' }
           $paths = @(git diff --name-only '0fa04d8d30b2ce416ff5909f6d27af738c49326e' HEAD)
           if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect exact source diff' }
@@ -57,6 +65,9 @@ jobs:
             }
           }
           if ($paths -notcontains $allowedWorkflow) { throw 'Missing the one-time workflow in the review commit' }
+          $guardExpected = '4c60c48a1b270246d9ac1c925f5f9f9c38ad74acfa6a22128b939338518db05e'
+          $guardActual = (Get-FileHash 'atm-mcp/src/guard.rs' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($guardActual -ne $guardExpected) { throw "Unexpected R3 guard.rs source: $guardActual" }
           $expected = 'cb0ab0844775b6ef33a87edc52101d83b1f735bed8ea1dbd061f91e905607ab1'
           $actual = (Get-FileHash 'atm-mcp/Cargo.lock' -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $expected) { throw "Cargo.lock changed: $actual" }
