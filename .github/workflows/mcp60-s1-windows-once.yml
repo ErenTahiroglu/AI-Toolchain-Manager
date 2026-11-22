@@ -1,4 +1,4 @@
-# R6: one artifact-only push from exact R5 green head; no source modifications, no repeat attempts.
+# S2-C0 R1: one source-and-workflow push from exact R6 head (76c6a587). No artifact, no secrets, no repeat attempts.
 # Ephemeral branch-only CI; this is NOT the permanent .github/workflows/ci.yml MCP step.
 name: ATM MCP60 S1 one-time Windows verification
 
@@ -16,8 +16,8 @@ concurrency:
 
 jobs:
   isolated-s1:
-    # One artifact-only sixth push, based on exact R5 green CI SHA. No later push can trigger.
-    if: github.event.created == false && github.event.before == '2e805781b87fe32bfd4e89f33727d42780ffac36' && github.ref == 'refs/heads/review/mcp60-s1-windows-v3'
+    # One C0 push, based on exact R6 CI head. A re-run of the run is refused by run_attempt == 1. No later push can trigger.
+    if: github.event.created == false && github.event.before == '76c6a58735d090a0abbc043986447b3002e1e630' && github.ref == 'refs/heads/review/mcp60-s1-windows-v3' && github.run_attempt == 1
     runs-on: windows-2025
     timeout-minutes: 60
     defaults:
@@ -31,7 +31,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pin already in ATM ci.yml
         with:
           persist-credentials: false
-          fetch-depth: 7
+          fetch-depth: 9
 
       - name: Fail-closed provenance, target, and lockfile preflight
         run: |
@@ -41,46 +41,68 @@ jobs:
           Write-Output "RUNNER_OS=$env:RUNNER_OS; RUNNER_ARCH=$env:RUNNER_ARCH"
           Write-Output "IMAGE_OS=$env:ImageOS; IMAGE_VERSION=$env:ImageVersion"
           $head = (git rev-parse HEAD).Trim()
-          $parent = (git rev-parse HEAD^).Trim()
-          if ($LASTEXITCODE -ne 0 -or $head -ne $env:GITHUB_SHA) { throw 'HEAD != GITHUB_SHA' }
-          if ($parent -ne '2e805781b87fe32bfd4e89f33727d42780ffac36') { throw 'Unexpected R5 green parent commit' }
-          $grandparent = (git rev-parse HEAD^^).Trim()
-          if ($LASTEXITCODE -ne 0 -or $grandparent -ne '134c23e542f2b93a158d4c69b572ffac70998ba8') { throw 'Unexpected R4 grandparent' }
-          $greatgrandparent = (git rev-parse HEAD^^^).Trim()
-          if ($LASTEXITCODE -ne 0 -or $greatgrandparent -ne 'f6b19255579d81a646c6f6c5cab1b3e60b1da620') { throw 'Unexpected R3 great-grandparent' }
-          $fourthAncestor = (git rev-parse HEAD^^^^).Trim()
-          if ($LASTEXITCODE -ne 0 -or $fourthAncestor -ne '41d2dc24ac00643a89b870a9d91c6bd04efec2ca') { throw 'Unexpected R2 fourth ancestor' }
-          $fifthAncestor = (git rev-parse HEAD^^^^^).Trim()
-          if ($LASTEXITCODE -ne 0 -or $fifthAncestor -ne 'df740bf1cc16d2f0a816c515bc5de615f9069cc8') { throw 'Unexpected R1 fifth ancestor' }
-          $baseline = (git rev-parse HEAD^^^^^^).Trim()
-          if ($LASTEXITCODE -ne 0 -or $baseline -ne '0fa04d8d30b2ce416ff5909f6d27af738c49326e') { throw 'Unexpected baseline sixth ancestor' }
-          $singlePushPaths = @(git diff --name-only HEAD^ HEAD)
-          if ($LASTEXITCODE -ne 0 -or $singlePushPaths.Count -ne 1 -or
-              $singlePushPaths[0] -ne '.github/workflows/mcp60-s1-windows-once.yml') {
-            throw 'R6 one-push diff must contain exactly the temporary workflow; atm-mcp tree must be unchanged'
+          if ($LASTEXITCODE -ne 0 -or $head -cne $env:GITHUB_SHA) { throw 'HEAD != GITHUB_SHA' }
+          $revLine = (git rev-list --parents -n 1 HEAD).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read the commit parents' }
+          $revParts = @($revLine -split ' ')
+          if ($revParts.Count -ne 2) { throw "HEAD must have exactly one parent, found $($revParts.Count - 1)" }
+          if ($revParts[0] -cne $head) { throw 'rev-list does not describe HEAD' }
+          if ($revParts[1] -cne '76c6a58735d090a0abbc043986447b3002e1e630') { throw 'The parent is not the R6 head' }
+          $chain = @(
+            '76c6a58735d090a0abbc043986447b3002e1e630',
+            '2e805781b87fe32bfd4e89f33727d42780ffac36',
+            '134c23e542f2b93a158d4c69b572ffac70998ba8',
+            'f6b19255579d81a646c6f6c5cab1b3e60b1da620',
+            '41d2dc24ac00643a89b870a9d91c6bd04efec2ca',
+            'df740bf1cc16d2f0a816c515bc5de615f9069cc8',
+            '0fa04d8d30b2ce416ff5909f6d27af738c49326e'
+          )
+          for ($i = 0; $i -lt $chain.Count; $i++) {
+            $n = $i + 1
+            $ancestor = (git rev-parse "HEAD~$n").Trim()
+            if ($LASTEXITCODE -ne 0 -or $ancestor -cne $chain[$i]) { throw "Unexpected ancestor HEAD~$n" }
           }
-          if ($env:RUNNER_ARCH -ne 'X64') { throw 'Expected Windows x64' }
-          $paths = @(git diff --name-only '0fa04d8d30b2ce416ff5909f6d27af738c49326e' HEAD)
+          $tab = [string][char]9
+          $nameStatus = @(git diff --no-renames --name-status HEAD^ HEAD)
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect the one-push diff' }
+          $expectedStatus = @(
+            ('M' + $tab + '.github/workflows/mcp60-s1-windows-once.yml'),
+            ('M' + $tab + 'atm-mcp/src/lib.rs'),
+            ('A' + $tab + 'atm-mcp/src/snapshot.rs'),
+            ('A' + $tab + 'atm-mcp/tests/snapshot.rs')
+          )
+          if ($nameStatus.Count -ne $expectedStatus.Count) { throw 'C0 one-push diff must contain exactly four entries' }
+          foreach ($line in $expectedStatus) {
+            if ($nameStatus -cnotcontains $line) { throw "C0 one-push diff is missing: $line" }
+          }
+          if ($env:RUNNER_ARCH -cne 'X64') { throw 'Expected Windows x64' }
+          $paths = @(git diff --no-renames --name-only '0fa04d8d30b2ce416ff5909f6d27af738c49326e' HEAD)
           if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect exact source diff' }
           $allowedWorkflow = '.github/workflows/mcp60-s1-windows-once.yml'
           foreach ($path in $paths) {
-            if (!($path -like 'atm-mcp/*' -or $path -eq $allowedWorkflow)) {
+            if (!($path -clike 'atm-mcp/*' -or $path -ceq $allowedWorkflow)) {
               throw "Out-of-scope path in review commit: $path"
             }
           }
-          if ($paths -notcontains $allowedWorkflow) { throw 'Missing the one-time workflow in the review commit' }
-          $guardExpected = '189fdc539d42725ac4661700e2849906e8e20cee200929d52254994c23231238'
-          $guardActual = (Get-FileHash 'atm-mcp/src/guard.rs' -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($guardActual -ne $guardExpected) { throw "Unexpected R3 guard.rs source: $guardActual" }
-          $mainExpected = '736757e3d1ed2169ef125f4ff95d20f0e0c0d5d63190192df2a55e1bf26ce857'
-          $mainActual = (Get-FileHash 'atm-mcp/src/main.rs' -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($mainActual -ne $mainExpected) { throw "Unexpected R4 main.rs source: $mainActual" }
-          $toolsExpected = 'a5dc3fb9fd680bb50b81e2f460b8d0cc2f4d5ee6a273f45b1105da49658e1f94'
-          $toolsActual = (Get-FileHash 'atm-mcp/src/tools.rs' -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($toolsActual -ne $toolsExpected) { throw "Unexpected R5 tools.rs source: $toolsActual" }
+          if ($paths -cnotcontains $allowedWorkflow) { throw 'Missing the one-time workflow in the review commit' }
+          $pins = [ordered]@{
+            'atm-mcp/src/guard.rs'      = '189fdc539d42725ac4661700e2849906e8e20cee200929d52254994c23231238'
+            'atm-mcp/src/main.rs'       = '736757e3d1ed2169ef125f4ff95d20f0e0c0d5d63190192df2a55e1bf26ce857'
+            'atm-mcp/src/tools.rs'      = 'a5dc3fb9fd680bb50b81e2f460b8d0cc2f4d5ee6a273f45b1105da49658e1f94'
+            'atm-mcp/src/server.rs'     = 'fbf63404a9acaffb6ca9f516b70b24ce8c3e158469cb58eab811faecee2572f2'
+            'atm-mcp/src/catalog.rs'    = 'a00dcd752bd57fdbb4a50a591d19c50c17f2d13c750228105a0b0fdf94dbc27f'
+            'atm-mcp/Cargo.toml'        = '9140b434a9739a797707539855ff3450932a6d7ca1e3e5a21adb1495c9d2f24f'
+            'atm-mcp/src/lib.rs'        = '275263eb3820e2cc38f8533a37f31d71ed54539f9ab08ccf047b5f1b4277636d'
+            'atm-mcp/src/snapshot.rs'   = '2c48ac9f8c9f7d28b0a48856ec84307566fca58912b4efaedcdb972fc14e4697'
+            'atm-mcp/tests/snapshot.rs' = '85d85f97ba001827af07a110a83a5415b11ff7e2204fc26378e9471381e8df38'
+          }
+          foreach ($entry in $pins.GetEnumerator()) {
+            $got = (Get-FileHash $entry.Key -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($got -cne $entry.Value) { throw "Unexpected source $($entry.Key): $got" }
+          }
           $expected = 'cb0ab0844775b6ef33a87edc52101d83b1f735bed8ea1dbd061f91e905607ab1'
           $actual = (Get-FileHash 'atm-mcp/Cargo.lock' -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actual -ne $expected) { throw "Cargo.lock changed: $actual" }
+          if ($actual -cne $expected) { throw "Cargo.lock changed: $actual" }
           Write-Output "CARGO_LOCK_SHA256=$actual"
           @'
           import re, tomllib
@@ -106,10 +128,11 @@ jobs:
           print('MCP_MANIFEST_SCOPE_OK rmcp=3.9.0 no-default-features server+transport-io')
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Cargo.lock provenance check failed' }
-          rustc -vV
+          $rustcInfo = @(rustc -vV)
           if ($LASTEXITCODE -ne 0) { throw 'Rust compiler is missing' }
-          $target = (rustc -vV | Select-String '^host:').ToString()
-          if ($target -notmatch 'x86_64-pc-windows-msvc') { throw "Unexpected Rust host $target" }
+          $rustcInfo | ForEach-Object { Write-Output $_ }
+          $hostLines = @($rustcInfo | Where-Object { $_ -clike 'host: *' })
+          if ($hostLines.Count -ne 1 -or $hostLines[0] -cne 'host: x86_64-pc-windows-msvc') { throw "Unexpected Rust host: $($hostLines -join ';')" }
           cargo -V
           if ($LASTEXITCODE -ne 0) { throw 'Cargo missing' }
           cargo fmt --version
@@ -141,34 +164,3 @@ jobs:
           cargo clippy --offline --locked --target x86_64-pc-windows-msvc --all-targets -- -D warnings
           if ($LASTEXITCODE -ne 0) { throw 'Clippy failed' }
           Write-Output 'S1_CI_SUPPORTING_TESTS_PASSED_NOT_INDEPENDENT_SECURITY_ACCEPTANCE'
-      # Export only the exact Windows binary just built and exercised by the passing test suite.
-      # Artifact is deliberately short-lived and publicly downloadable while retained.
-      - name: Hash exactly the tested Windows executable
-        working-directory: atm-mcp
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $exe = 'target\x86_64-pc-windows-msvc\debug\atm-mcp.exe'
-          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Expected MCP executable missing; no upload' }
-          $file = Get-Item -LiteralPath $exe
-          if ($file.Length -le 0) { throw 'MCP executable empty; no upload' }
-          $sha = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($sha -notmatch '^[a-f0-9]{64}$') { throw 'Invalid SHA-256 format; no upload' }
-          $shaFile = Join-Path $file.DirectoryName 'atm-mcp.exe.sha256'
-          [System.IO.File]::WriteAllText($shaFile, "$sha  atm-mcp.exe`n", [System.Text.UTF8Encoding]::new($false))
-          $line = [System.IO.File]::ReadAllText($shaFile).Trim()
-          if ($line -ne "$sha  atm-mcp.exe") { throw 'SHA sidecar mismatch; no upload' }
-          Write-Output "ATM_MCP_EXE_SHA256=$sha"
-          Write-Output "ATM_MCP_EXE_BYTES=$($file.Length)"
-          Write-Output "ATM_MCP_SOURCE_COMMIT=$env:GITHUB_SHA"
-
-      - name: Publish 1-day artifact (only exe and its SHA-256 sidecar)
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6 pinned from official actions/upload-artifact tag
-        with:
-          name: atm-mcp60-s1-windows-x64-exact-r6
-          path: |
-            atm-mcp/target/x86_64-pc-windows-msvc/debug/atm-mcp.exe
-            atm-mcp/target/x86_64-pc-windows-msvc/debug/atm-mcp.exe.sha256
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
-          include-hidden-files: false

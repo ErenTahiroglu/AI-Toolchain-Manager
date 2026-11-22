@@ -2,4 +2,5 @@
 pub mod catalog;
 pub mod guard;
 pub mod server;
+pub mod snapshot;
 pub mod tools;
