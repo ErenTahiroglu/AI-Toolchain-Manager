@@ -16,16 +16,15 @@ concurrency:
 
 jobs:
   isolated-s1:
-    # Require the first creation push of the exact review branch. Never rebuild
-    # on later pushes without another explicit owner decision.
-    if: github.event.created == true && github.ref == 'refs/heads/review/mcp60-s1-windows-v3'
+    # One narrowly authorized repair push: trigger only when the prior branch HEAD
+    # is the exact 0-job workflow-rejection commit. No further push can run this job.
+    if: github.event.created == false && github.event.before == 'df740bf1cc16d2f0a816c515bc5de615f9069cc8' && github.ref == 'refs/heads/review/mcp60-s1-windows-v3'
     runs-on: windows-2025
     timeout-minutes: 60
     defaults:
       run:
         shell: pwsh
     env:
-      CARGO_HOME: ${{ runner.temp }}\mcp60-cargo-home
       CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
       CARGO_TERM_COLOR: never
     steps:
@@ -33,7 +32,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pin already in ATM ci.yml
         with:
           persist-credentials: false
-          fetch-depth: 2
+          fetch-depth: 3
 
       - name: Fail-closed provenance, target, and lockfile preflight
         run: |
@@ -45,7 +44,9 @@ jobs:
           $head = (git rev-parse HEAD).Trim()
           $parent = (git rev-parse HEAD^).Trim()
           if ($LASTEXITCODE -ne 0 -or $head -ne $env:GITHUB_SHA) { throw 'HEAD != GITHUB_SHA' }
-          if ($parent -ne '0fa04d8d30b2ce416ff5909f6d27af738c49326e') { throw 'Unexpected baseline parent' }
+          if ($parent -ne 'df740bf1cc16d2f0a816c515bc5de615f9069cc8') { throw 'Unexpected preceding review commit' }
+          $grandparent = (git rev-parse HEAD^^).Trim()
+          if ($LASTEXITCODE -ne 0 -or $grandparent -ne '0fa04d8d30b2ce416ff5909f6d27af738c49326e') { throw 'Unexpected baseline grandparent' }
           if ($env:RUNNER_ARCH -ne 'X64') { throw 'Expected Windows x64' }
           $paths = @(git diff --name-only '0fa04d8d30b2ce416ff5909f6d27af738c49326e' HEAD)
           if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect exact source diff' }
@@ -97,6 +98,8 @@ jobs:
 
       - name: One crates.io-only dependency fetch for exact Windows target
         working-directory: atm-mcp
+        env:
+          CARGO_HOME: ${{ runner.temp }}\mcp60-cargo-home
         run: |
           cargo fetch --locked --target x86_64-pc-windows-msvc
           if ($LASTEXITCODE -ne 0) { throw 'Authorized fetch failed; stop' }
@@ -105,6 +108,8 @@ jobs:
       # The priority is compile -> actual tests -> lint; no source is autoformatted or modified.
       - name: Offline dependency features, build, functional tests, and strict Clippy
         working-directory: atm-mcp
+        env:
+          CARGO_HOME: ${{ runner.temp }}\mcp60-cargo-home
         run: |
           cargo tree --offline --locked --target x86_64-pc-windows-msvc -e features
           if ($LASTEXITCODE -ne 0) { throw 'Cargo feature inventory failed' }
