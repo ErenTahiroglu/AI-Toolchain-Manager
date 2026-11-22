@@ -219,7 +219,9 @@ fn checkpoint_success_schema() -> Value {
 }
 
 /// (name, description, input schema, output schema). The input schemas are unchanged from S1 V2.
-pub fn definitions() -> Vec<(&'static str, &'static str, Map<String, Value>, Map<String, Value>)> {
+pub type ToolDefinition = (&'static str, &'static str, Map<String, Value>, Map<String, Value>);
+
+pub fn definitions() -> Vec<ToolDefinition> {
     let kind_enum = json!(KINDS);
     vec![
         (

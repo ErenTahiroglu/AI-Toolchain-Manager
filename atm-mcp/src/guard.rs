@@ -10,6 +10,7 @@
 //!   3. only then lets `serde_json` build the SDK's own typed message, which the SDK dispatches (lifecycle, eras, discover and tools stay
 //!      entirely in rmcp);
 //!   4. sends through the SDK's own `AsyncRwTransport` writer (its codec produces one compact line per message).
+//!
 //! It does not implement JSON-RPC semantics. Rejections are answered with a fixed `-32600` error that carries the request id when the frame
 //! has exactly one readable `id`; otherwise the frame is dropped (the same behavior as the SDK for unreadable input).
 

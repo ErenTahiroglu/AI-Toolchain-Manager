@@ -1,4 +1,4 @@
-# R4 focused EOF-exit fix gate: one push from exact R3 head; no further attempts.
+# R5 minimal Clippy-only fix gate: one push from exact R4 head; no further attempts.
 # Ephemeral branch-only CI; this is NOT the permanent .github/workflows/ci.yml MCP step.
 name: ATM MCP60 S1 one-time Windows verification
 
@@ -16,9 +16,9 @@ concurrency:
 
 jobs:
   isolated-s1:
-    # One authorized fourth push: trigger only from the exact R3 test-failing commit.
+    # One authorized fifth push: trigger only from the exact R4 tests-pass commit.
     # Any subsequent push has a different before SHA and cannot run this job.
-    if: github.event.created == false && github.event.before == 'f6b19255579d81a646c6f6c5cab1b3e60b1da620' && github.ref == 'refs/heads/review/mcp60-s1-windows-v3'
+    if: github.event.created == false && github.event.before == '134c23e542f2b93a158d4c69b572ffac70998ba8' && github.ref == 'refs/heads/review/mcp60-s1-windows-v3'
     runs-on: windows-2025
     timeout-minutes: 60
     defaults:
@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pin already in ATM ci.yml
         with:
           persist-credentials: false
-          fetch-depth: 5
+          fetch-depth: 6
 
       - name: Fail-closed provenance, target, and lockfile preflight
         run: |
@@ -44,18 +44,21 @@ jobs:
           $head = (git rev-parse HEAD).Trim()
           $parent = (git rev-parse HEAD^).Trim()
           if ($LASTEXITCODE -ne 0 -or $head -ne $env:GITHUB_SHA) { throw 'HEAD != GITHUB_SHA' }
-          if ($parent -ne 'f6b19255579d81a646c6f6c5cab1b3e60b1da620') { throw 'Unexpected preceding review commit' }
+          if ($parent -ne '134c23e542f2b93a158d4c69b572ffac70998ba8') { throw 'Unexpected preceding review commit' }
           $grandparent = (git rev-parse HEAD^^).Trim()
-          if ($LASTEXITCODE -ne 0 -or $grandparent -ne '41d2dc24ac00643a89b870a9d91c6bd04efec2ca') { throw 'Unexpected review grandparent' }
+          if ($LASTEXITCODE -ne 0 -or $grandparent -ne 'f6b19255579d81a646c6f6c5cab1b3e60b1da620') { throw 'Unexpected review grandparent' }
           $greatgrandparent = (git rev-parse HEAD^^^).Trim()
-          if ($LASTEXITCODE -ne 0 -or $greatgrandparent -ne 'df740bf1cc16d2f0a816c515bc5de615f9069cc8') { throw 'Unexpected review great-grandparent' }
-          $baseline = (git rev-parse HEAD^^^^).Trim()
-          if ($LASTEXITCODE -ne 0 -or $baseline -ne '0fa04d8d30b2ce416ff5909f6d27af738c49326e') { throw 'Unexpected baseline fourth ancestor' }
+          if ($LASTEXITCODE -ne 0 -or $greatgrandparent -ne '41d2dc24ac00643a89b870a9d91c6bd04efec2ca') { throw 'Unexpected review great-grandparent' }
+          $fourthAncestor = (git rev-parse HEAD^^^^).Trim()
+          if ($LASTEXITCODE -ne 0 -or $fourthAncestor -ne 'df740bf1cc16d2f0a816c515bc5de615f9069cc8') { throw 'Unexpected review fourth ancestor' }
+          $baseline = (git rev-parse HEAD^^^^^).Trim()
+          if ($LASTEXITCODE -ne 0 -or $baseline -ne '0fa04d8d30b2ce416ff5909f6d27af738c49326e') { throw 'Unexpected baseline fifth ancestor' }
           $singlePushPaths = @(git diff --name-only HEAD^ HEAD)
-          if ($LASTEXITCODE -ne 0 -or $singlePushPaths.Count -ne 2 -or
-              $singlePushPaths -notcontains 'atm-mcp/src/main.rs' -or
+          if ($LASTEXITCODE -ne 0 -or $singlePushPaths.Count -ne 3 -or
+              $singlePushPaths -notcontains 'atm-mcp/src/guard.rs' -or
+              $singlePushPaths -notcontains 'atm-mcp/src/tools.rs' -or
               $singlePushPaths -notcontains '.github/workflows/mcp60-s1-windows-once.yml') {
-            throw 'R4 one-push diff must contain exactly main.rs and the temporary workflow'
+            throw 'R5 one-push diff must contain exactly guard.rs, tools.rs and temporary workflow'
           }
           if ($env:RUNNER_ARCH -ne 'X64') { throw 'Expected Windows x64' }
           $paths = @(git diff --name-only '0fa04d8d30b2ce416ff5909f6d27af738c49326e' HEAD)
@@ -67,12 +70,15 @@ jobs:
             }
           }
           if ($paths -notcontains $allowedWorkflow) { throw 'Missing the one-time workflow in the review commit' }
-          $guardExpected = '4c60c48a1b270246d9ac1c925f5f9f9c38ad74acfa6a22128b939338518db05e'
+          $guardExpected = '189fdc539d42725ac4661700e2849906e8e20cee200929d52254994c23231238'
           $guardActual = (Get-FileHash 'atm-mcp/src/guard.rs' -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($guardActual -ne $guardExpected) { throw "Unexpected R3 guard.rs source: $guardActual" }
           $mainExpected = '736757e3d1ed2169ef125f4ff95d20f0e0c0d5d63190192df2a55e1bf26ce857'
           $mainActual = (Get-FileHash 'atm-mcp/src/main.rs' -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($mainActual -ne $mainExpected) { throw "Unexpected R4 main.rs source: $mainActual" }
+          $toolsExpected = 'a5dc3fb9fd680bb50b81e2f460b8d0cc2f4d5ee6a273f45b1105da49658e1f94'
+          $toolsActual = (Get-FileHash 'atm-mcp/src/tools.rs' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($toolsActual -ne $toolsExpected) { throw "Unexpected R5 tools.rs source: $toolsActual" }
           $expected = 'cb0ab0844775b6ef33a87edc52101d83b1f735bed8ea1dbd061f91e905607ab1'
           $actual = (Get-FileHash 'atm-mcp/Cargo.lock' -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $expected) { throw "Cargo.lock changed: $actual" }
